@@ -6,12 +6,12 @@ import os
 
 block_cipher = None
 
-# 收集所有数据文件
-datas = [
-    # 图标文件（如有）
-]
+UPX_LEVEL = 9  # 最大压缩率
 
-# 收集所有 hidden imports（PyInstaller 静态分析漏掉的模块）
+# 收集所有数据文件
+datas = []
+
+# hidden imports（PyInstaller 静态分析漏掉的模块）
 hiddenimports = [
     "PIL._tkinter_finder",
     "win32com.client",
@@ -37,10 +37,12 @@ a = Analysis(
     excludes=[
         "tkinter",
         "matplotlib",
-        "numpy",       # 不需要科学计算
+        "numpy",
         "scipy",
         "pandas",
         "jupyter",
+        # PyMuPDF 大体积库，如不需要 PDF 功能可取消注释下一行
+        # "PyMuPDF",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -60,14 +62,14 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    console=False,          # 隐藏控制台窗口
+    upx=False,               # UPX 压缩交由 COLLECT 统一处理
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,              # 可放 .ico 图标文件路径
+    icon="icon.ico",         # 图标文件
 )
 
 coll = COLLECT(
@@ -77,6 +79,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=["PySide6", "PyMuPDF"],  # 避免 Qt/PyMuPDF 被 UPX 压坏
     name="Outlook长图插入工具",
 )
