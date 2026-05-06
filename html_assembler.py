@@ -17,21 +17,21 @@ def assemble_html(image_paths: List[str], original_width: int) -> str:
     Returns:
         HTML 字符串
     """
-    # 内联 CSS 样式
+    # 内联 CSS 样式（双花括号转义）
     css = """
     <style>
-        .email-images {
+        .email-images {{
             border-collapse: collapse;
             border-spacing: 0;
-        }
-        .email-images img {
+        }}
+        .email-images img {{
             display: block;
             width: {width}px;
             height: auto;
             border: none;
             margin: 0;
             padding: 0;
-        }
+        }}
     </style>
     """.format(width=original_width)
 
