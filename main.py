@@ -1,6 +1,6 @@
 """
 Outlook 长图无损插入工具 - 主程序
-PySide6 窗口应用，支持拖拽上传
+PySide6 窗口应用，支持拖拽上传、自动切片及 Outlook 自动化发送
 """
 import os
 import sys
@@ -12,205 +12,121 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
-    QFrame, QGridLayout, QScrollArea, QSizePolicy,
+    QFrame, QGridLayout, QScrollArea,
     QLineEdit, QSpinBox
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QImageReader
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 
-from image_slicer import detect_and_slice, get_image_info
+from image_slicer import detect_and_slice
 from pdf_slicer import pdf_to_images
 from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
-# ============================================================
-# 颜色主题
-# ============================================================
-C = type("C", (), {
-    "PRIMARY": "#0078D4",
-    "PRIMARY_HOVER": "#106EBE",
-    "PRIMARY_PRESSED": "#005A9E",
-    "BG_LIGHT": "#F3F6F9",
-    "BG_CARD": "#FFFFFF",
-    "BG_DROP": "#F8FAFC",
-    "BORDER": "#D0D7DE",
-    "BORDER_HOVER": "#0078D4",
-    "TEXT_PRIMARY": "#24292F",
-    "TEXT_SECONDARY": "#57606A",
-    "SUCCESS": "#1B7F37",
-    "ERROR": "#CF222E",
-})()
+class Config:
+    APP_TITLE = "Outlook 长图助手"
+    DEFAULT_WIDTH = 650
+    MAX_HEIGHT_PER_SLICE = 1200
+    WINDOW_WIDTH = 680
+    WINDOW_HEIGHT = 720
+    SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf")
 
 
-def css(primary=C.PRIMARY, bg_light=C.BG_LIGHT, border=C.BORDER,
-        border_hover=C.BORDER_HOVER, text_primary=C.TEXT_PRIMARY,
-        text_secondary=C.TEXT_SECONDARY, bg_card=C.BG_CARD,
-        success=C.SUCCESS, error=C.ERROR, bg_drop=C.BG_DROP,
-        primary_hover=C.PRIMARY_HOVER, primary_pressed=C.PRIMARY_PRESSED):
-    """生成 CSS 字符串，避免 f-string 嵌套大括号问题"""
-    return {
-        "primary": primary, "bg_light": bg_light, "border": border,
-        "border_hover": border_hover, "text_primary": text_primary,
-        "text_secondary": text_secondary, "bg_card": bg_card,
-        "success": success, "error": error, "bg_drop": bg_drop,
-        "primary_hover": primary_hover, "primary_pressed": primary_pressed,
-    }
+class Theme:
+    PRIMARY = "#0078D4"
+    PRIMARY_HOVER = "#2563EB"
+    BG = "#F8FAFC"
+    CARD = "#FFFFFF"
+    BORDER = "#E5E7EB"
+    TEXT = "#111827"
+    SUBTEXT = "#6B7280"
+    SUCCESS = "#10B981"
+    ERROR = "#EF4444"
 
 
-# ============================================================
-# 拖拽区域组件
-# ============================================================
-class DropArea(QFrame):
-    """拖拽区域组件 - 现代化虚线边框样式"""
+class DropZone(QFrame):
+    file_dropped = Signal(str)
+    clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self._hover = False
-        self.file_path: Optional[str] = None
-        self.main_window = None  # set by MainWindow
+        self.setCursor(Qt.PointingHandCursor)
+        self._hovered = False
         self._setup_ui()
-        self._setup_style()
+        self._apply_style()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 40, 20, 40)
-        layout.setSpacing(10)
+        layout.setContentsMargins(28, 30, 28, 30)
+        layout.setSpacing(8)
         layout.setAlignment(Qt.AlignCenter)
 
-        self.icon_label = QLabel("🖼️")
+        self.icon_label = QLabel("📂")
         self.icon_label.setAlignment(Qt.AlignCenter)
-        self.icon_label.setStyleSheet("font-size: 42px; font-family: Segoe UI Emoji;")
+        self.icon_label.setStyleSheet("font-size: 46px;")
 
-        self.main_label = QLabel("将图片或 PDF 拖拽到此处")
-        self.main_label.setAlignment(Qt.AlignCenter)
-        s = "font-size: 16px; font-weight: 600; color: " + C.TEXT_PRIMARY + ";"
-        self.main_label.setStyleSheet(s)
+        self.title_label = QLabel("拖拽或点击上传图片 / PDF")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setFont(QFont("Microsoft YaHei", 13, QFont.Bold))
 
-        self.sub_label = QLabel("或点击上方按钮选择文件")
-        self.sub_label.setAlignment(Qt.AlignCenter)
-        s2 = "font-size: 13px; color: " + C.TEXT_SECONDARY + ";"
-        self.sub_label.setStyleSheet(s2)
-
-        self.hint_label = QLabel("支持 JPG, PNG, BMP, WebP, GIF, PDF")
-        self.hint_label.setAlignment(Qt.AlignCenter)
-        s3 = "font-size: 11px; color: " + C.TEXT_SECONDARY + ";"
-        self.hint_label.setStyleSheet(s3)
+        self.tip_label = QLabel("支持 JPG、PNG、WebP、GIF、PDF")
+        self.tip_label.setAlignment(Qt.AlignCenter)
+        self.tip_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 12px;")
 
         layout.addWidget(self.icon_label)
-        layout.addWidget(self.main_label)
-        layout.addWidget(self.sub_label)
-        layout.addWidget(self.hint_label)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.tip_label)
 
-    def _setup_style(self):
-        s = (
-            "QFrame {"
-            "border: 2px dashed " + C.BORDER + ";"
-            "border-radius: 16px;"
-            "background: " + C.BG_DROP + ";"
-            "}"
+    def _apply_style(self):
+        border = Theme.PRIMARY if self._hovered else Theme.BORDER
+        background = "#EFF6FF" if self._hovered else Theme.CARD
+        self.setStyleSheet(
+            f"QFrame {{ background: {background}; border: 2px dashed {border}; border-radius: 16px; }}"
         )
-        self.setStyleSheet(s)
 
     def enterEvent(self, event):
-        self._hover = True
-        s = (
-            "QFrame {"
-            "border: 2px dashed " + C.BORDER_HOVER + ";"
-            "border-radius: 16px;"
-            "background: #EBF5FF;"
-            "}"
-        )
-        self.setStyleSheet(s)
+        self._hovered = True
+        self._apply_style()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._hover = False
-        self._setup_style()
+        self._hovered = False
+        self._apply_style()
         super().leaveEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            s = (
-                "QFrame {"
-                "border: 2px dashed " + C.PRIMARY + ";"
-                "border-radius: 16px;"
-                "background: #D4E9FF;"
-                "}"
-            )
-            self.setStyleSheet(s)
-            self.icon_label.setText("📥")
-            self.main_label.setText("松开即可添加")
-            s2 = "font-size: 16px; font-weight: 600; color: " + C.PRIMARY + ";"
-            self.main_label.setStyleSheet(s2)
+            self._hovered = True
+            self._apply_style()
+            self.title_label.setText("松开以上传文件")
 
     def dragLeaveEvent(self, event):
-        self._setup_style()
-        self.icon_label.setText("🖼️")
-        self.main_label.setText("将图片或 PDF 拖拽到此处")
-        s = "font-size: 16px; font-weight: 600; color: " + C.TEXT_PRIMARY + ";"
-        self.main_label.setStyleSheet(s)
+        self._hovered = False
+        self._apply_style()
+        self.title_label.setText("拖拽或点击上传图片 / PDF")
 
     def dropEvent(self, event: QDropEvent):
-        self._setup_style()
-        urls = event.mimeData().urls()
-        if urls:
-            file_path = urls[0].toLocalFile()
-            if self.main_window:
-                self.main_window.on_file_selected(file_path)
+        self._hovered = False
+        self._apply_style()
+        if urls := event.mimeData().urls():
+            path = urls[0].toLocalFile()
+            self._submit(path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def _submit(self, path: str):
+        if Path(path).suffix.lower() in Config.SUPPORTED_EXTENSIONS:
+            self.file_dropped.emit(path)
+        else:
+            QMessageBox.warning(self, "格式不支持", "请选择图片或 PDF 文件。")
 
 
-# ============================================================
-# 缩略图卡片
-# ============================================================
-class ThumbnailCard(QWidget):
-    """单个切片缩略图卡片"""
-    def __init__(self, index: int, path: str, parent=None):
-        super().__init__(parent)
-        self.path = path
-        self.index = index
-        self._build_ui()
-
-    def _build_ui(self):
-        self.setFixedSize(130, 145)
-        s = (
-            "QWidget {"
-            "background: " + C.BG_CARD + ";"
-            "border: 1px solid " + C.BORDER + ";"
-            "border-radius: 10px;"
-            "}"
-        )
-        self.setStyleSheet(s)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
-
-        # 图片
-        self.img_label = QLabel()
-        self.img_label.setFixedSize(118, 100)
-        self.img_label.setAlignment(Qt.AlignCenter)
-        self.img_label.setStyleSheet("background: transparent; border: none;")
-        pixmap = QPixmap(self.path)
-        if pixmap.width() > 118 or pixmap.height() > 100:
-            pixmap = pixmap.scaled(118, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.img_label.setPixmap(pixmap)
-
-        # 页码
-        self.index_label = QLabel("#" + str(self.index + 1))
-        self.index_label.setAlignment(Qt.AlignCenter)
-        s2 = "font-size: 11px; color: " + C.TEXT_SECONDARY + ";"
-        self.index_label.setStyleSheet(s2)
-
-        layout.addWidget(self.img_label)
-        layout.addWidget(self.index_label)
-
-
-# ============================================================
-# 后台处理线程
-# ============================================================
 class ProcessWorker(QThread):
     progress = Signal(int)
     finished = Signal(list)
@@ -224,365 +140,241 @@ class ProcessWorker(QThread):
     def run(self):
         try:
             ext = Path(self.file_path).suffix.lower()
-            self.progress.emit(10)
+            self.progress.emit(15)
             if ext == ".pdf":
                 images = pdf_to_images(self.file_path)
-                self.progress.emit(30)
+                self.progress.emit(45)
                 slice_paths = []
                 temp_dir = tempfile.gettempdir()
-                for i, img in enumerate(images):
-                    path = os.path.join(temp_dir, f"pdf_page_{i}.png")
-                    img.save(path)
+                for index, image in enumerate(images):
+                    path = os.path.join(temp_dir, f"pdf_page_{index}.png")
+                    image.save(path)
                     slice_paths.append(path)
-                self.progress.emit(60)
             else:
-                slice_paths = detect_and_slice(self.file_path)
-                self.progress.emit(60)
+                slice_paths = detect_and_slice(self.file_path, max_height=Config.MAX_HEIGHT_PER_SLICE)
             self.progress.emit(100)
             self.finished.emit(slice_paths)
-        except Exception as e:
-            self.error.emit(str(e))
+        except Exception as exc:
+            self.error.emit(str(exc))
 
 
-# ============================================================
-# 主窗口
-# ============================================================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.slice_paths: List[str] = []
         self.file_path: Optional[str] = None
         self.worker: Optional[ProcessWorker] = None
-        self._setup_ui()
-        self._setup_style()
+        self._build_ui()
 
-    def _setup_ui(self):
-        self.setWindowTitle("Outlook 长图插入工具")
-        self.setFixedSize(720, 640)
+    def _build_ui(self):
+        self.setWindowTitle(Config.APP_TITLE)
+        self.setFixedSize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
+        self.setStyleSheet(f"background: {Theme.BG};")
 
-        # 标题栏
-        title_bar = QWidget()
-        title_bar.setFixedHeight(70)
-        title_bar.setStyleSheet("background: " + C.PRIMARY + ";")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(20, 0, 20, 0)
-        title_icon = QLabel("📧")
-        title_icon.setStyleSheet("font-size: 28px; font-family: Segoe UI Emoji;")
-        title_text = QLabel("Outlook 长图插入工具")
-        title_text.setStyleSheet(
-            "font-size: 20px; font-weight: bold; color: white; font-family: Microsoft YaHei, sans-serif;")
-        subtitle_text = QLabel("Outlook 邮件长图无损插入 · 自动切片 · 绿色免安装")
-        subtitle_text.setStyleSheet(
-            "font-size: 12px; color: rgba(255,255,255,0.8); font-family: Microsoft YaHei, sans-serif;")
-        title_right = QVBoxLayout()
-        title_right.setSpacing(2)
-        title_right.addWidget(title_text)
-        title_right.addWidget(subtitle_text)
-        title_layout.addWidget(title_icon)
-        title_layout.addLayout(title_right)
-        title_layout.addStretch()
+        container = QWidget()
+        self.setCentralWidget(container)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
 
-        # 主内容区
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(20, 16, 20, 16)
-        main_layout.setSpacing(12)
+        header = QLabel("Outlook 长图无损插入")
+        header.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
+        header.setStyleSheet(f"color: {Theme.TEXT};")
+        layout.addWidget(header)
 
-        # 标题栏
-        main_layout.addWidget(title_bar, alignment=Qt.AlignTop)
+        subtitle = QLabel("自动识别图片/PDF，生成切片并打开 Outlook 邮件窗口。")
+        subtitle.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 12px;")
+        layout.addWidget(subtitle)
 
-        # 拖拽区
-        self.drop_area = DropArea()
-        self.drop_area.main_window = self
-        main_layout.addWidget(self.drop_area)
+        self.drop_zone = DropZone()
+        self.drop_zone.file_dropped.connect(self.handle_file_selection)
+        self.drop_zone.clicked.connect(self._select_file)
+        layout.addWidget(self.drop_zone)
 
-        # 操作区
-        op_widget = QWidget()
-        op_layout = QVBoxLayout(op_widget)
-        op_layout.setSpacing(10)
-
-        # 第一行：选择文件 + 宽度调整
-        row1 = QWidget()
-        row1_layout = QHBoxLayout(row1)
-        row1_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.btn_select = QPushButton("📁 选择文件")
-        self.btn_select.setFixedHeight(38)
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(10)
+        self.btn_select = QPushButton("选择文件")
+        self.btn_select.setFixedHeight(42)
+        self.btn_select.setStyleSheet(self._btn_style(Theme.CARD, Theme.TEXT))
         self.btn_select.clicked.connect(self._select_file)
-        s = (
-            "QPushButton {"
-            "background: " + C.BG_CARD + ";"
-            "border: 1px solid " + C.BORDER + ";"
-            "border-radius: 8px;"
-            "padding: 0 16px;"
-            "font-size: 14px;"
-            "color: " + C.TEXT_PRIMARY + ";"
-            "}"
-            "QPushButton:hover {"
-            "border-color: " + C.PRIMARY + ";"
-            "color: " + C.PRIMARY + ";"
-            "}"
+
+        self.btn_reset = QPushButton("重置")
+        self.btn_reset.setFixedHeight(42)
+        self.btn_reset.setStyleSheet(self._btn_style(Theme.CARD, Theme.SUBTEXT))
+        self.btn_reset.clicked.connect(self.reset_app)
+
+        buttons_row.addWidget(self.btn_select)
+        buttons_row.addWidget(self.btn_reset)
+        buttons_row.addStretch()
+        layout.addLayout(buttons_row)
+
+        self.input_to = QLineEdit()
+        self.input_to.setPlaceholderText("收件人邮箱（可选）")
+        self.input_subject = QLineEdit()
+        self.input_subject.setPlaceholderText("邮件标题（可选）")
+        for widget in (self.input_to, self.input_subject):
+            widget.setFixedHeight(36)
+            widget.setStyleSheet(self._input_style())
+            layout.addWidget(widget)
+
+        width_row = QHBoxLayout()
+        width_label = QLabel("显示宽度")
+        width_label.setStyleSheet(f"color: {Theme.SUBTEXT};")
+        self.spin_width = QSpinBox()
+        self.spin_width.setRange(300, 1200)
+        self.spin_width.setValue(Config.DEFAULT_WIDTH)
+        self.spin_width.setSuffix(" px")
+        self.spin_width.setFixedWidth(110)
+        self.spin_width.setFixedHeight(36)
+        self.spin_width.setStyleSheet(self._input_style())
+        width_row.addWidget(width_label)
+        width_row.addWidget(self.spin_width)
+        width_row.addStretch()
+        layout.addLayout(width_row)
+
+        self.preview_area = QScrollArea()
+        self.preview_area.setWidgetResizable(True)
+        self.preview_area.setFixedHeight(150)
+        self.preview_area.setStyleSheet(
+            f"QScrollArea {{ border: 1px solid {Theme.BORDER}; border-radius: 12px; background: {Theme.CARD}; }}"
         )
-        self.btn_select.setStyleSheet(s)
+        self.thumb_container = QWidget()
+        self.thumb_grid = QGridLayout(self.thumb_container)
+        self.thumb_grid.setContentsMargins(10, 10, 10, 10)
+        self.thumb_grid.setSpacing(8)
+        self.preview_area.setWidget(self.thumb_container)
+        self.preview_area.hide()
+        layout.addWidget(self.preview_area)
 
-        self.btn_remove = QPushButton("🗑️ 移除")
-        self.btn_remove.setFixedHeight(38)
-        self.btn_remove.setFixedWidth(100)
-        self.btn_remove.clicked.connect(self._remove_file)
-        self.btn_remove.setEnabled(False)
-        s2 = (
-            "QPushButton {"
-            "background: " + C.BG_CARD + ";"
-            "border: 1px solid " + C.BORDER + ";"
-            "border-radius: 8px;"
-            "padding: 0 12px;"
-            "font-size: 14px;"
-            "color: " + C.TEXT_SECONDARY + ";"
-            "}"
-            "QPushButton:hover {"
-            "border-color: " + C.ERROR + ";"
-            "color: " + C.ERROR + ";"
-            "}"
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setStyleSheet(
+            f"QProgressBar {{ border: none; background: {Theme.BORDER}; border-radius: 2px; }}"
+            f"QProgressBar::chunk {{ background: {Theme.PRIMARY}; border-radius: 2px; }}"
         )
-        self.btn_remove.setStyleSheet(s2)
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
 
-        row1_layout.addWidget(self.btn_select)
-        row1_layout.addWidget(self.btn_remove)
-        row1_layout.addStretch()
-
-        # 第二行：宽度调整 + 邮件标题
-        row2 = QWidget()
-        row2_layout = QHBoxLayout(row2)
-        row2_layout.setSpacing(12)
-
-        width_label = QLabel("图片宽度:")
-        width_label.setStyleSheet(
-            "font-size: 14px; color: " + C.TEXT_SECONDARY + ";")
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(300, 2000)
-        self.width_spin.setValue(1000)
-        self.width_spin.setSuffix(" px")
-        self.width_spin.setFixedWidth(120)
-        s3 = (
-            "QSpinBox {"
-            "border: 1px solid " + C.BORDER + ";"
-            "border-radius: 6px;"
-            "padding: 4px 8px;"
-            "font-size: 14px;"
-            "}"
-        )
-        self.width_spin.setStyleSheet(s3)
-
-        subject_label = QLabel("邮件标题:")
-        subject_label.setStyleSheet(
-            "font-size: 14px; color: " + C.TEXT_SECONDARY + ";")
-        self.subject_input = QLineEdit()
-        self.subject_input.setPlaceholderText("请输入邮件标题（可选）")
-        self.subject_input.setFixedHeight(36)
-        s4 = (
-            "QLineEdit {"
-            "border: 1px solid " + C.BORDER + ";"
-            "border-radius: 6px;"
-            "padding: 4px 12px;"
-            "font-size: 14px;"
-            "}"
-            "QLineEdit:focus {"
-            "border-color: " + C.PRIMARY + ";"
-            "}"
-        )
-        self.subject_input.setStyleSheet(s4)
-
-        row2_layout.addWidget(width_label)
-        row2_layout.addWidget(self.width_spin)
-        row2_layout.addSpacing(16)
-        row2_layout.addWidget(subject_label)
-        row2_layout.addWidget(self.subject_input, stretch=1)
-
-        op_layout.addWidget(row1)
-        op_layout.addWidget(row2)
-        main_layout.addWidget(op_widget)
-
-        # 缩略图区
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFixedHeight(180)
-        s5 = "QScrollArea { border: none; background: transparent; }"
-        scroll.setStyleSheet(s5)
-
-        self.thumbnail_container = QWidget()
-        self.thumbnail_grid = QGridLayout(self.thumbnail_container)
-        self.thumbnail_grid.setSpacing(8)
-        self.thumbnail_area = ThumbnailArea()
-        self.thumbnail_area.setWidget(self.thumbnail_container)
-        self.thumbnail_area.setWidgetResizable(True)
-        s6 = (
-            "QScrollArea { border: 1px solid " + C.BORDER + ";"
-            "border-radius: 10px;"
-            "background: " + C.BG_CARD + ";"
-            "}"
-        )
-        self.thumbnail_area.setStyleSheet(s6)
-        self.thumbnail_area.hide()
-        main_layout.addWidget(self.thumbnail_area)
-
-        # 进度条
-        self.progress = QProgressBar()
-        self.progress.setFixedHeight(6)
-        self.progress.setTextVisible(False)
-        s7 = (
-            "QProgressBar {"
-            "border: none;"
-            "border-radius: 3px;"
-            "background: " + C.BORDER + ";"
-            "}"
-            "QProgressBar::chunk {"
-            "background: " + C.PRIMARY + ";"
-            "border-radius: 3px;"
-            "}"
-        )
-        self.progress.setStyleSheet(s7)
-        self.progress.hide()
-        main_layout.addWidget(self.progress)
-
-        # 状态标签
         self.status_label = QLabel("")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setFixedHeight(24)
-        main_layout.addWidget(self.status_label)
+        self.status_label.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 12px;")
+        layout.addWidget(self.status_label)
 
-        # 发送按钮
-        self.btn_send = QPushButton("📨 发送到 Outlook")
-        self.btn_send.setFixedHeight(52)
+        self.btn_send = QPushButton("创建 Outlook 邮件")
+        self.btn_send.setFixedHeight(46)
         self.btn_send.setEnabled(False)
+        self.btn_send.setStyleSheet(self._btn_style(Theme.PRIMARY, "white", bold=True))
         self.btn_send.clicked.connect(self._send_email)
-        s8 = (
-            "QPushButton {"
-            "background: " + C.PRIMARY + ";"
-            "color: white;"
-            "border: none;"
-            "border-radius: 10px;"
-            "font-size: 16px;"
-            "font-weight: bold;"
-            "}"
-            "QPushButton:hover {"
-            "background: " + C.PRIMARY_HOVER + ";"
-            "}"
-            "QPushButton:pressed {"
-            "background: " + C.PRIMARY_PRESSED + ";"
-            "}"
-            "QPushButton:disabled {"
-            "background: " + C.BORDER + ";"
-            "color: " + C.TEXT_SECONDARY + ";"
-            "}"
-        )
-        self.btn_send.setStyleSheet(s8)
-        main_layout.addWidget(self.btn_send)
+        layout.addWidget(self.btn_send)
 
-    def _setup_style(self):
-        s = "background: " + C.BG_LIGHT + ";"
-        self.setStyleSheet(s)
+    def _input_style(self) -> str:
+        return (
+            f"QLineEdit, QSpinBox {{"
+            f"border: 1px solid {Theme.BORDER};"
+            f"border-radius: 8px;"
+            f"padding: 0 10px;"
+            f"background: {Theme.CARD};"
+            f"color: {Theme.TEXT};"
+            f"}}"
+            f"QLineEdit:focus, QSpinBox:focus {{ border-color: {Theme.PRIMARY}; }}"
+        )
+
+    def _btn_style(self, bg: str, color: str, bold: bool = False) -> str:
+        weight = "bold" if bold else "normal"
+        hover = Theme.PRIMARY_HOVER if bg == Theme.PRIMARY else "#F3F4F6"
+        border = "1px solid transparent" if bg == Theme.PRIMARY else f"1px solid {Theme.BORDER}"
+        return (
+            f"QPushButton {{ background: {bg}; color: {color}; border: {border}; border-radius: 10px;"
+            f"font-weight: {weight}; font-size: 14px; }}"
+            f"QPushButton:hover {{ background: {hover}; }}"
+            f"QPushButton:disabled {{ background: {Theme.BORDER}; color: {Theme.SUBTEXT}; }}"
+        )
 
     def _select_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片或 PDF",
-            "", "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf)"
+            self, "选择图片或 PDF", "",
+            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf)"
         )
         if path:
-            self.on_file_selected(path)
+            self.handle_file_selection(path)
 
-    def _remove_file(self):
-        self.slice_paths = []
-        self.file_path = None
-        self.thumbnail_area.hide()
-        self.btn_send.setEnabled(False)
-        self.btn_remove.setEnabled(False)
-        self.status_label.setText("")
-        self.drop_area._setup_style()
-        self.drop_area.icon_label.setText("🖼️")
-        self.drop_area.main_label.setText("将图片或 PDF 拖拽到此处")
-        s = "font-size: 16px; font-weight: 600; color: " + C.TEXT_PRIMARY + ";"
-        self.drop_area.main_label.setStyleSheet(s)
-
-    def on_file_selected(self, path: str):
+    def handle_file_selection(self, path: str):
         self.file_path = path
-        self.slice_paths = []
-        self.drop_area._setup_style()
-        self.drop_area.icon_label.setText("✅")
-        self.drop_area.main_label.setText(Path(path).name)
-        s = "font-size: 14px; font-weight: 600; color: " + C.SUCCESS + ";"
-        self.drop_area.main_label.setStyleSheet(s)
-        self.btn_remove.setEnabled(True)
-        self.status_label.setText("正在处理...")
-        s2 = "color: " + C.TEXT_SECONDARY + "; font-size: 13px;"
-        self.status_label.setStyleSheet(s2)
-        self.progress.show()
-        self.progress.setValue(0)
+        self.drop_zone.title_label.setText(Path(path).name)
+        self.drop_zone.icon_label.setText("✅")
+        self.drop_zone.tip_label.setText("已选择文件，可继续切片")
+        self.status_label.setText("正在处理，请稍候...")
+        self.status_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 12px;")
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
 
-        self.worker = ProcessWorker(path, self.width_spin.value())
-        self.worker.progress.connect(self._on_progress)
+        self.worker = ProcessWorker(path, self.spin_width.value())
+        self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self._on_processed)
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
-    def _on_progress(self, val: int):
-        self.progress.setValue(val)
-
     def _on_processed(self, paths: List[str]):
         self.slice_paths = paths
-        self.progress.setValue(100)
-        self.progress.hide()
+        self.progress_bar.hide()
+        self.btn_send.setEnabled(bool(paths))
+        self.status_label.setText(f"已生成 {len(paths)} 张切片，准备发送")
+        self.status_label.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 12px;")
         self._show_thumbnails(paths)
-        self.btn_send.setEnabled(True)
-        self.status_label.setText(
-            f"✅ 已处理 {len(paths)} 张切片，可发送到 Outlook")
-        s = "color: " + C.SUCCESS + "; font-size: 13px;"
-        self.status_label.setStyleSheet(s)
 
     def _on_error(self, msg: str):
-        self.progress.hide()
-        self.status_label.setText("❌ 处理失败: " + msg)
-        s = "color: " + C.ERROR + "; font-size: 13px;"
-        self.status_label.setStyleSheet(s)
+        self.progress_bar.hide()
+        self.status_label.setText(f"处理失败: {msg}")
+        self.status_label.setStyleSheet(f"color: {Theme.ERROR}; font-size: 12px;")
+        QMessageBox.critical(self, "处理失败", msg)
 
     def _show_thumbnails(self, paths: List[str]):
-        # 清空旧缩略图
-        while self.thumbnail_grid.count():
-            item = self.thumbnail_grid.takeAt(0)
+        while self.thumb_grid.count():
+            item = self.thumb_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        cols = 5
+        cols = 4
         for i, path in enumerate(paths):
-            row = i // cols
-            col = i % cols
-            card = ThumbnailCard(i, path)
-            self.thumbnail_grid.addWidget(card, row, col)
+            row, col = divmod(i, cols)
+            thumb = QLabel()
+            thumb.setFixedSize(120, 100)
+            thumb.setStyleSheet(f"background: {Theme.CARD}; border-radius: 8px;")
+            pixmap = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            thumb.setPixmap(pixmap)
+            self.thumb_grid.addWidget(thumb, row, col)
 
-        self.thumbnail_area.show()
+        self.preview_area.show()
 
     def _send_email(self):
         if not self.slice_paths:
             return
-        subject = self.subject_input.text().strip() or "长图邮件"
-        width = self.width_spin.value()
+        subject = self.input_subject.text().strip() or "长图邮件"
+        to_addr = self.input_to.text().strip()
+        width = self.spin_width.value()
         try:
-            html = assemble_html(self.slice_paths, width)
-            create_email_with_images(html, subject, "", None)
-            self.status_label.setText("✅ 邮件已创建，请在 Outlook 中编辑并发送")
-            s = "color: " + C.SUCCESS + "; font-size: 13px;"
-            self.status_label.setStyleSheet(s)
-        except Exception as e:
-            QMessageBox.critical(self, "发送失败", str(e))
+            html_content = assemble_html(self.slice_paths, width)
+            create_email_with_images(html_content, subject, to_addr)
+            self.status_label.setText("✅ 邮件窗口已打开，请检查后发送")
+            self.status_label.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 12px;")
+        except Exception as exc:
+            QMessageBox.critical(self, "发送失败", str(exc))
 
-
-class ThumbnailArea(QScrollArea):
-    """缩略图滚动区域"""
-    pass
+    def reset_app(self):
+        self.slice_paths = []
+        self.file_path = None
+        self.drop_zone.title_label.setText("拖拽或点击上传图片 / PDF")
+        self.drop_zone.icon_label.setText("📂")
+        self.drop_zone.tip_label.setText("支持 JPG、PNG、WebP、GIF、PDF")
+        self.preview_area.hide()
+        self.btn_send.setEnabled(False)
+        self.status_label.setText("")
+        self.input_to.clear()
+        self.input_subject.clear()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    w = MainWindow()
-    w.show()
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec())

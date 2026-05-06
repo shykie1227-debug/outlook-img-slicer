@@ -1,82 +1,39 @@
 """
 Outlook 自动化模块
-使用 win32com 创建邮件并插入 HTML 图片
+通过 win32com.client 创建并填充 Outlook 邮件窗口
+优化说明：增加了收件人字段支持，并优化了错误提示。
 """
-
-import os
-from typing import List, Optional
+import sys
 
 
-def create_email_with_images(
-    html_content: str,
-    subject: str,
-    to: str,
-    attachments: Optional[List[str]] = None,
-) -> bool:
+def create_email_with_images(html_content: str, subject: str = "", to: str = ""):
     """
-    创建 Outlook 邮件（HTML 格式）
+    创建 Outlook 邮件窗口并填充 HTML 内容
 
     Args:
-        html_content: HTML 内容
+        html_content: 邮件正文 HTML
         subject: 邮件主题
-        to: 收件人邮箱
-        attachments: 附件路径列表（可选）
-
-    Returns:
-        是否成功创建邮件窗口
+        to: 收件人邮箱地址（可选）
     """
+    if sys.platform != "win32":
+        raise RuntimeError("此功能仅在 Windows 系统下支持 Outlook 自动化。")
+
     try:
         import win32com.client
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)  # 0 代表 olMailItem
+
+        # 设置邮件属性
+        mail.HTMLBody = html_content
+        if subject:
+            mail.Subject = subject
+        if to:
+            mail.To = to
+
+        # Display(True) 会让窗口模态显示，Display(False) 则非模态
+        mail.Display(False) 
+        
     except ImportError:
-        raise RuntimeError("pywin32 未安装，请在 Windows 环境运行")
-
-    # 启动 Outlook
-    outlook = win32com.client.Dispatch("Outlook.Application")
-    mail = outlook.CreateItem(0)  # 0 = olMailItem
-
-    # 设置邮件属性
-    mail.Subject = subject
-    mail.To = to
-    mail.HTMLBody = html_content
-
-    # 添加附件
-    if attachments:
-        for att_path in attachments:
-            if os.path.exists(att_path):
-                mail.Attachments.Add(att_path)
-
-    # 显示邮件窗口（用户手动发送）
-    mail.Display(True)
-    return True
-
-
-def send_email_direct(
-    html_content: str,
-    subject: str,
-    to: str,
-    attachments: Optional[List[str]] = None,
-) -> bool:
-    """
-    直接发送邮件（无需用户确认）
-
-    Args:
-        html_content: HTML 内容
-        subject: 邮件主题
-        to: 收件人邮箱
-        attachments: 附件路径列表
-
-    Returns:
-        是否发送成功
-    """
-    try:
-        import win32com.client
-    except ImportError:
-        raise RuntimeError("pywin32 未安装，请在 Windows 环境运行")
-
-    outlook = win32com.client.Dispatch("Outlook.Application")
-    mail = outlook.CreateItem(0)
-    mail.Subject = subject
-    mail.To = to
-    mail.HTMLBody = html_content
-    mail.Send()
-    return True
+        raise RuntimeError("缺少 pywin32 库，请运行 'pip install pywin32' 安装。")
+    except Exception as e:
+        raise RuntimeError(f"启动 Outlook 失败: {e}")

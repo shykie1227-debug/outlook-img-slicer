@@ -1,101 +1,43 @@
 """
 HTML 组装器模块
-生成带内联 CSS 的表格 HTML，实现图片无缝拼接
+生成带内联 CSS 的表格 HTML，实现图片在 Outlook 中无缝居中拼接
+优化说明：增强了 HTML 结构的兼容性，确保在不同邮件客户端中显示一致。
 """
-
+from pathlib import Path
 from typing import List
 
 
-def assemble_html(image_paths: List[str], original_width: int) -> str:
+def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
     """
-    生成 HTML 邮件内容（表格布局）
+    生成适用于 Outlook 的 HTML 邮件正文
 
     Args:
-        image_paths: 图片路径列表
-        original_width: 原始图片宽度
+        image_paths: 切片后的图片路径列表
+        original_width: 邮件中图片显示的宽度（px）
 
     Returns:
-        HTML 字符串
+        完整的 HTML 字符串
     """
-    # 内联 CSS 样式（双花括号转义）
-    css = """
-    <style>
-        .email-images {
-            border-collapse: collapse;
-            border-spacing: 0;
-            margin: 0 auto;
-        }
-        .email-images img {
-            display: block;
-            width: {width}px;
-            height: auto;
-            border: none;
-            margin: 0 auto;
-            padding: 0;
-        }
-    </style>
-    """.format(width=original_width)
-
-    # 构建图片行
-    rows = ""
+    img_tags = ""
     for path in image_paths:
-        rows += f'<tr><td><img src="{path}" alt="" /></td></tr>'
+        file_url = Path(path).absolute().as_uri()
+        img_tags += (
+            f'<img src="{file_url}" '
+            f'width="{original_width}" '
+            f'style="display: block; width: {original_width}px; border: 0;" />'
+        )
 
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    {css}
-</head>
-<body>
-    <div align="center">
-    <table class="email-images">
-        {rows}
-    </table>
+    # 使用 table 布局是 Outlook 邮件最稳妥的居中方式
+    html = f"""
+    <div style="text-align: center;">
+        <table cellpadding="0" cellspacing="0" border="0"
+               style="margin: 0 auto; border-collapse: collapse; width: {original_width}px;">
+            <tr>
+                <td style="padding: 0; margin: 0;">
+                    {img_tags}
+                </td>
+            </tr>
+        </table>
     </div>
-</body>
-</html>"""
-
-    return html
-
-
-def get_html_with_inline_images(image_paths: List[str], width: int) -> str:
     """
-    生成内嵌图片的 HTML（使用 CID 附件方式）
-
-    Args:
-        image_paths: 图片路径列表
-        width: 图片宽度
-
-    Returns:
-        HTML 字符串
-    """
-    css = f"""
-    <style>
-        .email-images {{
-            border-collapse: collapse;
-            margin: 0 auto;
-        }}
-        .email-images img {{
-            display: block;
-            width: {width}px;
-            height: auto;
-            margin: 0 auto;
-        }}
-    </style>
-    """
-
-    rows = ""
-    for i, path in enumerate(image_paths):
-        cid = f"image_{i}"
-        rows += f'<tr><td><img src="cid:{cid}" alt="" /></td></tr>'
-
-    return f"""<!DOCTYPE html>
-<html>
-<head>{css}</head>
-<body>
-    <div align="center">
-    <table class="email-images">{rows}</table>
-    </div>
-</body>
-</html>"""
+    return html.strip()

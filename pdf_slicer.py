@@ -1,49 +1,51 @@
 """
-PDF 解析器模块
-使用 PyMuPDF 将 PDF 页面转换为图片
+PDF 解析模块
+使用 PyMuPDF (fitz) 将 PDF 页面转换为高分辨率 PIL Image
+优化说明：增加了 DPI 参数控制，平衡清晰度与处理速度。
 """
-
-import io
 from typing import List
-from PIL import Image
 import fitz  # PyMuPDF
+from PIL import Image
+import io
 
 
 def pdf_to_images(pdf_path: str, dpi: int = 150) -> List[Image.Image]:
     """
-    将 PDF 转换为 PIL Image 列表
+    将 PDF 所有页面渲染为 PIL Image 对象
 
     Args:
         pdf_path: PDF 文件路径
-        dpi: 渲染分辨率，默认 150
+        dpi: 渲染分辨率（Dots Per Inch），默认 150。
+             提高 DPI 可获得更清晰的图片，但会增加内存占用。
 
     Returns:
-        PIL Image 对象列表（每页一张图）
+        PIL Image 对象列表
     """
-    images: List[Image.Image] = []
-    doc = fitz.open(pdf_path)
-
-    for page_num in range(len(doc)):
-        page = doc[page_num]
-        # 计算缩放因子 (72 DPI 基准)
-        zoom = dpi / 72
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat)
-
-        # 转换为 RGB 并加载为 PIL Image
-        img_data = pix.tobytes("png")
-        img = Image.open(io.BytesIO(img_data))
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        images.append(img)
-
-    doc.close()
+    images = []
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            
+            # 计算缩放比例 (72 是 PDF 的标准 DPI)
+            zoom = dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            
+            # 渲染页面为像素图
+            pix = page.get_pixmap(matrix=mat)
+            
+            # 转换为 PNG 字节流
+            img_data = pix.tobytes("png")
+            
+            # 转换为 PIL Image
+            img = Image.open(io.BytesIO(img_data))
+            images.append(img)
+            
+    except Exception as e:
+        raise RuntimeError(f"PDF 解析失败: {e}")
+    finally:
+        if doc:
+            doc.close()
+            
     return images
-
-
-def pdf_page_count(pdf_path: str) -> int:
-    """获取 PDF 页数"""
-    doc = fitz.open(pdf_path)
-    count = len(doc)
-    doc.close()
-    return count

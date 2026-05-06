@@ -1,5 +1,4 @@
 # Outlook 长图无损插入工具 - 依赖列表
-
 PySide6>=6.5.0
 Pillow>=10.0.0
 PyMuPDF>=1.23.0
