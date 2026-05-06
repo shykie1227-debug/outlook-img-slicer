@@ -2,11 +2,11 @@
 
 将长图自动切片后插入 Outlook 邮件正文，突破 1728px 高度限制。
 
-## ⬇️ 下载 exe（无需安装）
+## ⬇️ 一键下载 exe
 
-点击 **Actions** → 最新构建 run → **Outlook长图插入工具-EXE** 下载压缩包，解压后双击 `Outlook长图插入工具.exe` 即可运行。
+[![Release](https://img.shields.io/github/v/release/shykie1227-debug/outlook-img-slicer?label=下载exe)](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest)
 
-> GitHub Actions 自动构建，Windows 免安装版，绿色运行。
+> 点击上方徽章跳转最新 Release 页面，点击 **Assets → Outlook.zip** 下载，解压后运行 `Outlook长图插入工具.exe`。
 
 ## ✨ 功能特性
 
@@ -19,7 +19,7 @@
 
 ## 🖥️ 使用方法
 
-1. 下载 exe 并解压（**绿色免安装**）
+1. 下载 [Outlook.zip](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest) 并解压
 2. 双击 `Outlook长图插入工具.exe`
 3. 将长图/长截图**拖入**窗口
 4. 点击**发送到 Outlook**
@@ -53,7 +53,7 @@ python main.py  # 图像处理功能可用
 ```bash
 pip install pyinstaller
 pyinstaller --clean --noconfirm outlook_img_slicer.spec
-# 输出在 dist/Outlook长图插入工具/
+# 输出在 dist/
 ```
 
 ## 📐 工作原理
@@ -78,14 +78,14 @@ outlook-img-slicer/
 ├── SPEC.md                   # 规格说明书
 ├── README.md                 # 本文件
 ├── requirements.txt          # 依赖声明
-├── TEST_PLAN.md              # 测试计划
-├── main.py                   # PySide6 主程序
-├── image_slicer.py           # 图像切片模块
-├── pdf_slicer.py             # PDF 解析模块
-├── html_assembler.py          # HTML 组装模块
-├── outlook_sender.py          # Outlook 自动化模块
-├── outlook_img_slicer.spec    # PyInstaller 打包配置
-└── .github/workflows/build.yml # GitHub Actions 自动构建
+├── TEST_PLAN.md             # 测试计划
+├── main.py                  # PySide6 主程序
+├── image_slicer.py          # 图像切片模块
+├── pdf_slicer.py           # PDF 解析模块
+├── html_assembler.py         # HTML 组装模块
+├── outlook_sender.py        # Outlook 自动化模块
+├── outlook_img_slicer.spec  # PyInstaller 打包配置
+└── .github/workflows/build.yml # 自动构建 + Release 发布
 ```
 
 ## ⚠️ 注意事项

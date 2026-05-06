@@ -20,18 +20,19 @@ def assemble_html(image_paths: List[str], original_width: int) -> str:
     # 内联 CSS 样式（双花括号转义）
     css = """
     <style>
-        .email-images {{
+        .email-images {
             border-collapse: collapse;
             border-spacing: 0;
-        }}
-        .email-images img {{
+            margin: 0 auto;
+        }
+        .email-images img {
             display: block;
             width: {width}px;
             height: auto;
             border: none;
-            margin: 0;
+            margin: 0 auto;
             padding: 0;
-        }}
+        }
     </style>
     """.format(width=original_width)
 
@@ -40,7 +41,6 @@ def assemble_html(image_paths: List[str], original_width: int) -> str:
     for path in image_paths:
         rows += f'<tr><td><img src="{path}" alt="" /></td></tr>'
 
-    # 完整 HTML
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -48,9 +48,11 @@ def assemble_html(image_paths: List[str], original_width: int) -> str:
     {css}
 </head>
 <body>
+    <div align="center">
     <table class="email-images">
         {rows}
     </table>
+    </div>
 </body>
 </html>"""
 
@@ -72,11 +74,13 @@ def get_html_with_inline_images(image_paths: List[str], width: int) -> str:
     <style>
         .email-images {{
             border-collapse: collapse;
+            margin: 0 auto;
         }}
         .email-images img {{
             display: block;
             width: {width}px;
             height: auto;
+            margin: 0 auto;
         }}
     </style>
     """
@@ -90,6 +94,8 @@ def get_html_with_inline_images(image_paths: List[str], width: int) -> str:
 <html>
 <head>{css}</head>
 <body>
+    <div align="center">
     <table class="email-images">{rows}</table>
+    </div>
 </body>
 </html>"""

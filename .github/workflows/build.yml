@@ -5,49 +5,50 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller --clean --noconfirm outlook_img_slicer.spec
+        run: pip install -r requirements.txt && pip install pyinstaller
         shell: cmd
 
-      - name: Create output directory
+      - name: Build EXE with PyInstaller
+        run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
+        shell: cmd
+
+      - name: Package EXE folder
         run: |
-          mkdir -p dist/exe
-          if exist "dist\Outlook长图插入工具" (
-            xcopy /E /I /Y "dist\Outlook长图插入工具\*" "dist\exe\"
-          ) else (
-            xcopy /E /I /Y "dist\*" "dist\exe\"
-          )
+          powershell -Command "Compress-Archive -Path 'dist/*' -DestinationPath 'Outlook长图插入工具.zip' -Force"
+        shell: cmd
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: Outlook长图插入工具-EXE
-          path: dist/exe/
+          path: Outlook长图插入工具.zip
           retention-days: 30
 
-      - name: Upload single-file EXE artifact
-        if: false  # 如需单文件可改为 true，并修改 spec 文件
-        uses: actions/upload-artifact@v4
+      - name: Create Release & Upload EXE
+        uses: softprops/action-gh-release@v2
         with:
-          name: Outlook长图插入工具-单文件
-          path: dist/*.exe
-          retention-days: 30
+          tag_name: v${{ github.run_number }}
+          release_name: Outlook长图插入工具 v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            Outlook长图插入工具.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
