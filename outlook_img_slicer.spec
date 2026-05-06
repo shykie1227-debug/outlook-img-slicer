@@ -3,7 +3,6 @@
 
 import sys
 import os
-from PyInstaller.utils.plesshell import add_python_encodings_to_binaries
 
 block_cipher = None
 
