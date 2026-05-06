@@ -69,6 +69,7 @@ class DropArea(QFrame):
         self.setAcceptDrops(True)
         self._hover = False
         self.file_path: Optional[str] = None
+        self.main_window = None  # set by MainWindow
         self._setup_ui()
         self._setup_style()
 
@@ -156,8 +157,9 @@ class DropArea(QFrame):
         self._setup_style()
         urls = event.mimeData().urls()
         if urls:
-            self.file_path = urls[0].toLocalFile()
-            self.parent().parent().on_file_selected(self.file_path)
+            file_path = urls[0].toLocalFile()
+            if self.main_window:
+                self.main_window.on_file_selected(file_path)
 
 
 # ============================================================
@@ -292,6 +294,7 @@ class MainWindow(QMainWindow):
 
         # 拖拽区
         self.drop_area = DropArea()
+        self.drop_area.main_window = self
         main_layout.addWidget(self.drop_area)
 
         # 操作区
