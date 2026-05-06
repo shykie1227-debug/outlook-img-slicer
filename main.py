@@ -41,6 +41,7 @@ class Theme:
     BORDER = "#E5E7EB"
     TEXT = "#111827"
     SUBTEXT = "#6B7280"
+    TEXT_SECONDARY = "#6B7280"
     SUCCESS = "#10B981"
     ERROR = "#EF4444"
 
