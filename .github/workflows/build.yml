@@ -1,0 +1,53 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build EXE with PyInstaller
+        run: |
+          pyinstaller --clean --noconfirm outlook_img_slicer.spec
+        shell: cmd
+
+      - name: Create output directory
+        run: |
+          mkdir -p dist/exe
+          if exist "dist\Outlook长图插入工具" (
+            xcopy /E /I /Y "dist\Outlook长图插入工具\*" "dist\exe\"
+          ) else (
+            xcopy /E /I /Y "dist\*" "dist\exe\"
+          )
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Outlook长图插入工具-EXE
+          path: dist/exe/
+          retention-days: 30
+
+      - name: Upload single-file EXE artifact
+        if: false  # 如需单文件可改为 true，并修改 spec 文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: Outlook长图插入工具-单文件
+          path: dist/*.exe
+          retention-days: 30

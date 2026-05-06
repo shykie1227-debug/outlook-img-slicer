@@ -2,39 +2,61 @@
 
 将长图自动切片后插入 Outlook 邮件正文，突破 1728px 高度限制。
 
-## 功能特性
+## ⬇️ 下载 exe（无需安装）
 
-- ✅ 支持拖拽上传图片 (JPG, PNG, BMP, WebP, GIF) 和 PDF
-- ✅ 自动检测高度，智能切片（默认每片 1500px）
-- ✅ 无缝拼接：HTML 表格布局确保图片无间隙
-- ✅ Outlook COM 自动化：自动创建邮件窗口
-- ✅ DPI 高分屏适配
-- ✅ 跨平台设计（核心功能可在 macOS 测试）
+点击 **Actions** → 最新构建 run → **Outlook长图插入工具-EXE** 下载压缩包，解压后双击 `Outlook长图插入工具.exe` 即可运行。
 
-## 安装
+> GitHub Actions 自动构建，Windows 免安装版，绿色运行。
+
+## ✨ 功能特性
+
+- ✅ **拖拽上传**：支持 JPG, PNG, BMP, WebP, GIF, PDF
+- ✅ **智能切片**：高度超过 1500px 自动垂直分块
+- ✅ **无缝拼接**：HTML 表格布局，图片无间隙
+- ✅ **一键发送**：Outlook COM 自动化，直接创建邮件窗口
+- ✅ **DPI 适配**：完美支持 Win10/11 高分屏
+- ✅ **临时清理**：程序退出自动删除切片文件
+
+## 🖥️ 使用方法
+
+1. 下载 exe 并解压（**绿色免安装**）
+2. 双击 `Outlook长图插入工具.exe`
+3. 将长图/长截图**拖入**窗口
+4. 点击**发送到 Outlook**
+5. 在弹出的 Outlook 邮件窗口填入收件人，发送！
+
+## 🔧 开发说明
+
+### 技术栈
+| 模块 | 技术 |
+|:---|:---|
+| UI | PySide6 |
+| 图像处理 | Pillow |
+| PDF 解析 | PyMuPDF |
+| Outlook 自动化 | pywin32 |
+| 打包 | PyInstaller |
+
+### 本地运行（开发）
 
 ```bash
-# Windows 环境
+# Windows
 pip install -r requirements.txt
-
-# 仅 macOS/Linux 测试（无 Outlook）
-pip install PySide6 Pillow PyMuPDF
-```
-
-## 使用方法
-
-1. 运行程序
-```bash
 python main.py
+
+# 仅 macOS 测试（无 Outlook）
+pip install PySide6 Pillow PyMuPDF
+python main.py  # 图像处理功能可用
 ```
 
-2. 拖拽图片或 PDF 到窗口，或点击"选择文件"
+### 自行打包 exe
 
-3. 点击"发送到 Outlook"
+```bash
+pip install pyinstaller
+pyinstaller --clean --noconfirm outlook_img_slicer.spec
+# 输出在 dist/Outlook长图插入工具/
+```
 
-4. 在 Outlook 邮件窗口编辑收件人并发送
-
-## 工作原理
+## 📐 工作原理
 
 ```
 长图 (如 800x3000px)
@@ -49,22 +71,25 @@ python main.py
    Outlook 显示完整长图
 ```
 
-## 文件结构
+## 📁 项目结构
 
 ```
 outlook-img-slicer/
-├── SPEC.md            # 规格说明书
-├── README.md          # 本文件
-├── main.py            # PySide6 主程序
-├── image_slicer.py    # 图像切片模块
-├── pdf_slicer.py      # PDF 解析模块
-├── html_assembler.py  # HTML 组装模块
-├── outlook_sender.py  # Outlook 自动化模块
-└── requirements.txt   # 依赖列表
+├── SPEC.md                   # 规格说明书
+├── README.md                 # 本文件
+├── requirements.txt          # 依赖声明
+├── TEST_PLAN.md              # 测试计划
+├── main.py                   # PySide6 主程序
+├── image_slicer.py           # 图像切片模块
+├── pdf_slicer.py             # PDF 解析模块
+├── html_assembler.py          # HTML 组装模块
+├── outlook_sender.py          # Outlook 自动化模块
+├── outlook_img_slicer.spec    # PyInstaller 打包配置
+└── .github/workflows/build.yml # GitHub Actions 自动构建
 ```
 
-## 注意事项
+## ⚠️ 注意事项
 
-- 仅支持 Windows 系统（需要 Outlook 和 pywin32）
-- macOS/Linux 可用于图像处理测试，但不能发送邮件
-- 临时切片文件保存在系统 TEMP 目录
+- 仅支持 **Windows + Outlook**（pywin32 依赖）
+- exe 由 GitHub Actions 云端 Windows 构建，杀毒软件可能误报，签名后可解决
+- 临时切片文件保存在 `%TEMP%` 目录，程序退出自动清理
