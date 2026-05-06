@@ -19,18 +19,17 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 
 from image_slicer import detect_and_slice
-from pdf_slicer import pdf_to_images
 from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
 class Config:
-    APP_TITLE = "Outlook 长图助手"
+    APP_TITLE = "Outlook 长图助手 (精简版)"
     DEFAULT_WIDTH = 650
     MAX_HEIGHT_PER_SLICE = 1200
     WINDOW_WIDTH = 680
     WINDOW_HEIGHT = 720
-    SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf")
+    SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif")
 
 
 class Theme:
@@ -106,7 +105,7 @@ class DropZone(QFrame):
     def dragLeaveEvent(self, event):
         self._hovered = False
         self._apply_style()
-        self.title_label.setText("拖拽或点击上传图片 / PDF")
+        self.title_label.setText("拖拽或点击上传图片")
 
     def dropEvent(self, event: QDropEvent):
         self._hovered = False
@@ -124,7 +123,7 @@ class DropZone(QFrame):
         if Path(path).suffix.lower() in Config.SUPPORTED_EXTENSIONS:
             self.file_dropped.emit(path)
         else:
-            QMessageBox.warning(self, "格式不支持", "请选择图片或 PDF 文件。")
+            QMessageBox.warning(self, "格式不支持", "请选择图片文件 (JPG, PNG, BMP, WebP, GIF)。")
 
 
 class ProcessWorker(QThread):
@@ -139,19 +138,8 @@ class ProcessWorker(QThread):
 
     def run(self):
         try:
-            ext = Path(self.file_path).suffix.lower()
             self.progress.emit(15)
-            if ext == ".pdf":
-                images = pdf_to_images(self.file_path)
-                self.progress.emit(45)
-                slice_paths = []
-                temp_dir = tempfile.gettempdir()
-                for index, image in enumerate(images):
-                    path = os.path.join(temp_dir, f"pdf_page_{index}.png")
-                    image.save(path)
-                    slice_paths.append(path)
-            else:
-                slice_paths = detect_and_slice(self.file_path, max_height=Config.MAX_HEIGHT_PER_SLICE)
+            slice_paths = detect_and_slice(self.file_path, max_height=Config.MAX_HEIGHT_PER_SLICE)
             self.progress.emit(100)
             self.finished.emit(slice_paths)
         except Exception as exc:
@@ -182,7 +170,7 @@ class MainWindow(QMainWindow):
         header.setStyleSheet(f"color: {Theme.TEXT};")
         layout.addWidget(header)
 
-        subtitle = QLabel("自动识别图片/PDF，生成切片并打开 Outlook 邮件窗口。")
+        subtitle = QLabel("自动识别图片，生成切片并打开 Outlook 邮件窗口。")
         subtitle.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 12px;")
         layout.addWidget(subtitle)
 

@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 打包配置 - outlook-img-slicer"""
+"""PyInstaller 打包配置 - outlook-img-slicer 精简版"""
 
 import sys
 import os
@@ -41,6 +41,8 @@ a = Analysis(
         "scipy",
         "pandas",
         "jupyter",
+        "fitz",        # 移除 PyMuPDF
+        "mupdf",       # 移除 PyMuPDF
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -56,7 +58,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Outlook长图插入工具",
+    name="Outlook长图插入工具-精简版",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -78,5 +80,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="Outlook长图插入工具",
+    name="Outlook长图插入工具-精简版",
 )

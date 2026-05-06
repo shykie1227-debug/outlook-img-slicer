@@ -7,6 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/shykie1227-debug/outlook-img-slicer?label=最新版本)](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest)
 
 > 点击上方徽章跳转最新 Release 页面，选择对应平台下载：
+>
 > - **Windows 用户**：`outlook-img-slicer-windows.zip`
 > - **macOS 用户**：`outlook-img-slicer-macos.zip`
 >
@@ -26,6 +27,7 @@
 ## 🖥️ 使用方法
 
 ### Windows 用户
+
 1. 下载 `outlook-img-slicer-windows.zip` 并解压
 2. 双击 `Outlook长图插入工具.exe`
 3. 将长图/长截图**拖入**窗口或点击**选择文件**
@@ -33,6 +35,7 @@
 5. 在弹出的 Outlook 邮件窗口填入收件人，发送！
 
 ### macOS 用户
+
 1. 下载 `outlook-img-slicer-macos.zip` 并解压
 2. 双击 `Outlook长图插入工具`（可能需要右键 → 打开）
 3. 将长图/长截图**拖入**窗口或点击**选择文件**
@@ -44,14 +47,15 @@
 ## 🔧 开发说明
 
 ### 技术栈
-| 模块 | 技术 |
-|:---|:---|
-| UI | PySide6 (Qt6) |
-| 图像处理 | Pillow |
-| PDF 解析 | PyMuPDF |
+
+| 模块           | 技术                 |
+| :------------- | :------------------- |
+| UI             | PySide6 (Qt6)        |
+| 图像处理       | Pillow               |
+| PDF 解析       | PyMuPDF              |
 | Outlook 自动化 | pywin32 (仅 Windows) |
-| 打包 | PyInstaller |
-| CI/CD | GitHub Actions |
+| 打包           | PyInstaller          |
+| CI/CD          | GitHub Actions       |
 
 ### 本地运行（开发）
 

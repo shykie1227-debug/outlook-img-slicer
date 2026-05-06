@@ -21,8 +21,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt && pip install pyinstaller
+      - name: Install dependencies (lite)
+        run: pip install PySide6 Pillow pywin32 && pip install pyinstaller
         shell: cmd
 
       - name: Build EXE with PyInstaller
@@ -31,7 +31,7 @@ jobs:
 
       - name: Package EXE folder
         run: |
-          powershell -Command "Compress-Archive -Path 'dist/*' -DestinationPath 'outlook-img-slicer-windows.zip' -Force"
+          powershell -Command "Compress-Archive -Path 'dist/*' -DestinationPath 'outlook-img-slicer-lite-windows.zip' -Force"
         shell: cmd
 
       - name: Upload EXE to Release
@@ -39,7 +39,7 @@ jobs:
         with:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
-            outlook-img-slicer-windows.zip
+            outlook-img-slicer-lite-windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -55,20 +55,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt && pip install pyinstaller
+      - name: Install dependencies (lite)
+        run: pip install PySide6 Pillow && pip install pyinstaller
 
       - name: Build APP with PyInstaller
         run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
 
       - name: Package APP folder
-        run: zip -r outlook-img-slicer-macos.zip dist/*
+        run: zip -r outlook-img-slicer-lite-macos.zip dist/*
 
       - name: Upload APP to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
-            outlook-img-slicer-macos.zip
+            outlook-img-slicer-lite-macos.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
