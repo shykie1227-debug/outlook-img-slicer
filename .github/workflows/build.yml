@@ -1,4 +1,4 @@
-name: Build and Release Executables
+name: Build and Release EXE
 
 on:
   release:
@@ -22,29 +22,32 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt && pip install pyinstaller
+        run: pip install -r requirements.txt pyinstaller
         shell: cmd
 
-      - name: Build EXE with PyInstaller
-        run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
+      - name: Build single-file EXE
+        run: pyinstaller --clean --noconfirm --onefile --noconsole outlook_img_slicer.spec
         shell: cmd
 
-      - name: Package EXE folder
+      - name: Package EXE
         run: |
-          powershell -Command "Compress-Archive -Path 'dist/*' -DestinationPath 'outlook-img-slicer-windows.zip' -Force"
+          powershell -Command "Get-ChildItem dist/ -Filter '*.exe' | ForEach-Object { Compress-Archive -Path $_.FullName -DestinationPath 'outlook-img-slicer-windows.zip' -Force }"
         shell: cmd
 
-      - name: Upload EXE to Release
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
             outlook-img-slicer-windows.zip
+            outlook-img-slicer-windows.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
     runs-on: macos-latest
+    # macOS 版仅包含图片处理功能，不含 Outlook 自动化（pywin32 为 Windows 专有）
+    # 注意：若打包失败可删除此 job，Windows EXE 可独立使用
 
     steps:
       - name: Checkout code
@@ -55,11 +58,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt && pip install pyinstaller
+      - name: Install dependencies (without pywin32)
+        run: pip install PySide6 Pillow PyMuPDF pyinstaller
 
-      - name: Build APP with PyInstaller
+      - name: Build APP
         run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
+        env:
+          MACOS_BUILD: "true"
 
       - name: Package APP folder
         run: zip -r outlook-img-slicer-macos.zip dist/*

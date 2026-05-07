@@ -1,9 +1,11 @@
 """
 Outlook 长图无损插入工具 - 主程序
 PySide6 窗口应用，支持拖拽上传、自动切片及 Outlook 自动化发送
+V3.0.20260507: 修复 Outlook 图片不显示问题，新增保存切图、版本号显示
 """
 import os
 import sys
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional, List
@@ -15,7 +17,7 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QScrollArea,
     QLineEdit, QSpinBox
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 
 from image_slicer import detect_and_slice
@@ -24,12 +26,18 @@ from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
+# ============================================================
+# 版本信息
+# ============================================================
+VERSION = "V3.0.20260507"
+
+
 class Config:
-    APP_TITLE = "Outlook 长图助手"
+    APP_TITLE = f"Outlook 长图助手 {VERSION}"
     DEFAULT_WIDTH = 650
     MAX_HEIGHT_PER_SLICE = 1200
-    WINDOW_WIDTH = 680
-    WINDOW_HEIGHT = 720
+    WINDOW_WIDTH = 720     # 加宽以适应按钮文字
+    WINDOW_HEIGHT = 760
     SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf")
 
 
@@ -44,6 +52,16 @@ class Theme:
     TEXT_SECONDARY = "#6B7280"
     SUCCESS = "#10B981"
     ERROR = "#EF4444"
+
+
+def _btn_font_size(text: str, base_size: int = 14) -> int:
+    """根据按钮文字长度动态调整字号，防止溢出"""
+    if len(text) <= 8:
+        return base_size
+    elif len(text) <= 12:
+        return base_size - 1
+    else:
+        return base_size - 2
 
 
 class DropZone(QFrame):
@@ -168,6 +186,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
 
     def _build_ui(self):
+        # 窗口标题栏显示版本号
         self.setWindowTitle(Config.APP_TITLE)
         self.setFixedSize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
         self.setStyleSheet(f"background: {Theme.BG};")
@@ -175,9 +194,10 @@ class MainWindow(QMainWindow):
         container = QWidget()
         self.setCentralWidget(container)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 12)  # 底部12减小，为版本标签留空间
+        layout.setSpacing(14)
 
+        # ---- 标题区 ----
         header = QLabel("Outlook 长图无损插入")
         header.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
         header.setStyleSheet(f"color: {Theme.TEXT};")
@@ -187,21 +207,20 @@ class MainWindow(QMainWindow):
         subtitle.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 12px;")
         layout.addWidget(subtitle)
 
+        # ---- 拖放区 ----
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self.handle_file_selection)
         self.drop_zone.clicked.connect(self._select_file)
         layout.addWidget(self.drop_zone)
 
+        # ---- 按钮行（选择文件、重置） ----
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(10)
-        self.btn_select = QPushButton("选择文件")
-        self.btn_select.setFixedHeight(42)
-        self.btn_select.setStyleSheet(self._btn_style(Theme.CARD, Theme.TEXT))
-        self.btn_select.clicked.connect(self._select_file)
 
-        self.btn_reset = QPushButton("重置")
-        self.btn_reset.setFixedHeight(42)
-        self.btn_reset.setStyleSheet(self._btn_style(Theme.CARD, Theme.SUBTEXT))
+        self.btn_select = self._make_btn("选择文件", Theme.CARD, Theme.TEXT)
+        self.btn_reset = self._make_btn("重置", Theme.CARD, Theme.SUBTEXT)
+
+        self.btn_select.clicked.connect(self._select_file)
         self.btn_reset.clicked.connect(self.reset_app)
 
         buttons_row.addWidget(self.btn_select)
@@ -209,6 +228,7 @@ class MainWindow(QMainWindow):
         buttons_row.addStretch()
         layout.addLayout(buttons_row)
 
+        # ---- 收件人 / 邮件标题 ----
         self.input_to = QLineEdit()
         self.input_to.setPlaceholderText("收件人邮箱（可选）")
         self.input_subject = QLineEdit()
@@ -218,6 +238,7 @@ class MainWindow(QMainWindow):
             widget.setStyleSheet(self._input_style())
             layout.addWidget(widget)
 
+        # ---- 显示宽度 ----
         width_row = QHBoxLayout()
         width_label = QLabel("显示宽度")
         width_label.setStyleSheet(f"color: {Theme.SUBTEXT};")
@@ -233,6 +254,7 @@ class MainWindow(QMainWindow):
         width_row.addStretch()
         layout.addLayout(width_row)
 
+        # ---- 缩略图预览 ----
         self.preview_area = QScrollArea()
         self.preview_area.setWidgetResizable(True)
         self.preview_area.setFixedHeight(150)
@@ -247,6 +269,7 @@ class MainWindow(QMainWindow):
         self.preview_area.hide()
         layout.addWidget(self.preview_area)
 
+        # ---- 进度条 ----
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(4)
         self.progress_bar.setTextVisible(False)
@@ -257,16 +280,62 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         layout.addWidget(self.progress_bar)
 
+        # ---- 状态提示 ----
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 12px;")
         layout.addWidget(self.status_label)
 
-        self.btn_send = QPushButton("创建 Outlook 邮件")
-        self.btn_send.setFixedHeight(46)
+        # ---- 操作按钮行（保存切图 + 创建邮件） ----
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+
+        self.btn_save = self._make_btn("保存切图", Theme.CARD, Theme.TEXT)
+        self.btn_send = self._make_btn("创建 Outlook 邮件", Theme.PRIMARY, "white", bold=True)
+
+        self.btn_save.setEnabled(False)
         self.btn_send.setEnabled(False)
-        self.btn_send.setStyleSheet(self._btn_style(Theme.PRIMARY, "white", bold=True))
+
+        self.btn_save.clicked.connect(self._save_slices)
         self.btn_send.clicked.connect(self._send_email)
-        layout.addWidget(self.btn_send)
+
+        action_row.addWidget(self.btn_save)
+        action_row.addWidget(self.btn_send)
+        layout.addLayout(action_row)
+
+        # ---- 底部版本号标签 ----
+        footer_row = QHBoxLayout()
+        footer_row.addStretch()
+        version_label = QLabel(VERSION)
+        version_label.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 11px;")
+        footer_row.addWidget(version_label)
+        layout.addLayout(footer_row)
+
+    # ========================================================
+    # 辅助方法
+    # ========================================================
+
+    def _make_btn(self, text: str, bg: str, color: str, bold: bool = False) -> QPushButton:
+        """创建按钮，自动根据文字长度调整字号 + 设置 MinimumSize 防止溢出"""
+        font_size = _btn_font_size(text)
+        weight = "bold" if bold else "normal"
+        hover = Theme.PRIMARY_HOVER if bg == Theme.PRIMARY else "#F3F4F6"
+        border = "1px solid transparent" if bg == Theme.PRIMARY else f"1px solid {Theme.BORDER}"
+
+        # 动态 MinimumSize：根据文字长度估算最小宽度
+        min_w = max(90, len(text) * font_size + 40)
+
+        btn = QPushButton(text)
+        btn.setFixedHeight(46)
+        btn.setMinimumWidth(min_w)   # 防止按钮文字溢出
+        btn.setStyleSheet(
+            f"QPushButton {{"
+            f" background: {bg}; color: {color}; border: {border}; border-radius: 10px;"
+            f" font-weight: {weight}; font-size: {font_size}px; "
+            f" padding: 0 16px; }}"
+            f"QPushButton:hover {{ background: {hover}; }}"
+            f"QPushButton:disabled {{ background: {Theme.BORDER}; color: {Theme.SUBTEXT}; }}"
+        )
+        return btn
 
     def _input_style(self) -> str:
         return (
@@ -280,17 +349,6 @@ class MainWindow(QMainWindow):
             f"QLineEdit:focus, QSpinBox:focus {{ border-color: {Theme.PRIMARY}; }}"
         )
 
-    def _btn_style(self, bg: str, color: str, bold: bool = False) -> str:
-        weight = "bold" if bold else "normal"
-        hover = Theme.PRIMARY_HOVER if bg == Theme.PRIMARY else "#F3F4F6"
-        border = "1px solid transparent" if bg == Theme.PRIMARY else f"1px solid {Theme.BORDER}"
-        return (
-            f"QPushButton {{ background: {bg}; color: {color}; border: {border}; border-radius: 10px;"
-            f"font-weight: {weight}; font-size: 14px; }}"
-            f"QPushButton:hover {{ background: {hover}; }}"
-            f"QPushButton:disabled {{ background: {Theme.BORDER}; color: {Theme.SUBTEXT}; }}"
-        )
-
     def _select_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "选择图片或 PDF", "",
@@ -298,6 +356,10 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.handle_file_selection(path)
+
+    # ========================================================
+    # 文件处理
+    # ========================================================
 
     def handle_file_selection(self, path: str):
         self.file_path = path
@@ -318,8 +380,10 @@ class MainWindow(QMainWindow):
     def _on_processed(self, paths: List[str]):
         self.slice_paths = paths
         self.progress_bar.hide()
+        self.btn_save.setEnabled(bool(paths))
         self.btn_send.setEnabled(bool(paths))
-        self.status_label.setText(f"已生成 {len(paths)} 张切片，准备发送")
+        count = len(paths)
+        self.status_label.setText(f"已生成 {count} 张切片 {'(PDF)' if self.file_path and self.file_path.lower().endswith('.pdf') else ''}，可直接发送或保存")
         self.status_label.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 12px;")
         self._show_thumbnails(paths)
 
@@ -347,7 +411,53 @@ class MainWindow(QMainWindow):
 
         self.preview_area.show()
 
+    # ========================================================
+    # 保存切图（新增功能）
+    # ========================================================
+
+    def _save_slices(self):
+        """将切片保存到用户指定的目录"""
+        if not self.slice_paths:
+            return
+
+        # 选择保存目录
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "选择保存位置", "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        if not save_dir:
+            return
+
+        try:
+            saved_count = 0
+            for src in self.slice_paths:
+                filename = Path(src).name
+                dst = os.path.join(save_dir, filename)
+
+                # 避免覆盖：同名文件加序号
+                if os.path.exists(dst):
+                    stem = Path(src).stem
+                    ext = Path(src).suffix
+                    counter = 1
+                    while os.path.exists(dst):
+                        dst = os.path.join(save_dir, f"{stem}_{counter}{ext}")
+                        counter += 1
+
+                shutil.copy2(src, dst)
+                saved_count += 1
+
+            self.status_label.setText(f"✅ 已保存 {saved_count} 张切片到: {save_dir}")
+            self.status_label.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 12px;")
+            QMessageBox.information(self, "保存成功", f"已保存 {saved_count} 张切片到:\n{save_dir}")
+        except Exception as exc:
+            QMessageBox.critical(self, "保存失败", str(exc))
+
+    # ========================================================
+    # 发送邮件
+    # ========================================================
+
     def _send_email(self):
+        """创建 Outlook 邮件（CID 嵌入式图片）"""
         if not self.slice_paths:
             return
         subject = self.input_subject.text().strip() or "长图邮件"
@@ -355,11 +465,15 @@ class MainWindow(QMainWindow):
         width = self.spin_width.value()
         try:
             html_content = assemble_html(self.slice_paths, width)
-            create_email_with_images(html_content, subject, to_addr)
+            create_email_with_images(html_content, self.slice_paths, subject, to_addr)
             self.status_label.setText("✅ 邮件窗口已打开，请检查后发送")
             self.status_label.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 12px;")
         except Exception as exc:
             QMessageBox.critical(self, "发送失败", str(exc))
+
+    # ========================================================
+    # 重置
+    # ========================================================
 
     def reset_app(self):
         self.slice_paths = []
@@ -368,6 +482,7 @@ class MainWindow(QMainWindow):
         self.drop_zone.icon_label.setText("📂")
         self.drop_zone.tip_label.setText("支持 JPG、PNG、WebP、GIF、PDF")
         self.preview_area.hide()
+        self.btn_save.setEnabled(False)
         self.btn_send.setEnabled(False)
         self.status_label.setText("")
         self.input_to.clear()
