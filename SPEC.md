@@ -1,5 +1,7 @@
 # Outlook 长图无损插入工具 — 技术规格说明书 (SPEC.md)
 
+> **版本: v3.0.20260507**
+
 ## 1. 项目概述
 
 ### 1.1 背景
@@ -11,8 +13,19 @@ Outlook 邮件正文对图片有 **1728px 高度限制**，当用户尝试插入
 ### 1.3 约束
 - **平台：** Windows（依赖 pywin32 实现 Outlook 自动化）
 - **Python：** 3.10+
-- **打包：** Nuitka 或 PyInstaller 生成单文件 exe
+- **打包：** PyInstaller --onefile 单文件 exe
 - **无网络依赖：** 纯本地工具，不上传任何数据
+
+## V3 改进清单
+
+| 改进项 | 说明 |
+|---|---|
+| 单文件 EXE | `--onefile` 模式，双击即用 |
+| CID 嵌入 | 每张图片通过 PR_ATTACH_CONTENT_ID 协议正确嵌入 |
+| CSS 兼容性 | `min-height:1px;visibility:visible!important` 防止 Outlook 拦截 |
+| 按钮自适应 | 用 `QSizePolicy.Fixed` + `QFontMetrics` 计算宽度，解决溢出 |
+| 版本号 | 标题栏显示 `V3.0.20260507` |
+| 保存切图 | 新增「保存切图」按钮，可不发送邮件直接保存切片到本地 |
 
 ---
 

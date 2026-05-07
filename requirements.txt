@@ -1,5 +1,6 @@
-# Outlook 长图无损插入工具 - 依赖列表
-PySide6>=6.5.0
+# Outlook 长图插入工具 V3 依赖
 Pillow>=10.0.0
-PyMuPDF>=1.23.0
-pywin32>=300 ; sys_platform == 'win32'
+PySide6>=6.5.0
+pywin32>=306
+PyInstaller>=6.0.0
+UPX>=3.96  # 可选：exe 压缩（Windows 下打包可选）
