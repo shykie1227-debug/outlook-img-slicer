@@ -41,14 +41,14 @@ jobs:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
             outlook-img-slicer-windows.zip
-            outlook-img-slicer-windows.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
     runs-on: macos-latest
+    if: github.event_name == 'release'
     # macOS 版仅包含图片处理功能，不含 Outlook 自动化（pywin32 为 Windows 专有）
-    # 注意：若打包失败可删除此 job，Windows EXE 可独立使用
+    # 注意：spec 文件含 Windows 专属选项(console=False)，仅 release 时构建
 
     steps:
       - name: Checkout code
