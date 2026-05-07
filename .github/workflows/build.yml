@@ -26,7 +26,7 @@ jobs:
         shell: cmd
 
       - name: Build single-file EXE
-        run: pyinstaller --clean --noconfirm --onefile --noconsole outlook_img_slicer.spec
+        run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
         shell: cmd
 
       - name: Package EXE
