@@ -395,26 +395,32 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         root.addWidget(self.status_label)
 
-        # ══ 底部按钮区 ══════════════════════════
+        # ══ 底部按钮区（一行并排，主次分明） ═══════
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_row.setContentsMargins(0, 4, 0, 0)
+
         self.btn_send = QPushButton("创建 Outlook 邮件")
         self.btn_send.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
         self.btn_send.setCursor(Qt.PointingHandCursor)
         self.btn_send.setEnabled(False)
         self.btn_send.setStyleSheet(_btn_primary())
-        self.btn_send.setFixedHeight(48)
-        self.btn_send.setFixedSize(_btn_size("创建 Outlook 邮件", 14, extra_w=48, height=48))
+        self.btn_send.setFixedHeight(44)
+        self.btn_send.setMinimumSize(_btn_size("创建 Outlook 邮件", 14, extra_w=48, height=44))
         self.btn_send.clicked.connect(self._send_email)
-        root.addWidget(self.btn_send)
 
         self.btn_save = QPushButton("保存切图到本地")
         self.btn_save.setFont(_font("Microsoft YaHei", 13, QFont.Medium))
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setEnabled(False)
         self.btn_save.setStyleSheet(_btn_secondary())
-        self.btn_save.setFixedHeight(40)
-        self.btn_save.setFixedSize(_btn_size("保存切图到本地", 13, extra_w=36, height=40))
+        self.btn_save.setFixedHeight(44)
+        self.btn_save.setMinimumSize(_btn_size("保存切图到本地", 13, extra_w=36, height=44))
         self.btn_save.clicked.connect(self._save_slices)
-        root.addWidget(self.btn_save)
+
+        btn_row.addWidget(self.btn_send, stretch=6)
+        btn_row.addWidget(self.btn_save, stretch=4)
+        root.addLayout(btn_row)
 
         # ══ 版本 ════════════════════════════════
         ver_row = QHBoxLayout()
