@@ -26,7 +26,8 @@ from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
-VERSION = "V3.0.20260511"
+VERSION = "V3.0.20260511-TEST"
+CONFIG_VERSION = "20260511"
 
 
 class Config:
@@ -210,8 +211,17 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(14)
 
+        # ── 调试信息行（上线前删除）────────────────────────────
+        debug_label = QLabel(f"[BUILD {CONFIG_VERSION}] 可乐AI出品")
+        debug_label.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 10px; background: #F0FDF4; padding: 2px 8px; border-radius: 4px;")
+        debug_label.setFont(QFont("Microsoft YaHei", 10))
+        dbg_row = QHBoxLayout()
+        dbg_row.addWidget(debug_label)
+        dbg_row.addStretch()
+        layout.addLayout(dbg_row)
+
         # Header
-        header = QLabel("Outlook 长图无损插入")
+        header = QLabel("🎯 Outlook 长图无损插入")
         header.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
         header.setStyleSheet(f"color: {Theme.TEXT};")
         layout.addWidget(header)
