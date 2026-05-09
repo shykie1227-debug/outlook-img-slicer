@@ -2,7 +2,7 @@
 """
 build.py - Outlook 长图插入工具 V3 一键打包脚本
 用法: python build.py
-依赖: pip install pyinstaller pillow pymupdf PySide6 pywin32
+依赖: pip install pyinstaller Pillow PyMuPDF PySide6 pywin32==306
 """
 import subprocess
 import sys
@@ -23,19 +23,36 @@ def run(cmd: list, **kwargs):
     return result
 
 
-def check_dependencies():
-    """检查关键依赖是否安装"""
-    required = ["PyInstaller", "PIL", "fitz", "PySide6"]
+def check_and_install_deps():
+    """检查并自动安装缺失依赖"""
+    import_to_pip = {
+        "PyInstaller": "pyinstaller",
+        "PIL": "Pillow",
+        "fitz": "PyMuPDF",
+        "pymupdf": "PyMuPDF",
+        "PySide6": "PySide6",
+    }
+    required = list(import_to_pip.keys())
     missing = []
     for pkg in required:
         try:
             __import__(pkg)
         except ImportError:
-            missing.append(pkg.lower().replace("pymupdf", "fitz"))
+            missing.append(import_to_pip[pkg])
+
     if missing:
-        print("[ERROR] 缺少依赖，请先安装：")
-        print(f"  pip install {' '.join(missing)} pywin32")
-        sys.exit(1)
+        print(f"[INFO] 检测到缺失依赖: {', '.join(missing)}")
+        print("[INFO] 正在自动安装...")
+        pip_pkgs = missing + ["pywin32==306"]
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install"] + pip_pkgs,
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print(f"[ERROR] 自动安装失败，请手动运行：")
+            print(f"  pip install {' '.join(pip_pkgs)}")
+            sys.exit(1)
+        print("[INFO] 依赖安装完成！")
 
 
 def build_spec(spec_file: str):
@@ -83,7 +100,7 @@ def main():
     print(f"项目目录: {PROJECT_ROOT}")
     print(f"Python: {sys.version}")
 
-    check_dependencies()
+    check_and_install_deps()
 
     # 清理旧构建
     build_dir = PROJECT_ROOT / "build"
