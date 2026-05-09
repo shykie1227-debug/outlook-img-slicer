@@ -21,11 +21,12 @@ from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 
 from image_slicer import detect_and_slice
 from pdf_slicer import pdf_to_images
+from ppt_slicer import pptx_to_images
 from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
-VERSION = "V3.0.20260507"
+VERSION = "V3.0.20260509"
 
 
 class Config:
@@ -34,7 +35,9 @@ class Config:
     MAX_HEIGHT_PER_SLICE = 1200
     WINDOW_WIDTH = 680
     WINDOW_HEIGHT = 760
-    SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf")
+    SUPPORTED_EXTENSIONS = (
+        ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf", ".pptx", ".ppt"
+    )
 
 
 class Theme:
@@ -83,7 +86,7 @@ class DropZone(QFrame):
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setFont(QFont("Microsoft YaHei", 13, QFont.Bold))
 
-        self.tip_label = QLabel("支持 JPG、PNG、WebP、GIF、PDF")
+        self.tip_label = QLabel("支持 JPG、PNG、WebP、GIF、PDF、PPT、PPTX")
         self.tip_label.setAlignment(Qt.AlignCenter)
         self.tip_label.setStyleSheet(f"color: {Theme.SUBTEXT}; font-size: 12px;")
 
@@ -136,7 +139,7 @@ class DropZone(QFrame):
         if Path(path).suffix.lower() in Config.SUPPORTED_EXTENSIONS:
             self.file_dropped.emit(path)
         else:
-            QMessageBox.warning(self, "格式不支持", "请选择图片或 PDF 文件。")
+            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF 或 PPT 文件。")
 
 
 class ProcessWorker(QThread):
@@ -162,6 +165,23 @@ class ProcessWorker(QThread):
                     path = os.path.join(temp_dir, f"pdf_page_{index}.png")
                     image.save(path)
                     slice_paths.append(path)
+            elif ext in (".pptx", ".ppt"):
+                # PPT/PPTX：逐页渲染为图片，再按高度切片
+                images = pptx_to_images(self.file_path)
+                self.progress.emit(45)
+                slice_paths = []
+                temp_dir = tempfile.gettempdir()
+                for index, image in enumerate(images):
+                    path = os.path.join(temp_dir, f"ppt_page_{index}.png")
+                    image.save(path)
+                    slice_paths.append(path)
+                self.progress.emit(75)
+                # 对过长的幻灯片页面进行二次切片
+                final_slices = []
+                for path in slice_paths:
+                    tiles = detect_and_slice(path, max_height=Config.MAX_HEIGHT_PER_SLICE)
+                    final_slices.extend(tiles)
+                slice_paths = final_slices
             else:
                 slice_paths = detect_and_slice(
                     self.file_path, max_height=Config.MAX_HEIGHT_PER_SLICE
@@ -355,8 +375,8 @@ class MainWindow(QMainWindow):
 
     def _select_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片或 PDF", "",
-            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf)"
+            self, "选择图片、PDF 或 PPT", "",
+            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf);;PPT/PPTX (*.pptx *.ppt)"
         )
         if path:
             self.handle_file_selection(path)
@@ -454,7 +474,7 @@ class MainWindow(QMainWindow):
         self.file_path = None
         self.drop_zone.title_label.setText("拖拽或点击上传图片 / PDF")
         self.drop_zone.icon_label.setText("📂")
-        self.drop_zone.tip_label.setText("支持 JPG、PNG、WebP、GIF、PDF")
+        self.drop_zone.tip_label.setText("支持 JPG、PNG、WebP、GIF、PDF、PPT、PPTX")
         self.preview_area.hide()
         self.btn_send.setEnabled(False)
         self.btn_save.setEnabled(False)

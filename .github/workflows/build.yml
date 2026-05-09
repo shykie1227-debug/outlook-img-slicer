@@ -1,74 +1,78 @@
-name: Build and Release Executables
+name: Build & Release
 
 on:
+  push:
+    branches: [v3-2026-05-09]
   release:
-    types: [published]
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    types: [created]
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt && pip install pyinstaller
-        shell: cmd
-
-      - name: Build EXE with PyInstaller
-        run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
-        shell: cmd
-
-      - name: Package EXE folder
         run: |
-          powershell -Command "Compress-Archive -Path 'dist/*' -DestinationPath 'outlook-img-slicer-windows.zip' -Force"
-        shell: cmd
+          pip install pyinstaller pywin32==306 Pillow PySide6 PyMuPDF
 
-      - name: Upload EXE to Release
-        uses: softprops/action-gh-release@v2
+      - name: Build EXE
+        run: python build.py
+
+      - name: Compress EXE
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/Outlook长图插入工具.exe" -DestinationPath "dist/Outlook长图插入工具-V3.0.20260509.zip" -Force
+          Write-Host "Compressed size:"
+          (Get-Item "dist/Outlook长图插入工具-V3.0.20260509.zip").Length / 1MB
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: |
-            outlook-img-slicer-windows.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: Outlook长图插入工具-V3.0.20260509
+          path: |
+            dist/Outlook长图插入工具.exe
+            dist/Outlook长图插入工具-V3.0.20260509.zip
+          retention-days: 5
 
-  build-macos:
-    runs-on: macos-latest
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+      - name: Download EXE
+        uses: actions/download-artifact@v4
         with:
-          python-version: '3.11'
+          name: Outlook长图插入工具-V3.0.20260509
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt && pip install pyinstaller
-
-      - name: Build APP with PyInstaller
-        run: pyinstaller --clean --noconfirm outlook_img_slicer.spec
-
-      - name: Package APP folder
-        run: zip -r outlook-img-slicer-macos.zip dist/*
-
-      - name: Upload APP to Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
           files: |
-            outlook-img-slicer-macos.zip
+            Outlook长图插入工具.exe
+            Outlook长图插入工具-V3.0.20260509.zip
+          body: |
+            ## Outlook 长图插入工具 V3.0.20260509
+
+            ### 本次更新 (v2026-05-09):
+            - **新增 PPT/PPTX 支持** — 直接拖入幻灯片文件，自动渲染每页并切片插入 Outlook
+            - **修复 PNG 透明通道丢失 bug** — 透明 PNG 不再被强制转为黑色背景
+            - **修复切片扩展名不匹配 bug** — 切片文件扩展名与实际格式一致
+            - **优化打包体积** — 启用 PyInstaller strip，清理多余依赖
+
+            ### V3 完整改进:
+            - 单文件 EXE（双击即用）
+            - CID 嵌入式嵌入（解决 Outlook 图片不显示问题）
+            - CSS 兼容性修复（min-height + visibility）
+            - 按钮自适应宽度（解决字符溢出）
+            - 新增「保存切图」按钮
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

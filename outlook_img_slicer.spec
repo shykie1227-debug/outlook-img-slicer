@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 打包配置 - outlook-img-slicer V3
-真正的单文件模式（--onefile），不依赖外部 DLL
+PyInstaller 打包配置 - outlook-img-slicer V3.0.20260509
+真正的单文件模式（--onefile），优化体积
 """
 import sys
 import os
@@ -23,6 +23,8 @@ hiddenimports = [
     "pythoncom",
     "PIL",
     "fitz",
+    # PPT/PPTX 支持（PyMuPDF 原生支持 PPTX，无需额外依赖）
+    "ppt_slicer",
 ]
 
 a = Analysis(
@@ -43,6 +45,11 @@ a = Analysis(
         "jupyter",
         "test",
         "unittest",
+        "IPython",
+        "notebook",
+        "jax",
+        "torch",
+        "tensorflow",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -53,6 +60,7 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # 单文件 EXE：所有依赖打包进一个 exe
+# strip=True 移除调试符号，进一步减小体积
 exe = EXE(
     pyz,
     a.scripts,
@@ -63,7 +71,7 @@ exe = EXE(
     name="Outlook长图插入工具",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=True,           # 移除符号表，减小体积
     upx=UPX_LEVEL > 0,
     upx_args=["--best"] if UPX_LEVEL > 0 else [],
     console=False,

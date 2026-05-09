@@ -23,10 +23,6 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
     """
     try:
         img = Image.open(image_path)
-        # 转换模式以确保兼容性（RGBA 转 RGB 防止保存为 JPG 报错）
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        
         orig_w, orig_h = img.size
 
         # 如果高度在限制内，直接返回原图
@@ -37,21 +33,31 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
         slice_count = (orig_h + max_height - 1) // max_height
         slice_paths: List[str] = []
         temp_dir = tempfile.gettempdir()
-        ext = Path(image_path).suffix.lower()
+
+        # 判断原始格式：PNG/GIF 保留透明通道，其他转 RGB
+        original_ext = Path(image_path).suffix.lower()
+        preserve_alpha = original_ext in (".png", ".gif") and img.mode == "RGBA"
 
         for i in range(slice_count):
             top = i * max_height
             bottom = min((i + 1) * max_height, orig_h)
-            
+
             # 裁剪区域
             slice_img = img.crop((0, top, orig_w, bottom))
-            
-            # 生成临时文件路径
-            slice_filename = f"slice_{i}_{os.path.basename(image_path)}"
+
+            # 生成临时文件路径（统一用 .png 避免扩展名误导）
+            base_name = Path(image_path).stem
+            slice_filename = f"slice_{i}_{base_name}.png"
             slice_path = os.path.join(temp_dir, slice_filename)
-            
-            # 保存图片，保持高质量
-            slice_img.save(slice_path, quality=95, optimize=True)
+
+            # 保存切片：PNG/GIF 保留透明通道，其他格式用 JPEG 质量 95
+            if preserve_alpha:
+                slice_img.save(slice_path, format="PNG", optimize=True)
+            else:
+                # 非透明图片转为 RGB 再保存为 JPEG，避免 RGBA 混用
+                if slice_img.mode in ("RGBA", "P"):
+                    slice_img = slice_img.convert("RGB")
+                slice_img.save(slice_path, format="JPEG", quality=95, optimize=True)
             slice_paths.append(slice_path)
 
         return slice_paths
