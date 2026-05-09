@@ -29,8 +29,10 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
         if orig_h <= max_height:
             return [image_path]
 
-        # 计算需要的切片数量
+        # 计算需要的切片数量（等分切割）
         slice_count = (orig_h + max_height - 1) // max_height
+        # 每片高度 = 总高 / 片数（等分）
+        slice_height = (orig_h + slice_count - 1) // slice_count  # ceiling 整除，保证等分
         slice_paths: List[str] = []
         temp_dir = tempfile.gettempdir()
 
@@ -39,8 +41,8 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
         preserve_alpha = original_ext in (".png", ".gif") and img.mode == "RGBA"
 
         for i in range(slice_count):
-            top = i * max_height
-            bottom = min((i + 1) * max_height, orig_h)
+            top = i * slice_height
+            bottom = min((i + 1) * slice_height, orig_h)
 
             # 裁剪区域
             slice_img = img.crop((0, top, orig_w, bottom))

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QSpinBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics
 
 from image_slicer import detect_and_slice
 from pdf_slicer import pdf_to_images
@@ -31,7 +31,7 @@ VERSION = "V3.0.20260509"
 
 class Config:
     APP_TITLE = f"Outlook 长图助手 {VERSION}"
-    DEFAULT_WIDTH = 650
+    DEFAULT_WIDTH = 960
     MAX_HEIGHT_PER_SLICE = 1200
     WINDOW_WIDTH = 680
     WINDOW_HEIGHT = 760
@@ -227,44 +227,7 @@ class MainWindow(QMainWindow):
         self.drop_zone.clicked.connect(self._select_file)
         layout.addWidget(self.drop_zone)
 
-        # Buttons row — 自适应宽度，无文字溢出
-        btn_select = QPushButton("选择文件")
-        btn_select.setFont(QFont("Microsoft YaHei", 13))
-        btn_select.setCursor(Qt.PointingHandCursor)
-        btn_select.setStyleSheet(self._btn_style(Theme.CARD, Theme.TEXT))
-        btn_select.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        sz = _btn_metric("选择文件", 13)
-        btn_select.setFixedSize(sz)
-        btn_select.clicked.connect(self._select_file)
-
-        btn_reset = QPushButton("重置")
-        btn_reset.setFont(QFont("Microsoft YaHei", 13))
-        btn_reset.setCursor(Qt.PointingHandCursor)
-        btn_reset.setStyleSheet(self._btn_style(Theme.CARD, Theme.SUBTEXT))
-        btn_reset.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        sz = _btn_metric("重置", 13)
-        btn_reset.setFixedSize(sz)
-        btn_reset.clicked.connect(self.reset_app)
-
-        self.btn_save = QPushButton("保存切图")
-        self.btn_save.setFont(QFont("Microsoft YaHei", 13))
-        self.btn_save.setCursor(Qt.PointingHandCursor)
-        self.btn_save.setStyleSheet(self._btn_style(Theme.CARD, Theme.SUBTEXT))
-        self.btn_save.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        sz = _btn_metric("保存切图", 13)
-        self.btn_save.setFixedSize(sz)
-        self.btn_save.clicked.connect(self._save_slices)
-        self.btn_save.setEnabled(False)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        btn_row.addWidget(btn_select)
-        btn_row.addWidget(btn_reset)
-        btn_row.addWidget(self.btn_save)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        # Input fields
+        # Input fields (move up to replace old button row position)
         self.input_to = QLineEdit()
         self.input_to.setPlaceholderText("收件人邮箱（可选）")
         self.input_subject = QLineEdit()
@@ -328,15 +291,50 @@ class MainWindow(QMainWindow):
         self.status_label.setFont(QFont("Microsoft YaHei", 12))
         layout.addWidget(self.status_label)
 
-        # Send button
+        # Bottom button row: [选择文件] [重置] [保存切图] — [创建 Outlook 邮件] (same row)
+        btn_select = QPushButton("选择文件")
+        btn_select.setFont(QFont("Microsoft YaHei", 13))
+        btn_select.setCursor(Qt.PointingHandCursor)
+        btn_select.setStyleSheet(self._btn_style(Theme.CARD, Theme.TEXT))
+        btn_select.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        sz = _btn_metric("选择文件", 13)
+        btn_select.setFixedSize(sz)
+        btn_select.clicked.connect(self._select_file)
+
+        btn_reset = QPushButton("重置")
+        btn_reset.setFont(QFont("Microsoft YaHei", 13))
+        btn_reset.setCursor(Qt.PointingHandCursor)
+        btn_reset.setStyleSheet(self._btn_style(Theme.CARD, Theme.SUBTEXT))
+        btn_reset.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        sz = _btn_metric("重置", 13)
+        btn_reset.setFixedSize(sz)
+        btn_reset.clicked.connect(self.reset_app)
+
+        self.btn_save = QPushButton("保存切图")
+        self.btn_save.setFont(QFont("Microsoft YaHei", 13))
+        self.btn_save.setCursor(Qt.PointingHandCursor)
+        self.btn_save.setStyleSheet(self._btn_style(Theme.CARD, Theme.SUBTEXT))
+        self.btn_save.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        sz = _btn_metric("保存切图", 13)
+        self.btn_save.setFixedSize(sz)
+        self.btn_save.clicked.connect(self._save_slices)
+        self.btn_save.setEnabled(False)
+
         self.btn_send = QPushButton("创建 Outlook 邮件")
         self.btn_send.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
-        self.btn_send.setFixedHeight(48)
         self.btn_send.setCursor(Qt.PointingHandCursor)
         self.btn_send.setEnabled(False)
         self.btn_send.setStyleSheet(self._btn_style(Theme.PRIMARY, "white", bold=True))
         self.btn_send.clicked.connect(self._send_email)
-        layout.addWidget(self.btn_send)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(10)
+        bottom_row.addWidget(btn_select)
+        bottom_row.addWidget(btn_reset)
+        bottom_row.addWidget(self.btn_save)
+        bottom_row.addStretch()
+        bottom_row.addWidget(self.btn_send)
+        layout.addLayout(bottom_row)
 
         # Version label in footer
         version_row = QHBoxLayout()

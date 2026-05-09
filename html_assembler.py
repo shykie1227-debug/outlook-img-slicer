@@ -37,13 +37,13 @@ def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
     # table 布局是 Outlook 邮件最稳妥的居中方式
     html = f"""
     <!--[if mso]>
-    <table cellpadding="0" cellspacing="0" border="0" width="{original_width}"><tr><td>
+    <table cellpadding="0" cellspacing="0" border="0" width="{original_width}"><tr><td style="text-align: center;">
     <![endif]-->
-    <div style="text-align: center;">
+    <div style="text-align: center; margin: 0 auto; width: {original_width}px;">
         <table cellpadding="0" cellspacing="0" border="0"
-               style="margin: 0 auto; border-collapse: collapse; width: {original_width}px;">
+               style="margin: 0 auto; border-collapse: collapse; width: {original_width}px; text-align: center;">
             <tr>
-                <td style="padding: 0; margin: 0;">
+                <td style="text-align: center; padding: 0; margin: 0;">
                     {img_tags}
                 </td>
             </tr>
