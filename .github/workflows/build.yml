@@ -62,25 +62,11 @@ jobs:
           name: Outlook长图插入工具-V3.0.20260509
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            Outlook长图插入工具.exe
-            Outlook长图插入工具-V3.0.20260509.zip
-          body: |
-            ## Outlook 长图插入工具 V3.0.20260509
-
-            ### 本次更新 (v2026-05-09):
-            - **新增 PPT/PPTX 支持** — 直接拖入幻灯片文件，自动渲染每页并切片插入 Outlook
-            - **修复 PNG 透明通道丢失 bug** — 透明 PNG 不再被强制转为黑色背景
-            - **修复切片扩展名不匹配 bug** — 切片文件扩展名与实际格式一致
-            - **优化打包体积** — 启用 PyInstaller strip，清理多余依赖
-
-            ### V3 完整改进:
-            - 单文件 EXE（双击即用）
-            - CID 嵌入式嵌入（解决 Outlook 图片不显示问题）
-            - CSS 兼容性修复（min-height + visibility）
-            - 按钮自适应宽度（解决字符溢出）
-            - 新增「保存切图」按钮
+        run: |
+          gh release upload v2026-05-09 \
+            "Outlook长图插入工具.exe" \
+            "Outlook长图插入工具-V3.0.20260509.zip" \
+            --repo ${{ github.repository }} \
+            --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
