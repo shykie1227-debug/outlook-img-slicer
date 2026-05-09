@@ -24,10 +24,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          $env:PYTHONIOENCODING = "utf-8"
           pip install pyinstaller pywin32==306 Pillow PySide6 PyMuPDF
 
       - name: Build EXE
+        env:
+          PYTHONIOENCODING: utf-8
         run: python build.py
 
       - name: Compress EXE
