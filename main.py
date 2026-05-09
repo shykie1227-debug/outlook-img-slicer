@@ -26,7 +26,7 @@ from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
-VERSION = "V3.0.20260510"
+VERSION = "V3.0.20260511"
 
 
 class Config:
