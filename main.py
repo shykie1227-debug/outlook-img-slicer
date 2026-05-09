@@ -55,8 +55,8 @@ class Theme:
 def _btn_metric(text: str, font_size: int = 13) -> QSize:
     """估算按钮所需最小尺寸（中文 + 英文通用）"""
     fm = QFontMetrics(QFont("Microsoft YaHei", font_size))
-    w = fm.horizontalAdvance(text) + 80
-    h = max(42, fm.height() + 22)
+    w = fm.horizontalAdvance(text) + 36  # 均匀内边距
+    h = max(38, fm.height() + 16)
     return QSize(w, h)
 
 
