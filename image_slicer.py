@@ -1,10 +1,11 @@
 """
 图像切片器模块
 将长图按指定高度切片，支持 JPG/PNG/BMP/WebP/GIF
-优化说明：增加了对透明通道的处理，确保切片质量。
+优化说明：使用 math.ceil 实现严格等高切片（每片高度一致，向下取整避免越界）。
 """
 import os
 import tempfile
+from math import ceil, floor
 from typing import List
 from pathlib import Path
 from PIL import Image
@@ -12,7 +13,7 @@ from PIL import Image
 
 def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
     """
-    检测图像高度，必要时进行无损切片
+    检测图像高度，必要时进行无损切片（等高切片，每片高度一致）。
 
     Args:
         image_path: 原始图片文件路径
@@ -29,11 +30,10 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
         if orig_h <= max_height:
             return [image_path]
 
-        # 计算需要的切片数量（等分切割）
-        slice_count = (orig_h + max_height - 1) // max_height
-        # 每片高度 = 总高 / 片数（向下取整等分，剩余部分归入最后一片）
-        slice_height = orig_h // slice_count
-        remaining = orig_h - slice_height * slice_count  # 0 ~ slice_count-1
+        # 等高切片：计算切片数量和每片高度（向上取整，再向下取整避免越界）
+        slice_count = ceil(orig_h / max_height)
+        slice_height = floor(orig_h / slice_count)  # 向下取整确保不越界
+
         slice_paths: List[str] = []
         temp_dir = tempfile.gettempdir()
 
@@ -72,10 +72,10 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
 def get_image_info(image_path: str) -> dict:
     """
     获取图片基本元数据
-    
+
     Args:
         image_path: 图片路径
-        
+
     Returns:
         包含 width, height, format 的字典
     """

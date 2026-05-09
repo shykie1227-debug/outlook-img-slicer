@@ -27,7 +27,7 @@ from html_assembler import assemble_html
 from outlook_sender import create_email_with_images
 
 
-VERSION = "V3.0.20260511"
+VERSION = "V3.0.20260512"
 
 
 # ────────────────────────────────────────────
@@ -326,8 +326,6 @@ class MainWindow(QMainWindow):
         self.btn_reset.clicked.connect(self.reset_app)
         toolbar.addWidget(self.btn_reset)
 
-        toolbar.addStretch()
-
         width_lbl = QLabel("显示宽度")
         width_lbl.setFont(_font("Microsoft YaHei", 12))
         width_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
@@ -346,6 +344,7 @@ class MainWindow(QMainWindow):
             f"QSpinBox:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         )
         toolbar.addWidget(self.spin_width)
+        toolbar.addStretch()
 
         root.addLayout(toolbar)
 
@@ -418,8 +417,8 @@ class MainWindow(QMainWindow):
         self.btn_save.setMinimumSize(_btn_size("保存切图到本地", 13, extra_w=36, height=44))
         self.btn_save.clicked.connect(self._save_slices)
 
-        btn_row.addWidget(self.btn_send, stretch=6)
-        btn_row.addWidget(self.btn_save, stretch=4)
+        btn_row.addWidget(self.btn_send, stretch=5)
+        btn_row.addWidget(self.btn_save, stretch=5)
         root.addLayout(btn_row)
 
         # ══ 版本 ════════════════════════════════
