@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 打包配置 - outlook-img-slicer V3.0.20260509
+PyInstaller 打包配置 - outlook-img-slicer V3.0.20260512
 真正的单文件模式（--onefile），优化体积
 """
 import sys
@@ -25,7 +25,9 @@ hiddenimports = [
     "fitz",
     # PPT/PPTX 支持（PyMuPDF 原生支持 PPTX，无需额外依赖）
     "ppt_slicer",
-]
+    # python-pptx（PPT 渲染备用，无 office 环境也能提取嵌入图片）
+    "pptx",
+    "lxml",
 
 a = Analysis(
     ["main.py"],
