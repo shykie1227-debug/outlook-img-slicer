@@ -1,7 +1,6 @@
 """
 HTML 组装器模块
-生成带内联 CSS 的表格 HTML，实现图片在 Outlook 中无缝居中拼接
-V3 改进：CID 嵌入式嵌入 + CSS min-height/visibility 修复 Outlook 显示兼容性
+生成带内联 CSS 的表格 HTML，实现图片在 Outlook 中居中拼接
 """
 from pathlib import Path
 from typing import List, Dict
@@ -9,7 +8,7 @@ from typing import List, Dict
 
 def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
     """
-    生成适用于 Outlook 的 HTML 邮件正文（V3 CID 嵌入版）
+    生成适用于 Outlook 的 HTML 邮件正文，图片居中显示。
 
     Args:
         image_paths: 切片后的图片路径列表
@@ -23,42 +22,34 @@ def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
         cid = f"slice_{i + 1:03d}"
         img_tags += (
             f'<img src="cid:{cid}" '
-            f'width="{original_width}" '
             f'alt="slice_{i + 1}" '
             f'style="'
             f'display: block; '
             f'width: {original_width}px; '
+            f'height: auto; '
+            f'margin: 0 auto; '
             f'border: 0; '
-            f'min-height: 1px; '
-            f'visibility: visible !important; '
             f'" />'
         )
 
-    # table 布局是 Outlook 邮件最稳妥的居中方式
-    html = f"""
-    <!--[if mso]>
-    <table cellpadding="0" cellspacing="0" border="0" width="{original_width}"><tr><td style="text-align: center;">
-    <![endif]-->
-    <div style="text-align: center; margin: 0 auto; width: {original_width}px;">
-        <table cellpadding="0" cellspacing="0" border="0"
-               style="margin: 0 auto; border-collapse: collapse; width: {original_width}px; text-align: center;">
-            <tr>
-                <td style="text-align: center; padding: 0; margin: 0;">
-                    {img_tags}
-                </td>
-            </tr>
-        </table>
-    </div>
-    <!--[if mso]></td></tr></table><![endif]-->
-    """
-    return html.strip()
+    # 简洁的居中表格布局，Outlook 最稳
+    html = (
+        f'<table cellpadding="0" cellspacing="0" border="0" '
+        f'style="margin: 0 auto; border-collapse: collapse; '
+        f'text-align: center; width: {original_width}px;">'
+        f'<tr>'
+        f'<td style="text-align: center; width: {original_width}px; padding: 0; '
+        f'font-size: 0; line-height: 0;">'
+        f'{img_tags}'
+        f'</td>'
+        f'</tr>'
+        f'</table>'
+    )
+    return html
 
 
 def get_cid_map(image_paths: List[str]) -> Dict[int, str]:
     """
     返回 image_paths 索引到 CID 的映射，供 outlook_sender 设置附件 CID 用。
-
-    Returns:
-        {index: "slice_001", ...}
     """
     return {i: f"slice_{i + 1:03d}" for i in range(len(image_paths))}

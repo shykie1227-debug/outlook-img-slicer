@@ -31,8 +31,9 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
 
         # 计算需要的切片数量（等分切割）
         slice_count = (orig_h + max_height - 1) // max_height
-        # 每片高度 = 总高 / 片数（等分）
-        slice_height = (orig_h + slice_count - 1) // slice_count  # ceiling 整除，保证等分
+        # 每片高度 = 总高 / 片数（向下取整等分，剩余部分归入最后一片）
+        slice_height = orig_h // slice_count
+        remaining = orig_h - slice_height * slice_count  # 0 ~ slice_count-1
         slice_paths: List[str] = []
         temp_dir = tempfile.gettempdir()
 
@@ -42,7 +43,8 @@ def detect_and_slice(image_path: str, max_height: int = 1200) -> List[str]:
 
         for i in range(slice_count):
             top = i * slice_height
-            bottom = min((i + 1) * slice_height, orig_h)
+            # 最后一片包含所有剩余高度，其他片用固定 slice_height
+            bottom = top + slice_height if i < slice_count - 1 else orig_h
 
             # 裁剪区域
             slice_img = img.crop((0, top, orig_w, bottom))
