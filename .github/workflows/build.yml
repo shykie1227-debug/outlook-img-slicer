@@ -19,8 +19,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set UTF-8 encoding
+        run: chcp 65001
+
       - name: Install dependencies
         run: |
+          $env:PYTHONIOENCODING = "utf-8"
           pip install pyinstaller pywin32==306 Pillow PySide6 PyMuPDF
 
       - name: Build EXE
