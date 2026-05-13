@@ -14,11 +14,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
     QFrame, QGridLayout, QScrollArea,
-    QSizePolicy, QLineEdit, QSlider,
-    QPlainTextEdit
+    QLineEdit, QSlider
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator
 
 from image_slicer import detect_and_slice, get_image_info, auto_merge_images
 from pdf_slicer import pdf_to_images
@@ -28,14 +27,15 @@ from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "4.0 xiaoming"
+VERSION = "4.1"
+VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
 HQ_QUALITY = 100       # 超清模式 JPEG 质量
 
 
 class Config:
-    APP_TITLE = f"Outlook 长图助手 {VERSION}"
+    APP_TITLE = f"Outlook 长图助手 V{VERSION}"
     DEFAULT_WIDTH = 960
     MAX_HEIGHT_PER_SLICE = 1728
     MAX_SLICE_COUNT = 20
@@ -300,21 +300,29 @@ class MainWindow(QMainWindow):
         width_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         toolbar.addWidget(width_lbl)
 
-        self.width_value_lbl = QLabel(f"{Config.DEFAULT_WIDTH} px")
-        self.width_value_lbl.setFont(_font("Microsoft YaHei", 12, QFont.Bold))
-        self.width_value_lbl.setFixedWidth(100)
-        self.width_value_lbl.setAlignment(Qt.AlignCenter)
-        self.width_value_lbl.setStyleSheet(
-            f"color: {Theme.PRIMARY}; background: {Theme.DROPZONE_HOVER_BG}; "
-            f"border: 1px solid {Theme.PRIMARY}; border-radius: 8px; "
-            f"padding: 4px 8px; font-family: Microsoft YaHei, sans-serif;"
+        self.edit_width = QLineEdit(f"{Config.DEFAULT_WIDTH}")
+        self.edit_width.setFont(_font("Microsoft YaHei", 12))
+        self.edit_width.setValidator(QIntValidator(400, 1920))
+        self.edit_width.setFixedWidth(100)
+        self.edit_width.setFixedHeight(34)
+        self.edit_width.setAlignment(Qt.AlignCenter)
+        self.edit_width.setStyleSheet(
+            f"QLineEdit {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {Theme.BORDER}; border-radius: 8px; "
+            f"padding: 0 8px; font-family: Microsoft YaHei, sans-serif; }}"
+            f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         )
-        toolbar.addWidget(self.width_value_lbl)
+        self.edit_width.editingFinished.connect(self._on_width_edited)
+        px_lbl = QLabel("px")
+        px_lbl.setFont(_font("Microsoft YaHei", 12))
+        px_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
+        toolbar.addWidget(self.edit_width)
+        toolbar.addWidget(px_lbl)
 
         self.slider_width = QSlider(Qt.Horizontal)
         self.slider_width.setRange(400, 1920)
         self.slider_width.setValue(Config.DEFAULT_WIDTH)
-        self.slider_width.setFixedWidth(180)
+        self.slider_width.setFixedWidth(160)
         self.slider_width.setFixedHeight(34)
         self.slider_width.setStyleSheet(
             f"QSlider::groove:horizontal {{ background: {Theme.BORDER}; height: 6px; border-radius: 3px; }}"
@@ -322,7 +330,7 @@ class MainWindow(QMainWindow):
             f"margin: -6px 0; border-radius: 9px; }}"
             f"QSlider::sub-page:horizontal {{ background: {Theme.PRIMARY}; height: 6px; border-radius: 3px; }}"
         )
-        self.slider_width.valueChanged.connect(self._on_width_changed)
+        self.slider_width.valueChanged.connect(self._on_slider_changed)
         toolbar.addWidget(self.slider_width)
 
         self.btn_copy_html = QPushButton("📋 复制HTML")
@@ -412,15 +420,27 @@ class MainWindow(QMainWindow):
         # ══ 版本 ═══════════════════════════
         ver_row = QHBoxLayout()
         ver_row.addStretch()
-        ver_lbl = QLabel(f"v{VERSION}")
-        ver_lbl.setFont(_font("Microsoft YaHei", 11))
-        ver_lbl.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent;")
-        ver_row.addWidget(ver_lbl)
+        ver_col = QVBoxLayout()
+        ver_col.setSpacing(0)
+        ver1 = QLabel(f"V{VERSION}")
+        ver1.setFont(_font("Microsoft YaHei", 11, QFont.Bold))
+        ver1.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent;")
+        ver1.setAlignment(Qt.AlignRight)
+        ver2 = QLabel(VERSION_BY)
+        ver2.setFont(_font("Microsoft YaHei", 10))
+        ver2.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent;")
+        ver2.setAlignment(Qt.AlignRight)
+        ver_col.addWidget(ver1)
+        ver_col.addWidget(ver2)
+        ver_row.addLayout(ver_col)
         root.addLayout(ver_row)
 
     # ── 工具函数 ────────────────────────────
     def _get_width(self) -> int:
-        return self.slider_width.value()
+        try:
+            return int(self.edit_width.text())
+        except ValueError:
+            return Config.DEFAULT_WIDTH
 
     def _set_status(self, text: str, level: str = "info"):
         colors = {"info": Theme.TEXT_SECONDARY, "success": Theme.SUCCESS,
@@ -436,8 +456,21 @@ class MainWindow(QMainWindow):
         self.drop_zone.icon_label.setText("📂")
         self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT，点击上传")
 
-    def _on_width_changed(self, value: int):
-        self.width_value_lbl.setText(f"{value} px")
+    def _on_width_edited(self):
+        """手动输入完成时同步到滑块"""
+        try:
+            v = int(self.edit_width.text())
+            v = max(400, min(1920, v))
+            self.slider_width.blockSignals(True)
+            self.slider_width.setValue(v)
+            self.slider_width.blockSignals(False)
+            self.edit_width.setText(str(v))
+        except ValueError:
+            self.edit_width.setText(str(self.slider_width.value()))
+
+    def _on_slider_changed(self, value: int):
+        """滑块拖动时同步到输入框"""
+        self.edit_width.setText(str(value))
 
     # ── 快捷键 ──────────────────────────────
     def keyPressEvent(self, event: QKeyEvent):
@@ -645,12 +678,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "保存失败", str(exc))
 
     def _copy_html(self):
+        """复制 HTML 到剪贴板（同时写入 HTML 和纯文本格式）"""
         if not self.slice_paths:
             return
         try:
             html = generate_plain_html(self.slice_paths, self._get_width())
-            QGuiApplication.clipboard().setText(html)
-            self._set_status("📋 HTML 已复制到剪贴板，可在 Outlook 中 Ctrl+V 粘贴", "success")
+            mime = QMimeData()
+            # HTML 格式：Outlook/Word 粘贴时正确渲染
+            mime.setHtml(html)
+            # 纯文本格式：作为 fallback
+            mime.setText(html)
+            QGuiApplication.clipboard().setMimeData(mime)
+            self._set_status("📋 HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
         except Exception as exc:
             QMessageBox.critical(self, "复制失败", str(exc))
 
@@ -725,8 +764,8 @@ class MainWindow(QMainWindow):
             self.worker = None
         self._reset_drop_zone()
         self.input_subject.clear()
+        self.edit_width.setText(str(Config.DEFAULT_WIDTH))
         self.slider_width.setValue(Config.DEFAULT_WIDTH)
-        self.width_value_lbl.setText(f"{Config.DEFAULT_WIDTH} px")
         self.preview_area.hide()
         self.btn_send.setEnabled(False)
         self.btn_save.setEnabled(False)
