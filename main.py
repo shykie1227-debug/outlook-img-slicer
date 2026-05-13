@@ -1,6 +1,6 @@
 """
-Outlook 长图无损插入工具 - 主程序 V3
-PySide6 窗口应用，支持拖拽上传、自动切片及 Outlook 自动化发送
+Outlook 长图无损插入工具 - 主程序 V4
+PySide6 窗口应用，支持拖拽上传、自动切片、邮件体积检测、一键复制HTML、多图合并
 """
 import os
 import sys
@@ -14,25 +14,25 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
     QFrame, QGridLayout, QScrollArea,
-    QSizePolicy, QLineEdit, QSpinBox,
+    QSizePolicy, QLineEdit, QSlider,
     QPlainTextEdit
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication
 
-from image_slicer import detect_and_slice, get_image_info
+from image_slicer import detect_and_slice, get_image_info, auto_merge_images
 from pdf_slicer import pdf_to_images
 from ppt_slicer import pptx_to_images
-from html_assembler import assemble_html
+from html_assembler import assemble_html, generate_plain_html
 from outlook_sender import create_email_with_images
+from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "V3.0.20260512"
+VERSION = "4.0 xiaoming"
+MAX_EMAIL_SIZE_MB = 20
+COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
+HQ_QUALITY = 100       # 超清模式 JPEG 质量
 
-
-# ────────────────────────────────────────────
-# 配置 & 主题
-# ────────────────────────────────────────────
 
 class Config:
     APP_TITLE = f"Outlook 长图助手 {VERSION}"
@@ -40,49 +40,40 @@ class Config:
     MAX_HEIGHT_PER_SLICE = 1728
     MAX_SLICE_COUNT = 20
     WINDOW_WIDTH = 720
-    WINDOW_HEIGHT = 780
+    WINDOW_HEIGHT = 640
     SUPPORTED_EXTENSIONS = (
         ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf", ".pptx", ".ppt"
     )
 
 
 class Theme:
-    # Primary
     PRIMARY = "#0078D4"
     PRIMARY_HOVER = "#2563EB"
     PRIMARY_ACTIVE = "#1D4ED8"
     PRIMARY_DISABLED = "#BFDBFE"
     PRIMARY_TEXT = "#FFFFFF"
-    # Secondary (辅助按钮)
     SECONDARY_BG = "#FFFFFF"
     SECONDARY_HOVER = "#F3F4F6"
     SECONDARY_BORDER = "#D1D5DB"
     SECONDARY_TEXT = "#374151"
-    # Ghost (工具类操作)
     GHOST_BG = "#F3F4F6"
     GHOST_HOVER = "#E5E7EB"
     GHOST_TEXT = "#374151"
-    # Functional
     SUCCESS = "#10B981"
     ERROR = "#EF4444"
     WARNING = "#F59E0B"
-    # Surface
     BG = "#F0F2F5"
     CARD = "#FFFFFF"
     BORDER = "#E4E7EC"
     BORDER_HOVER = "#C8CDD6"
     BORDER_FOCUS = "#0078D4"
-    # Text
     TEXT_PRIMARY = "#111827"
     TEXT_SECONDARY = "#6B7280"
     TEXT_PLACEHOLDER = "#9CA3AF"
     TEXT_DISABLED = "#C8CDD6"
-    # DropZone
     DROPZONE_IDLE_BORDER = "#D1D5DB"
     DROPZONE_HOVER_BG = "#EFF6FF"
     DROPZONE_HOVER_BORDER = "#0078D4"
-    # Section separator
-    SEPARATOR = "#F0F2F5"
 
 
 def _font(family: str = "Microsoft YaHei", size: int = 12, weight: int = QFont.Normal) -> QFont:
@@ -93,10 +84,6 @@ def _btn_size(text: str, font_size: int = 13, extra_w: int = 36, height: int = 3
     fm = QFontMetrics(QFont("Microsoft YaHei", font_size))
     return QSize(fm.horizontalAdvance(text) + extra_w, height)
 
-
-# ────────────────────────────────────────────
-# 组件样式字符串（集中管理）
-# ────────────────────────────────────────────
 
 def _btn_primary() -> str:
     return (
@@ -130,10 +117,10 @@ def _btn_ghost() -> str:
 
 def _input_style() -> str:
     return (
-        f"QLineEdit, QSpinBox {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
+        f"QLineEdit {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
         f"border: 1px solid {Theme.BORDER}; border-radius: 8px; "
         f"padding: 0 12px; font-family: Microsoft YaHei, sans-serif; }}"
-        f"QLineEdit:focus, QSpinBox:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
+        f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         f"QLineEdit::placeholder {{ color: {Theme.TEXT_PLACEHOLDER}; }}"
     )
 
@@ -143,7 +130,7 @@ def _input_style() -> str:
 # ────────────────────────────────────────────
 
 class DropZone(QFrame):
-    file_dropped = Signal(str)
+    file_dropped = Signal(list)  # 传出多路径列表
     clicked = Signal()
 
     def __init__(self, parent=None):
@@ -163,12 +150,10 @@ class DropZone(QFrame):
         self.icon_label = QLabel("📂")
         self.icon_label.setAlignment(Qt.AlignCenter)
         self.icon_label.setStyleSheet("font-size: 44px; background: transparent; border: none;")
-
         self.title_label = QLabel("拖拽图片到此处")
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
         self.title_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; border: none;")
-
         self.tip_label = QLabel("支持 JPG · PNG · PDF · PPT，点击上传")
         self.tip_label.setAlignment(Qt.AlignCenter)
         self.tip_label.setFont(_font("Microsoft YaHei", 12))
@@ -182,19 +167,14 @@ class DropZone(QFrame):
         border = Theme.DROPZONE_HOVER_BORDER if self._hovered else Theme.DROPZONE_IDLE_BORDER
         bg = Theme.DROPZONE_HOVER_BG if self._hovered else Theme.CARD
         self.setStyleSheet(
-            f"QFrame {{ background: {bg}; border: 2px dashed {border}; "
-            f"border-radius: 14px; }}"
+            f"QFrame {{ background: {bg}; border: 2px dashed {border}; border-radius: 14px; }}"
         )
 
     def enterEvent(self, event):
-        self._hovered = True
-        self._apply_style()
-        super().enterEvent(event)
+        self._hovered = True; self._apply_style(); super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._hovered = False
-        self._apply_style()
-        super().leaveEvent(event)
+        self._hovered = False; self._apply_style(); super().leaveEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -204,27 +184,18 @@ class DropZone(QFrame):
             self.title_label.setText("松开以上传")
 
     def dragLeaveEvent(self, event):
-        self._hovered = False
-        self._apply_style()
+        self._hovered = False; self._apply_style()
         self.title_label.setText("拖拽图片到此处")
 
     def dropEvent(self, event: QDropEvent):
-        self._hovered = False
-        self._apply_style()
+        self._hovered = False; self._apply_style()
         if urls := event.mimeData().urls():
-            path = urls[0].toLocalFile()
-            self._submit(path)
+            self.file_dropped.emit([u.toLocalFile() for u in urls])
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
-
-    def _submit(self, path: str):
-        if Path(path).suffix.lower() in Config.SUPPORTED_EXTENSIONS:
-            self.file_dropped.emit(path)
-        else:
-            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF 或 PPT 文件。")
 
 
 # ────────────────────────────────────────────
@@ -242,7 +213,6 @@ class ProcessWorker(QThread):
         self.width = width
 
     def _convert_and_slice(self, converter_fn, prefix: str, p_before: int, p_after: int) -> List[str]:
-        """PDF/PPT 通用转换 + 切片，消除重复代码"""
         images = converter_fn(self.file_path)
         self.progress.emit(p_before)
         temp_dir = tempfile.gettempdir()
@@ -252,10 +222,9 @@ class ProcessWorker(QThread):
             image.save(path)
             slice_paths.append(path)
         self.progress.emit(p_after)
-        # 每页结果若高度超限则二次切片
         final = []
         for p in slice_paths:
-            final.extend(detect_and_slice(p, max_height=Config.MAX_HEIGHT_PER_SLICE))
+            final.extend(detect_and_slice(p, max_height=1728, smart=True))
         return final
 
     def run(self):
@@ -267,7 +236,7 @@ class ProcessWorker(QThread):
             elif ext in (".pptx", ".ppt"):
                 slice_paths = self._convert_and_slice(pptx_to_images, "ppt_page", 45, 75)
             else:
-                slice_paths = detect_and_slice(self.file_path, max_height=Config.MAX_HEIGHT_PER_SLICE)
+                slice_paths = detect_and_slice(self.file_path, max_height=1728, smart=True)
             self.progress.emit(100)
             self.finished.emit(slice_paths)
         except Exception as exc:
@@ -282,39 +251,39 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.slice_paths: List[str] = []
-        self.file_path: Optional[str] = None
+        self.all_file_paths: List[str] = []
         self.worker: Optional[ProcessWorker] = None
         self._build_ui()
 
     def _build_ui(self):
         self.setWindowTitle(Config.APP_TITLE)
-        self.setMinimumSize(480, 640)
+        self.setMinimumSize(480, 660)
         self.resize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
 
         container = QWidget()
         self.setCentralWidget(container)
         root = QVBoxLayout(container)
         root.setContentsMargins(24, 20, 24, 16)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
-        # ══ Header ══════════════════════════════
-        title = QLabel("Outlook 长图无损插入")
+        # ══ Header ════════════════════════════
+        title = QLabel("Outlook 长图助手 V4")
         title.setFont(_font("Microsoft YaHei", 20, QFont.Bold))
         title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent;")
         root.addWidget(title)
 
-        subtitle = QLabel("自动识别图片/PDF/PPT，切片后插入邮件正文，保持原始清晰度")
+        subtitle = QLabel("长图/PDF/PPT切片后插入Outlook邮件，保持原始清晰度")
         subtitle.setFont(_font("Microsoft YaHei", 12))
         subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         root.addWidget(subtitle)
 
-        # ══ Drop Zone ════════════════════════════
+        # ══ Drop Zone ════════════════════════
         self.drop_zone = DropZone()
-        self.drop_zone.file_dropped.connect(self._handle_file)
+        self.drop_zone.file_dropped.connect(self._handle_dropped_files)
         self.drop_zone.clicked.connect(self._select_file)
         root.addWidget(self.drop_zone)
 
-        # ══ 工具栏（重置 + 宽度） ══════════════
+        # ══ 工具栏（重置 + 宽度 + 复制HTML） ═══
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
@@ -326,36 +295,49 @@ class MainWindow(QMainWindow):
         self.btn_reset.clicked.connect(self.reset_app)
         toolbar.addWidget(self.btn_reset)
 
-        width_lbl = QLabel("显示宽度")
+        width_lbl = QLabel("宽度：")
         width_lbl.setFont(_font("Microsoft YaHei", 12))
         width_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         toolbar.addWidget(width_lbl)
 
-        # 计算 SpinBox 最小宽度：能容纳最大数值 + suffix
-        spin_font = QFont("Microsoft YaHei", 12)
-        spin_metrics = QFontMetrics(spin_font)
-        max_num_w = spin_metrics.horizontalAdvance("1920")  # range max
-        suffix_w = spin_metrics.horizontalAdvance(" px")
-        spin_min_w = max_num_w + suffix_w + 24  # padding左右 + margin
-        self.spin_width = QSpinBox()
-        self.spin_width.setFont(_font("Microsoft YaHei", 12))
-        self.spin_width.setRange(400, 1920)
-        self.spin_width.setValue(Config.DEFAULT_WIDTH)
-        self.spin_width.setSuffix(" px")
-        self.spin_width.setMinimumWidth(spin_min_w)
-        self.spin_width.setFixedHeight(34)
-        self.spin_width.setStyleSheet(
-            f"QSpinBox {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
-            f"border: 1px solid {Theme.BORDER}; border-radius: 8px; "
-            f"padding: 0 8px; font-family: Microsoft YaHei, sans-serif; }}"
-            f"QSpinBox:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
+        self.width_value_lbl = QLabel(f"{Config.DEFAULT_WIDTH} px")
+        self.width_value_lbl.setFont(_font("Microsoft YaHei", 12, QFont.Bold))
+        self.width_value_lbl.setFixedWidth(100)
+        self.width_value_lbl.setAlignment(Qt.AlignCenter)
+        self.width_value_lbl.setStyleSheet(
+            f"color: {Theme.PRIMARY}; background: {Theme.DROPZONE_HOVER_BG}; "
+            f"border: 1px solid {Theme.PRIMARY}; border-radius: 8px; "
+            f"padding: 4px 8px; font-family: Microsoft YaHei, sans-serif;"
         )
-        toolbar.addWidget(self.spin_width)
-        toolbar.addStretch()
+        toolbar.addWidget(self.width_value_lbl)
 
+        self.slider_width = QSlider(Qt.Horizontal)
+        self.slider_width.setRange(400, 1920)
+        self.slider_width.setValue(Config.DEFAULT_WIDTH)
+        self.slider_width.setFixedWidth(180)
+        self.slider_width.setFixedHeight(34)
+        self.slider_width.setStyleSheet(
+            f"QSlider::groove:horizontal {{ background: {Theme.BORDER}; height: 6px; border-radius: 3px; }}"
+            f"QSlider::handle:horizontal {{ background: {Theme.PRIMARY}; width: 18px; height: 18px; "
+            f"margin: -6px 0; border-radius: 9px; }}"
+            f"QSlider::sub-page:horizontal {{ background: {Theme.PRIMARY}; height: 6px; border-radius: 3px; }}"
+        )
+        self.slider_width.valueChanged.connect(self._on_width_changed)
+        toolbar.addWidget(self.slider_width)
+
+        self.btn_copy_html = QPushButton("📋 复制HTML")
+        self.btn_copy_html.setFont(_font("Microsoft YaHei", 12))
+        self.btn_copy_html.setCursor(Qt.PointingHandCursor)
+        self.btn_copy_html.setEnabled(False)
+        self.btn_copy_html.setStyleSheet(_btn_ghost())
+        self.btn_copy_html.setFixedSize(_btn_size("📋 复制HTML", 12, extra_w=20, height=34))
+        self.btn_copy_html.clicked.connect(self._copy_html)
+        toolbar.addWidget(self.btn_copy_html)
+
+        toolbar.addStretch()
         root.addLayout(toolbar)
 
-        # ══ 邮件标题 ════════════════════════════
+        # ══ 邮件标题 ════════════════════════
         subject_lbl = QLabel("邮件标题（可选）")
         subject_lbl.setFont(_font("Microsoft YaHei", 12))
         subject_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
@@ -368,7 +350,7 @@ class MainWindow(QMainWindow):
         self.input_subject.setStyleSheet(_input_style())
         root.addWidget(self.input_subject)
 
-        # ══ 预览区 ═════════════════════════════
+        # ══ 预览区 ═════════════════════════
         self.preview_area = QScrollArea()
         self.preview_area.setWidgetResizable(True)
         self.preview_area.setFixedHeight(140)
@@ -384,7 +366,7 @@ class MainWindow(QMainWindow):
         self.preview_area.hide()
         root.addWidget(self.preview_area)
 
-        # ══ 进度条 ══════════════════════════════
+        # ══ 进度条 ═════════════════════════
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(4)
         self.progress_bar.setTextVisible(False)
@@ -395,13 +377,14 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         root.addWidget(self.progress_bar)
 
-        # ══ 状态 ═══════════════════════════════
+        # ══ 状态 ═══════════════════════════
         self.status_label = QLabel("")
         self.status_label.setFont(_font("Microsoft YaHei", 12))
+        self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         root.addWidget(self.status_label)
 
-        # ══ 底部按钮区（一行并排，主次分明） ═══════
+        # ══ 底部按钮区 ═════════════════════
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.setContentsMargins(0, 4, 0, 0)
@@ -412,23 +395,21 @@ class MainWindow(QMainWindow):
         self.btn_send.setEnabled(False)
         self.btn_send.setStyleSheet(_btn_primary())
         self.btn_send.setFixedHeight(44)
-        self.btn_send.setMinimumSize(_btn_size("创建 Outlook 邮件", 14, extra_w=48, height=44))
         self.btn_send.clicked.connect(self._send_email)
 
-        self.btn_save = QPushButton("保存切图到本地")
+        self.btn_save = QPushButton("保存切图")
         self.btn_save.setFont(_font("Microsoft YaHei", 13, QFont.Medium))
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setEnabled(False)
         self.btn_save.setStyleSheet(_btn_secondary())
         self.btn_save.setFixedHeight(44)
-        self.btn_save.setMinimumSize(_btn_size("保存切图到本地", 13, extra_w=36, height=44))
         self.btn_save.clicked.connect(self._save_slices)
 
         btn_row.addWidget(self.btn_send, stretch=5)
         btn_row.addWidget(self.btn_save, stretch=5)
         root.addLayout(btn_row)
 
-        # ══ 版本 ════════════════════════════════
+        # ══ 版本 ═══════════════════════════
         ver_row = QHBoxLayout()
         ver_row.addStretch()
         ver_lbl = QLabel(f"v{VERSION}")
@@ -437,21 +418,28 @@ class MainWindow(QMainWindow):
         ver_row.addWidget(ver_lbl)
         root.addLayout(ver_row)
 
-    # ── 状态统一设置 ──────────────────────────
+    # ── 工具函数 ────────────────────────────
+    def _get_width(self) -> int:
+        return self.slider_width.value()
+
     def _set_status(self, text: str, level: str = "info"):
-        colors = {
-            "info": Theme.TEXT_SECONDARY,
-            "success": Theme.SUCCESS,
-            "error": Theme.ERROR,
-            "warning": Theme.WARNING,
-        }
+        colors = {"info": Theme.TEXT_SECONDARY, "success": Theme.SUCCESS,
+                  "error": Theme.ERROR, "warning": Theme.WARNING}
         self.status_label.setText(text)
         self.status_label.setStyleSheet(
             f"color: {colors.get(level, Theme.TEXT_SECONDARY)}; "
             f"font-size: 12px; background: transparent;"
         )
 
-    # ── 快捷键 ────────────────────────────────
+    def _reset_drop_zone(self):
+        self.drop_zone.title_label.setText("拖拽图片到此处")
+        self.drop_zone.icon_label.setText("📂")
+        self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT，点击上传")
+
+    def _on_width_changed(self, value: int):
+        self.width_value_lbl.setText(f"{value} px")
+
+    # ── 快捷键 ──────────────────────────────
     def keyPressEvent(self, event: QKeyEvent):
         mod = event.modifiers()
         if (mod & Qt.ControlModifier) and event.key() == Qt.Key_O:
@@ -463,13 +451,14 @@ class MainWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    # ── 文件输入 ────────────────────────────
     def _select_file(self):
-        path, _ = QFileDialog.getOpenFileName(
+        paths, _ = QFileDialog.getOpenFileNames(
             self, "选择图片、PDF 或 PPT", "",
             "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf);;PPT/PPTX (*.pptx *.ppt)"
         )
-        if path:
-            self._handle_file(path)
+        if paths:
+            self._handle_dropped_files(paths)
 
     def _paste_image(self):
         image = QGuiApplication.clipboard().image()
@@ -479,24 +468,90 @@ class MainWindow(QMainWindow):
         temp_dir = tempfile.gettempdir()
         temp_path = os.path.join(temp_dir, f"paste_{os.getpid()}.png")
         image.save(temp_path)
-        self._handle_file(temp_path)
+        self._handle_dropped_files([temp_path])
 
-    def _handle_file(self, path: str):
+    def _handle_dropped_files(self, paths: List[str]):
+        """入口：处理一次拖入/选择的一批文件"""
+        # 过滤合法后缀
+        valid = [p for p in paths if Path(p).suffix.lower() in Config.SUPPORTED_EXTENSIONS]
+        if not valid:
+            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF 或 PPT 文件。")
+            return
+
+        if len(valid) > 1:
+            # 按文件名自然排序，保证顺序可预测
+            import re
+            def natural_key(s):
+                return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', Path(s).stem)]
+            valid.sort(key=natural_key)
+            self._handle_multi_files(valid)
+        else:
+            self._start_processing(valid[0])
+
+    def _handle_multi_files(self, paths: List[str]):
+        """多张图片 → 弹框询问是否智能拼图"""
+        btn_box = QMessageBox(self)
+        btn_box.setWindowTitle("智能拼图")
+        btn_box.setIcon(QMessageBox.Question)
+        btn_box.setText(f"检测到 {len(paths)} 张图片")
+        btn_box.setInformativeText(
+            "智能拼图将多张图片纵向拼接为一张长图，<b>保存后可继续拖入新图</b>"
+        )
+        btn_merge = btn_box.addButton("🗜️ 智能拼图", QMessageBox.AcceptRole)
+        btn_single = btn_box.addButton("📄 只取第一张", QMessageBox.NoRole)
+        btn_cancel = btn_box.addButton("取消", QMessageBox.RejectRole)
+        btn_box.setDefaultButton(btn_merge)
+        btn_box.exec()
+        if btn_box.clickedButton() == btn_cancel:
+            return
+        if btn_box.clickedButton() == btn_single:
+            # 仅处理第一张
+            self._start_processing(paths[0])
+            self._set_status("💡 多图模式下仅处理了第一张图片，其余已忽略", "info")
+            return
+
+        # ── 智能拼图 ──────────────────────────
+        self._set_status("正在智能拼接多张图片...", "info")
+        try:
+            merged_path = auto_merge_images(paths, direction="vertical")
+            # 保存合并后的图片
+            save_dir = QFileDialog.getExistingDirectory(self, "选择保存合并图片的位置", "")
+            if not save_dir:
+                QMessageBox.information(self, "提示", "已取消保存，合并后的图片仅用于本次临时切片。")
+            else:
+                fname = f"merged_{os.getpid()}.jpg"
+                save_path = os.path.join(save_dir, fname)
+                shutil.copy2(merged_path, save_path)
+                self._set_status(f"✅ 合并图片已保存至：{save_path}", "success")
+
+            # 合并完成，清空拖拽区
+            self.reset_app()
+            self._set_status(f"✅ 合并图片已保存，可继续拖入新图片", "success")
+        except Exception as exc:
+            QMessageBox.critical(self, "拼图失败", str(exc))
+
+    def _start_processing(self, path: str):
+        """单图/合并后处理的统一入口"""
         ext = Path(path).suffix.lower()
-        self.file_path = path
-        self.drop_zone.title_label.setText(Path(path).name)
-        self.drop_zone.icon_label.setText("✅")
-        self.drop_zone.tip_label.setText("正在处理...")
+        # 安全检查
+        if ext not in (".pdf", ".pptx", ".ppt"):
+            try:
+                check_image_safety(path)
+            except ImageSafetyError as e:
+                reply = QMessageBox.warning(
+                    self, "图片安全检查未通过",
+                    f"{e}\n\n是否仍要处理？（可能导致程序卡死）",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
 
-        # 图片文件先估算切片数量
+        # 检查切片数量
         if ext not in (".pdf", ".pptx", ".ppt"):
             try:
                 info = get_image_info(path)
-                orig_h = info["height"]
-                sc = (orig_h + Config.MAX_HEIGHT_PER_SLICE - 1) // Config.MAX_HEIGHT_PER_SLICE
+                sc = (info["height"] + Config.MAX_HEIGHT_PER_SLICE - 1) // Config.MAX_HEIGHT_PER_SLICE
                 sc = max(1, sc)
-                self.drop_zone.tip_label.setText(f"预计生成 {sc} 张切片")
-
                 if sc > Config.MAX_SLICE_COUNT:
                     reply = QMessageBox.warning(
                         self, "切片数量较多",
@@ -504,12 +559,14 @@ class MainWindow(QMainWindow):
                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                     )
                     if reply != QMessageBox.Yes:
-                        self._reset_drop_zone()
                         return
-            except Exception as exc:
-                QMessageBox.critical(self, "处理失败", str(exc))
-                return
+            except Exception:
+                pass
 
+        self.file_path = path
+        self.drop_zone.title_label.setText(Path(path).name)
+        self.drop_zone.icon_label.setText("✅")
+        self.drop_zone.tip_label.setText("正在切片处理...")
         self._set_status("正在处理，请稍候...", "info")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
@@ -519,8 +576,7 @@ class MainWindow(QMainWindow):
         if self.worker is not None:
             self.worker.deleteLater()
             self.worker = None
-        width = self.spin_width.value()
-        self.worker = ProcessWorker(path, width)
+        self.worker = ProcessWorker(path, self._get_width())
         self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self._on_processed)
         self.worker.error.connect(self._on_error)
@@ -531,7 +587,15 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self.btn_send.setEnabled(bool(paths))
         self.btn_save.setEnabled(bool(paths))
-        self._set_status(f"✅ 已生成 {len(paths)} 张切片，点击「创建 Outlook 邮件」发送", "success")
+        self.btn_copy_html.setEnabled(bool(paths))
+
+        # 体积检测
+        size_mb = estimate_email_size_mb(paths) if paths else 0
+        self._set_status(
+            f"✅ 已生成 {len(paths)} 张切片 | 预计 {size_mb}MB"
+            + (" ⚠️ 超过推荐大小(20MB)，发送时可选择压缩" if size_mb > MAX_EMAIL_SIZE_MB else ""),
+            "warning" if size_mb > MAX_EMAIL_SIZE_MB else "success"
+        )
         self._show_thumbnails(paths)
         if self.worker:
             self.worker.deleteLater()
@@ -550,7 +614,6 @@ class MainWindow(QMainWindow):
             item = self.thumb_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-
         cols = 4
         for i, path in enumerate(paths):
             row, col = divmod(i, cols)
@@ -558,8 +621,7 @@ class MainWindow(QMainWindow):
             thumb.setFixedSize(120, 100)
             thumb.setScaledContents(True)
             thumb.setStyleSheet(
-                f"background: {Theme.CARD}; border-radius: 8px; "
-                f"border: 1px solid {Theme.BORDER};"
+                f"background: {Theme.CARD}; border-radius: 8px; border: 1px solid {Theme.BORDER};"
             )
             pixmap = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             thumb.setPixmap(pixmap)
@@ -582,40 +644,93 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
 
-    def _send_email(self):
+    def _copy_html(self):
         if not self.slice_paths:
             return
         try:
-            width = self.spin_width.value()
-            html_content = assemble_html(self.slice_paths, width)
+            html = generate_plain_html(self.slice_paths, self._get_width())
+            QGuiApplication.clipboard().setText(html)
+            self._set_status("📋 HTML 已复制到剪贴板，可在 Outlook 中 Ctrl+V 粘贴", "success")
+        except Exception as exc:
+            QMessageBox.critical(self, "复制失败", str(exc))
+
+    def _compress_slices(self):
+        """
+        将切片压缩为较低品质的 JPEG，原地替换。
+
+        基于开源项目实现:
+        - Pillow (python-pillow/Pillow ⭐13k) https://github.com/python-pillow/Pillow
+          JPEG 压缩: https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html#jpeg
+        - MozJPEG (mozilla/mozjpeg ⭐2.8k) 感知量化表
+          https://github.com/mozilla/mozjpeg
+        """
+        if not self.slice_paths:
+            return
+        from PIL import Image
+        for i, p in enumerate(self.slice_paths):
+            img = Image.open(p)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(p, format="JPEG", quality=COMPRESS_QUALITY, optimize=True)
+
+    def _send_email(self):
+        if not self.slice_paths:
+            return
+
+        # 体积检测 + 压缩询问
+        size_mb = estimate_email_size_mb(self.slice_paths)
+        if size_mb > MAX_EMAIL_SIZE_MB:
+            btn_box = QMessageBox(self)
+            btn_box.setWindowTitle("邮件体积较大")
+            btn_box.setIcon(QMessageBox.Warning)
+            btn_box.setText(f"预计 {size_mb}MB，超过推荐限制（{MAX_EMAIL_SIZE_MB}MB）")
+            btn_box.setInformativeText(
+                f"<b>压缩后</b> 缩小至约 {COMPRESS_QUALITY}% 品质（推荐）\n"
+                f"<b>原画质</b> 保持当前品质直接发送"
+            )
+            btn_compress = btn_box.addButton(f"🔽 压缩至 {COMPRESS_QUALITY}%", QMessageBox.AcceptRole)
+            btn_original = btn_box.addButton("🎨 原画质发送", QMessageBox.NoRole)
+            btn_cancel = btn_box.addButton("取消", QMessageBox.RejectRole)
+            btn_box.setDefaultButton(btn_compress)
+            btn_box.exec()
+            if btn_box.clickedButton() == btn_cancel:
+                self._set_status(
+                    "💡 已取消发送，可先「保存切图」手动压缩后再编辑",
+                    "warning"
+                )
+                return
+            if btn_box.clickedButton() == btn_compress:
+                self._compress_slices()
+                self._set_status(
+                    f"🔽 已压缩至约 {estimate_email_size_mb(self.slice_paths)}MB，正在打开邮件...",
+                    "success"
+                )
+
+        try:
+            html_content = assemble_html(self.slice_paths, self._get_width())
             subject = self.input_subject.text().strip() or "长图邮件"
             create_email_with_images(
-                html_content,
-                subject=subject,
-                to="",
-                image_paths=self.slice_paths
+                html_content, subject=subject, to="", image_paths=self.slice_paths
             )
             self._set_status("✅ 邮件窗口已打开，请检查后发送", "success")
         except Exception as exc:
             QMessageBox.critical(self, "发送失败", str(exc))
 
-    def _reset_drop_zone(self):
-        self.drop_zone.title_label.setText("拖拽图片到此处")
-        self.drop_zone.icon_label.setText("📂")
-        self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT，点击上传")
-
     def reset_app(self):
         self.slice_paths = []
         self.file_path = None
+        self.all_file_paths = []
         if self.worker is not None:
             self.worker.deleteLater()
             self.worker = None
         self._reset_drop_zone()
         self.input_subject.clear()
-        self.spin_width.setValue(Config.DEFAULT_WIDTH)
+        self.slider_width.setValue(Config.DEFAULT_WIDTH)
+        self.width_value_lbl.setText(f"{Config.DEFAULT_WIDTH} px")
         self.preview_area.hide()
         self.btn_send.setEnabled(False)
         self.btn_save.setEnabled(False)
+        self.btn_copy_html.setEnabled(False)
         self._set_status("")
 
 

@@ -292,10 +292,24 @@ def insert_images_to_outlook(image_paths: list[str], subject: str = "") -> bool:
 
 ## 8. 技术选型理由
 
-| 依赖 | 选型 | 理由 |
-|---|---|---|
-| UI 框架 | PySide6 | LGPL 授权，官方维护，功能完整 |
-| 图像处理 | Pillow | Python 图像处理标准库，切片 crop() 满足需求 |
-| PDF 解析 | PyMuPDF | 保留作为备选（若未来支持 PDF 内图片提取）|
-| Outlook 自动化 | pywin32 | Windows COM 自动化 Outlook 的标准方案 |
-| 打包 | Nuitka > PyInstaller | Nuitka 编译性能更好，单文件打包更干净 |
+| 依赖 | 选型 | 理由 | 开源项目 |
+|---|---|---|---|
+| UI 框架 | PySide6 | LGPL 授权，官方维护，功能完整 | Qt (qt.io) |
+| 图像处理 | Pillow 10+ | 切片/合并/压缩核心库 | python-pillow/Pillow ⭐13k |
+| 图片压缩参考 | MozJPEG 算法 | 感知量化优化 JPEG 体积 | mozilla/mozjpeg ⭐2.8k |
+| 图片拼接参考 | Pillow paste | 纵向居中拼接 | nkmk/python-snippets ⭐317 |
+| PDF 解析 | PyMuPDF | 保留作为备选 | pymupdf/PyMuPDF |
+| Outlook 自动化 | pywin32 | Windows COM 自动化 Outlook 的标准方案 | mhammond/pywin32 |
+| 打包 | PyInstaller | --onefile 单文件 exe | pyinstaller/pyinstaller |
+
+## 9. 参考的开源项目
+
+| 项目 | GitHub | 用途 |
+|------|--------|------|
+| Pillow | https://github.com/python-pillow/Pillow | 所有图像处理（切片/合并/压缩/格式转换）|
+| MozJPEG | https://github.com/mozilla/mozjpeg | JPEG 压缩量化表参考 |
+| nkmk/python-snippets | https://github.com/nkmk/python-snippets | Pillow concat 拼接模式参考 |
+| PyInstaller | https://github.com/pyinstaller/pyinstaller | 单文件 EXE 打包 |
+| PySide6 | https://pypi.org/project/PySide6/ | Qt6 UI 框架 |
+| PyMuPDF | https://github.com/pymupdf/PyMuPDF | PDF 渲染 |
+| python-pptx | https://github.com/scanny/python-pptx | PPTX 幻灯片提取 |

@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 打包配置 - outlook-img-slicer V3.0.20260512
+PyInstaller 打包配置 - outlook-img-slicer V4.0.20260513
 真正的单文件模式（--onefile），优化体积
 """
 import sys
@@ -28,6 +28,9 @@ hiddenimports = [
     # python-pptx（PPT 渲染备用，无 office 环境也能提取嵌入图片）
     "pptx",
     "lxml",
+    # V4 新增模块
+    "image_safety",
+    "html_assembler",
 ]
 
 a = Analysis(
