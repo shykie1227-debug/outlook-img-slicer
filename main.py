@@ -27,7 +27,7 @@ from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "4.1"
+VERSION = "4.2"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -457,10 +457,15 @@ class MainWindow(QMainWindow):
         self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT，点击上传")
 
     def _on_width_edited(self):
-        """手动输入完成时同步到滑块"""
+        """手动输入完成时同步到滑块，超限弹窗提醒"""
         try:
             v = int(self.edit_width.text())
-            v = max(400, min(1920, v))
+            if v < 400:
+                QMessageBox.warning(self, "宽度超限", "宽度最小为 400px，已自动调整为 400px")
+                v = 400
+            elif v > 1920:
+                QMessageBox.warning(self, "宽度超限", "宽度最大为 1920px，已自动调整为 1920px")
+                v = 1920
             self.slider_width.blockSignals(True)
             self.slider_width.setValue(v)
             self.slider_width.blockSignals(False)
