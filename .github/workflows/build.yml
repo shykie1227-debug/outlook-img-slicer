@@ -1,0 +1,72 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [v3-2026-05-09]
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set UTF-8 encoding
+        run: chcp 65001
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller pywin32==306 Pillow PySide6 PyMuPDF
+
+      - name: Build EXE
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python build.py
+
+      - name: Compress EXE
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/Outlook长图插入工具.exe" -DestinationPath "dist/Outlook长图插入工具-V3.0.20260509.zip" -Force
+          Write-Host "Compressed size:"
+          (Get-Item "dist/Outlook长图插入工具-V3.0.20260509.zip").Length / 1MB
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Outlook长图插入工具-V3.0.20260509
+          path: |
+            dist/Outlook长图插入工具.exe
+            dist/Outlook长图插入工具-V3.0.20260509.zip
+          retention-days: 5
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+
+    steps:
+      - name: Download EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: Outlook长图插入工具-V3.0.20260509
+
+      - name: Create Release
+        run: |
+          gh release upload v2026-05-09 \
+            "Outlook长图插入工具.exe" \
+            "Outlook长图插入工具-V3.0.20260509.zip" \
+            --repo ${{ github.repository }} \
+            --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
