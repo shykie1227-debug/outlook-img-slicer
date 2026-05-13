@@ -3,40 +3,47 @@ HTML 组装器模块
 生成仅用 <table> + inline-style 的 HTML，适配 Outlook 渲染引擎。
 禁止使用：flex · grid · position
 仅用：table · inline-style
+
+Outlook/Word 图片渲染要点：
+- 必须设 width+height 双属性，Word 才不拉伸变形
+- 用 HTML width/height 属性而非 CSS（Word 对 CSS 支持差）
 """
 from pathlib import Path
 from typing import List, Dict
+from PIL import Image
+
+
+def _get_img_dimensions(img_path: str) -> tuple:
+    """获取图片实际像素尺寸"""
+    with Image.open(img_path) as img:
+        return img.size  # (width, height)
 
 
 def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
     """
-    生成适用于 Outlook 的 HTML 邮件正文，图片居中显示。
-
-    Outlook 使用 Word 渲染引擎，对 CSS 支持有限。
-    最稳方案：只用 <table> + inline-style，不用 flex/grid/position。
-
-    Args:
-        image_paths: 切片后的图片路径列表
-        original_width: 邮件中图片显示的宽度（px）
-
-    Returns:
-        完整的 HTML 字符串，使用 cid: 内联嵌入
+    生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
+    每张图读取实际尺寸，按 display_width 等比计算 height。
     """
     img_rows = ""
     for i, path in enumerate(image_paths):
         cid = f"slice_{i + 1:03d}"
+        try:
+            actual_w, actual_h = _get_img_dimensions(path)
+            display_h = int(actual_h * original_width / actual_w)
+        except Exception:
+            display_h = original_width
+
         img_rows += (
             f'<tr>\n'
             f'<td align="center" style="'
             f'text-align: center; '
-            f'padding: 0; '
-            f'margin: 0; '
-            f'font-size: 0; '
-            f'line-height: 0; '
+            f'padding: 0; margin: 0; '
+            f'font-size: 0; line-height: 0;'
             f'">'
             f'<img src="cid:{cid}" '
             f'alt="slice_{i + 1}" '
             f'width="{original_width}" '
+            f'height="{display_h}" '
             f'style="border: 0;" />\n'
             f'</td>\n'
             f'</tr>\n'
@@ -61,14 +68,13 @@ def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
 
 
 def get_cid_map(image_paths: List[str]) -> Dict[int, str]:
-    """返回 image_paths 索引到 CID 的映射"""
     return {i: f"slice_{i + 1:03d}" for i in range(len(image_paths))}
 
 
 def generate_plain_html(image_paths: List[str], original_width: int = 650) -> str:
     """
-    生成纯内联 base64 的 HTML（不含 cid），供复制到剪贴板使用。
-    每张图片转为 base64 data URI 嵌入。
+    生成纯内联 base64 的 HTML，供复制到剪贴板使用。
+    每张图读取实际尺寸，等比计算 height，防止 Word/Outlook 拉伸变形。
     """
     import base64
 
@@ -77,13 +83,15 @@ def generate_plain_html(image_paths: List[str], original_width: int = 650) -> st
         with open(path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("ascii")
         ext = Path(path).suffix.lower().lstrip(".")
-        if ext in ("jpg", "jpeg"):
-            mime = "image/jpeg"
-        elif ext == "png":
-            mime = "image/png"
-        else:
-            mime = "image/png"
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
         src = f"data:{mime};base64,{b64}"
+
+        try:
+            actual_w, actual_h = _get_img_dimensions(path)
+            display_h = int(actual_h * original_width / actual_w)
+        except Exception:
+            display_h = original_width
+
         img_rows += (
             f'<tr>\n'
             f'<td align="center" style="'
@@ -93,6 +101,7 @@ def generate_plain_html(image_paths: List[str], original_width: int = 650) -> st
             f'<img src="{src}" '
             f'alt="slice_{i + 1}" '
             f'width="{original_width}" '
+            f'height="{display_h}" '
             f'style="border: 0;" />\n'
             f'</td>\n'
             f'</tr>\n'

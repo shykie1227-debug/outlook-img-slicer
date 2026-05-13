@@ -27,7 +27,7 @@ from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "4.2"
+VERSION = "4.3"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
