@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
     QFrame, QGridLayout, QScrollArea,
-    QLineEdit, QSlider
+    QLineEdit, QSlider, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator
@@ -27,7 +27,7 @@ from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "4.3"
+VERSION = "4.4"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -207,10 +207,11 @@ class ProcessWorker(QThread):
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, file_path: str, width: int):
+    def __init__(self, file_path: str, width: int, smart: bool = False):
         super().__init__()
         self.file_path = file_path
         self.width = width
+        self.smart = smart
 
     def _convert_and_slice(self, converter_fn, prefix: str, p_before: int, p_after: int) -> List[str]:
         images = converter_fn(self.file_path)
@@ -224,7 +225,7 @@ class ProcessWorker(QThread):
         self.progress.emit(p_after)
         final = []
         for p in slice_paths:
-            final.extend(detect_and_slice(p, max_height=1728, smart=True))
+            final.extend(detect_and_slice(p, max_height=1728, smart=self.smart, target_width=self.width))
         return final
 
     def run(self):
@@ -236,7 +237,7 @@ class ProcessWorker(QThread):
             elif ext in (".pptx", ".ppt"):
                 slice_paths = self._convert_and_slice(pptx_to_images, "ppt_page", 45, 75)
             else:
-                slice_paths = detect_and_slice(self.file_path, max_height=1728, smart=True)
+                slice_paths = detect_and_slice(self.file_path, max_height=1728, smart=self.smart, target_width=self.width)
             self.progress.emit(100)
             self.finished.emit(slice_paths)
         except Exception as exc:
@@ -332,6 +333,19 @@ class MainWindow(QMainWindow):
         )
         self.slider_width.valueChanged.connect(self._on_slider_changed)
         toolbar.addWidget(self.slider_width)
+
+        self.chk_smart = QCheckBox("智能切图")
+        self.chk_smart.setFont(_font("Microsoft YaHei", 12))
+        self.chk_smart.setChecked(False)  # 默认等分切图
+        self.chk_smart.setCursor(Qt.PointingHandCursor)
+        self.chk_smart.setStyleSheet(
+            f"QCheckBox {{ color: {Theme.TEXT_SECONDARY}; background: transparent; spacing: 6px; }}"
+            f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 4px; "
+            f"border: 1px solid {Theme.BORDER}; background: {Theme.CARD}; }}"
+            f"QCheckBox::indicator:checked {{ background: {Theme.PRIMARY}; "
+            f"border-color: {Theme.PRIMARY}; }}"
+        )
+        toolbar.addWidget(self.chk_smart)
 
         self.btn_copy_html = QPushButton("📋 复制HTML")
         self.btn_copy_html.setFont(_font("Microsoft YaHei", 12))
@@ -614,7 +628,7 @@ class MainWindow(QMainWindow):
         if self.worker is not None:
             self.worker.deleteLater()
             self.worker = None
-        self.worker = ProcessWorker(path, self._get_width())
+        self.worker = ProcessWorker(path, self._get_width(), smart=self.chk_smart.isChecked())
         self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.finished.connect(self._on_processed)
         self.worker.error.connect(self._on_error)

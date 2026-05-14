@@ -1,7 +1,7 @@
 """
 图像切片器模块
 将长图按指定高度切片，支持 JPG/PNG/BMP/WebP/GIF
-V4 新增智能切图：通过像素分析避免切断重要内容（标题、表格、文本行）
+V4.4 智能切图：通过像素灰度方差 + 亮度综合分析查找安全断点，规避文字区
 """
 import os
 import tempfile
@@ -10,83 +10,198 @@ from typing import List
 from pathlib import Path
 from PIL import Image
 
-
-# ── 智能切图常量 ────────────────────────────
-SMART_SCAN_WINDOW = 20       # 扫描窗口高度（px），在断点附近上下扫描
-SMART_MIN_SPACING = 6        # 至少连续 N 行空白才算安全断点
-SMART_BRIGHTNESS_THRESHOLD = 240  # 像素亮度阈值（接近白色）
-
 from image_safety import check_image_safety, ImageSafetyError
 
 
-def _is_blank_row(pixels, y: int, width: int) -> bool:
-    """判断第 y 行是否为空白行（接近白色）"""
-    if width == 0:
-        return True
-    # 采样检测：取等间隔 10 个点
-    sample_step = max(1, width // 10)
-    blank_count = 0
-    samples = 0
-    for x in range(0, width, sample_step):
+# ── 智能切图常量 ────────────────────────────
+SMART_SCAN_RATIO = 0.15       # 扫描窗口 = 切片高度 * 此比率（自适应）
+SMART_MIN_SCAN = 30           # 扫描窗口最小 px
+SMART_MAX_SCAN = 200          # 扫描窗口最大 px
+SMART_MIN_SPACING = 6         # 至少连续 N 行空白才算安全断点
+BLANK_VARIANCE_THRESHOLD = 8  # 灰度标准差 < 此值视为"行内无变量"（空白/纯色行）
+BLANK_BRIGHTNESS_MIN = 200    # 空白行平均亮度下限（排除深色纯色区）
+TEXTURE_VARIANCE_MIN = 15     # 文字行灰度标准差下限（防止误判灰度不均的图片为文字）
+
+# 动态亮度阈值：低于此亮度视为"非空白"
+# 若图像整体偏暗，使用自适应 percentile
+ADAPTIVE_BRIGHTNESS_PERCENTILE = 85  # 取全图亮度百分位作为动态阈值
+
+
+def _row_stats(pixels, y: int, width: int) -> tuple:
+    """
+    分析第 y 行的像素统计量。
+
+    Returns:
+        (mean_brightness, std_dev, sample_count)
+        mean_brightness: 平均亮度（0-255）
+        std_dev: 灰度标准差，反映行内纹理复杂度
+        sample_count: 采样点数
+    """
+    # 密集采样：每隔 2px 取一点，上限 150 个点
+    step = max(1, width // 150)
+    values: List[int] = []
+    for x in range(0, width, step):
         try:
             p = pixels[x, y]
-            # RGB tuple: 三个通道都接近白色
             if isinstance(p, tuple) and len(p) >= 3:
-                if p[0] > SMART_BRIGHTNESS_THRESHOLD and p[1] > SMART_BRIGHTNESS_THRESHOLD and p[2] > SMART_BRIGHTNESS_THRESHOLD:
-                    blank_count += 1
+                # RGB → 灰度亮度（加权）
+                gray = int(0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2])
+                values.append(gray)
             else:
-                # 灰度图
-                if p > SMART_BRIGHTNESS_THRESHOLD:
-                    blank_count += 1
-            samples += 1
+                values.append(int(p))
         except (IndexError, TypeError):
             pass
-    return samples > 0 and (blank_count / samples) > 0.85
+
+    if not values:
+        return (255, 0, 0)
+
+    mean = sum(values) / len(values)
+    if len(values) >= 2:
+        var = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
+        std = var ** 0.5
+    else:
+        std = 0.0
+
+    return (mean, std, len(values))
 
 
-def _find_smart_cut(pixels, width: int, height: int, target_cut: int) -> int:
+def _is_safe_blank(pixels, y: int, width: int, adaptive_threshold: float = 220) -> bool:
+    """
+    判断第 y 行是否为"安全的空白行"（可在此处切图）。
+
+    双条件：
+    1. 亮度足够高（背景色），排除深色纯色区
+    2. 灰度方差足够低（无纹理），排除文字/图片/线条
+
+    Args:
+        pixels: 像素加载器
+        y: 行坐标
+        width: 图片宽度
+        adaptive_threshold: 动态亮度阈值（基于全图统计）
+
+    Returns:
+        True 表示该行适合切片
+    """
+    mean_brightness, std_dev, samples = _row_stats(pixels, y, width)
+    if samples < 5:
+        return False
+
+    # 条件 1：亮度必须高于动态阈值（排除深色背景的内容）
+    if mean_brightness < adaptive_threshold:
+        return False
+
+    # 条件 2：灰度方差必须足够低（排除有文字/线条/纹理的行）
+    if std_dev > BLANK_VARIANCE_THRESHOLD:
+        return False
+
+    return True
+
+
+def _compute_adaptive_threshold(pixels, width: int, height: int) -> float:
+    """
+    计算图像的动态亮度阈值。
+    取全图各行的平均亮度的第 ADAPTIVE_BRIGHTNESS_PERCENTILE 百分位。
+    """
+    step_y = max(1, height // 50)  # 采样 ~50 行
+    step_x = max(1, width // 10)   # 每行采 ~10 点
+    all_means: List[float] = []
+
+    for y in range(0, height, step_y):
+        values: List[int] = []
+        for x in range(0, width, step_x):
+            try:
+                p = pixels[x, y]
+                if isinstance(p, tuple) and len(p) >= 3:
+                    gray = int(0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2])
+                    values.append(gray)
+                else:
+                    values.append(int(p))
+            except (IndexError, TypeError):
+                pass
+        if values:
+            all_means.append(sum(values) / len(values))
+
+    if not all_means:
+        return BLANK_BRIGHTNESS_MIN
+
+    all_means.sort()
+    idx = int(len(all_means) * ADAPTIVE_BRIGHTNESS_PERCENTILE / 100)
+    idx = min(idx, len(all_means) - 1)
+    return max(all_means[idx], BLANK_BRIGHTNESS_MIN)
+
+
+def _find_smart_cut(pixels, width: int, height: int, target_cut: int,
+                    slice_height: int) -> int:
     """
     在 target_cut 附近查找最佳切片位置。
-    优先选择连续空白行最多的位置（安全断点）。
-    返回最适合切片的 y 坐标。
+
+    算法：
+    1. 计算扫描窗口（基于 slice_height 自适应）
+    2. 从 target_cut 向外双向扫描，寻找连续安全空白行
+    3. 评分综合考量：空白行长度、距目标点的距离、对称性
+    4. 返回最适合切片的 y 坐标
+
+    Args:
+        pixels: 像素加载器
+        width: 图片宽度
+        height: 图片高度
+        target_cut: 理论等分切割位置
+        slice_height: 单切片高度，用于计算扫描范围
+
+    Returns:
+        最佳切割位置的 y 坐标
     """
-    scan_top = max(0, target_cut - SMART_SCAN_WINDOW)
-    scan_bottom = min(height, target_cut + SMART_SCAN_WINDOW)
+    scan = int(max(SMART_MIN_SCAN, min(SMART_MAX_SCAN, slice_height * SMART_SCAN_RATIO)))
+    scan_top = max(0, target_cut - scan)
+    scan_bottom = min(height, target_cut + scan)
+
+    # 先计算全图像亮度自适应阈值
+    adaptive_threshold = _compute_adaptive_threshold(pixels, width, height)
 
     best_cut = target_cut
-    best_blank_streak = 0
+    best_score = -1.0
 
     y = scan_top
     while y < scan_bottom:
-        if _is_blank_row(pixels, y, width):
-            # 计算从这里开始的连续空白行数
+        if _is_safe_blank(pixels, y, width, adaptive_threshold):
+            # 计算连续安全空白行
             streak = 0
             yy = y
-            while yy < scan_bottom and _is_blank_row(pixels, yy, width):
+            while yy < scan_bottom and _is_safe_blank(pixels, yy, width, adaptive_threshold):
                 streak += 1
                 yy += 1
-            if streak >= SMART_MIN_SPACING and streak > best_blank_streak:
-                # 优先靠近目标切割位置
-                distance_penalty = abs(yy - target_cut)
-                score = streak - distance_penalty * 0.1
-                if score > best_blank_streak:
-                    best_blank_streak = score
-                    # 选连续空白行的中间位置
-                    best_cut = y + streak // 2
-            y = yy
+
+            if streak >= SMART_MIN_SPACING:
+                # 选择连续空白行的中间位置作为切割点
+                cut_pos = y + streak // 2
+
+                # ── 评分公式 ──
+                #  空白行越多越好，越靠近 target_cut 越好
+                #  权重：空白行数 (×2) + 距离惩罚 (负，×0.2)
+                dist = abs(cut_pos - target_cut)
+                score = (streak * 2.0) - (dist * 0.2)
+
+                if score > best_score:
+                    best_score = score
+                    best_cut = cut_pos
+
+            y = yy  # 跳过已扫描的连续行
         else:
             y += 1
+
     return best_cut
 
 
-def detect_and_slice(image_path: str, max_height: int = 1200, smart: bool = True) -> List[str]:
+def detect_and_slice(image_path: str, max_height: int = 1200,
+                     smart: bool = False, target_width: int = None) -> List[str]:
     """
     检测图像高度，必要时进行无损切片。
 
     Args:
         image_path: 原始图片文件路径
         max_height: 单片最大高度（像素），默认 1200px
-        smart: 是否启用智能切图（避免切断内容）
+        smart: 是否启用智能切图（避免切断内容），默认 False=等分切图
+        target_width: 目标宽度（像素），若指定则在切片前将图片缩放到此宽度，None=保持原宽
 
     Returns:
         切片后的临时文件路径列表
@@ -94,12 +209,18 @@ def detect_and_slice(image_path: str, max_height: int = 1200, smart: bool = True
     try:
         check_image_safety(image_path)
     except ImageSafetyError:
-        # 文件过大时降级：不用安全检查，直接尝试打开
         pass
 
     try:
         img = Image.open(image_path)
         orig_w, orig_h = img.size
+
+        # ── 等比缩放到目标宽度（如果指定） ──────────────────────────────
+        if target_width and 0 < target_width < orig_w:
+            ratio = target_width / orig_w
+            new_h = int(orig_h * ratio)
+            img = img.resize((target_width, new_h), Image.LANCZOS)
+            orig_w, orig_h = img.size
 
         if orig_h <= max_height:
             return [image_path]
@@ -110,11 +231,10 @@ def detect_and_slice(image_path: str, max_height: int = 1200, smart: bool = True
         original_ext = Path(image_path).suffix.lower()
         preserve_alpha = original_ext in (".png", ".gif") and img.mode == "RGBA"
 
-        # 如果启用智能切图，预扫像素
+        # ── 如果启用智能切图，预扫像素 ──────────────────────────────────
         pixels = None
         if smart:
             try:
-                # 转为 RGB 模式以便统一处理像素颜色
                 scan_img = img.convert("RGB") if img.mode != "RGB" else img
                 pixels = scan_img.load()
             except Exception:
@@ -126,17 +246,18 @@ def detect_and_slice(image_path: str, max_height: int = 1200, smart: bool = True
 
         for i in range(slice_count):
             top = i * slice_height
-            bottom = top + slice_height if i < slice_count - 1 else orig_h
+            bottom = (top + slice_height) if i < slice_count - 1 else orig_h
 
-            # 智能切图：在断点附近找连续空白行
+            # 智能切图：在断点附近找连续安全空白行
             if smart and pixels and i < slice_count - 1:
-                adjusted = _find_smart_cut(pixels, orig_w, orig_h, bottom)
-                # 调整不能使最后一片太高
-                if adjusted > top + max_height * 1.2:
+                adjusted = _find_smart_cut(pixels, orig_w, orig_h, bottom, slice_height)
+                # 安全网：调整不能使最后一片过高
+                max_adjust = int(slice_height * 1.3)
+                if adjusted > top + max_adjust:
                     adjusted = bottom
                 bottom = adjusted
 
-            # 裁剪区域
+            # 裁剪区域（使用经过缩放的 orig_w）
             slice_img = img.crop((0, top, orig_w, bottom))
 
             slice_filename = f"slice_{i}_{base_name}.png"
@@ -185,8 +306,6 @@ def auto_merge_images(image_paths: List[str], direction: str = "vertical") -> st
     if len(image_paths) == 1:
         return image_paths[0]
 
-    # 逐张合并：每次取当前画布 + 新图 → 创建新画布
-    # 参考 Pillow 官方教程: Image.paste 拼接
     def _ensure_rgb(img: Image.Image) -> Image.Image:
         if img.mode == "RGBA":
             bg = Image.new("RGB", img.size, (255, 255, 255))
@@ -205,9 +324,7 @@ def auto_merge_images(image_paths: List[str], direction: str = "vertical") -> st
             w = max(canvas.width, nxt.width)
             h = canvas.height + nxt.height
             new_canvas = Image.new("RGB", (w, h), (255, 255, 255))
-            # 已有内容居中粘贴到顶部
             new_canvas.paste(canvas, ((w - canvas.width) // 2, 0))
-            # 新图居中粘贴到底部
             new_canvas.paste(nxt, ((w - nxt.width) // 2, canvas.height))
         else:
             w = canvas.width + nxt.width
