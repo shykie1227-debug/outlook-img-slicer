@@ -28,7 +28,7 @@ from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "4.4"
+VERSION = "4.5"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         self.setWindowTitle(Config.APP_TITLE)
-        self.setMinimumSize(480, 660)
+        self.setMinimumSize(640, 660)
         self.resize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
 
         container = QWidget()
@@ -267,7 +267,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(10)
 
         # ══ Header ════════════════════════════
-        title = QLabel("Outlook 长图助手 V4")
+        title = QLabel(f"Outlook 长图助手 V{VERSION}")
         title.setFont(_font("Microsoft YaHei", 20, QFont.Bold))
         title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent;")
         root.addWidget(title)
