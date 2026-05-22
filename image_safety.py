@@ -4,7 +4,6 @@
 """
 from PIL import Image
 from pathlib import Path
-from typing import Tuple
 
 # 安全限制常量
 MAX_IMAGE_WIDTH = 30000

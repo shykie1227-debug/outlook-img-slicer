@@ -29,7 +29,7 @@ def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
         cid = f"slice_{i + 1:03d}"
         try:
             actual_w, actual_h = _get_img_dimensions(path)
-            display_h = int(actual_h * original_width / actual_w)
+            display_h = round(actual_h * original_width / actual_w)
         except Exception:
             display_h = original_width
 
@@ -44,7 +44,7 @@ def assemble_html(image_paths: List[str], original_width: int = 650) -> str:
             f'alt="slice_{i + 1}" '
             f'width="{original_width}" '
             f'height="{display_h}" '
-            f'style="border: 0;" />\n'
+            f'style="border: 0; display: block;" />\n'
             f'</td>\n'
             f'</tr>\n'
         )
@@ -88,7 +88,7 @@ def generate_plain_html(image_paths: List[str], original_width: int = 650) -> st
 
         try:
             actual_w, actual_h = _get_img_dimensions(path)
-            display_h = int(actual_h * original_width / actual_w)
+            display_h = round(actual_h * original_width / actual_w)
         except Exception:
             display_h = original_width
 
@@ -102,7 +102,7 @@ def generate_plain_html(image_paths: List[str], original_width: int = 650) -> st
             f'alt="slice_{i + 1}" '
             f'width="{original_width}" '
             f'height="{display_h}" '
-            f'style="border: 0;" />\n'
+            f'style="border: 0; display: block;" />\n'
             f'</td>\n'
             f'</tr>\n'
         )

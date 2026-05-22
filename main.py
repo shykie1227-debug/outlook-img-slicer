@@ -4,6 +4,7 @@ PySide6 窗口应用，支持拖拽上传、自动切片、邮件体积检测、
 """
 import os
 import sys
+import re
 import tempfile
 import shutil
 from pathlib import Path
@@ -31,7 +32,6 @@ VERSION = "4.4"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
-HQ_QUALITY = 100       # 超清模式 JPEG 质量
 
 
 class Config:
@@ -252,7 +252,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.slice_paths: List[str] = []
-        self.all_file_paths: List[str] = []
         self.worker: Optional[ProcessWorker] = None
         self._build_ui()
 
@@ -532,7 +531,6 @@ class MainWindow(QMainWindow):
 
         if len(valid) > 1:
             # 按文件名自然排序，保证顺序可预测
-            import re
             def natural_key(s):
                 return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', Path(s).stem)]
             valid.sort(key=natural_key)
@@ -706,7 +704,8 @@ class MainWindow(QMainWindow):
             # HTML 格式：Outlook/Word 粘贴时正确渲染
             mime.setHtml(html)
             # 纯文本格式：作为 fallback
-            mime.setText(html)
+            plain = f"已将 {len(self.slice_paths)} 张切片 HTML 复制到剪贴板"
+            mime.setText(plain)
             QGuiApplication.clipboard().setMimeData(mime)
             self._set_status("📋 HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
         except Exception as exc:
@@ -727,9 +726,11 @@ class MainWindow(QMainWindow):
         from PIL import Image
         for i, p in enumerate(self.slice_paths):
             img = Image.open(p)
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            img.save(p, format="JPEG", quality=COMPRESS_QUALITY, optimize=True)
+            rgb = img.convert("RGB") if img.mode in ("RGBA", "P") else img
+            # 直接保存为 JPEG 并用回 PNG 扩展名，避免路径引用失效
+            new_path = p.replace(".png", ".jpg")
+            rgb.save(new_path, format="JPEG", quality=COMPRESS_QUALITY, optimize=True)
+            self.slice_paths[i] = new_path
 
     def _send_email(self):
         if not self.slice_paths:
@@ -777,7 +778,6 @@ class MainWindow(QMainWindow):
     def reset_app(self):
         self.slice_paths = []
         self.file_path = None
-        self.all_file_paths = []
         if self.worker is not None:
             self.worker.deleteLater()
             self.worker = None
