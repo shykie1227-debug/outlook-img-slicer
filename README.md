@@ -21,9 +21,9 @@
 
 ### 下载安装
 
-📥 直接下载：[**Outlook长图插入工具.exe**](https://github.com/shykie1227-debug/outlook-img-slicer/releases/download/v4.3/Outlook.exe)（Windows 免安装，双击即用）
+📥 直接下载：[**Outlook长图插入工具.exe**](https://github.com/shykie1227-debug/outlook-img-slicer/releases/download/v4.5/Outlook.exe)（Windows 免安装，双击即用）
 
-📦 发布说明：[查看 V4.2 更新 →](https://github.com/shykie1227-debug/outlook-img-slicer/releases/tag/v4.3) 
+📦 发布说明：[查看 V4.5 更新 →](https://github.com/shykie1227-debug/outlook-img-slicer/releases/tag/v4.5) 
 📦 所有版本：[前往 Releases 页面 →](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest)
 
 ### 开发环境运行
