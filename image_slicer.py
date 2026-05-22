@@ -341,7 +341,7 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
 
                     min_bottom = top + max(60, int(slice_height * 0.7))
                     min_bottom = max(min_bottom, out_h - ((remaining_slices - 1) * max_height))
-                    max_bottom = min(top + max_height, out_h - ((remaining_slices - 1) * max_height))
+                    max_bottom = min(top + max_height, max(top + slice_height, out_h - ((remaining_slices - 1) * max_height)))
                     bottom = max(min_bottom, min(adjusted, max_bottom))
 
             slice_img = img.crop((0, top, out_w, bottom))
