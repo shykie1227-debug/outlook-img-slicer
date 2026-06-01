@@ -33,7 +33,7 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL, SORT_DRAG_ORDER
 
 
-VERSION = "4.6.1"
+VERSION = "4.6.2"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
