@@ -2,6 +2,12 @@
 Outlook 自动化模块
 通过 win32com.client 创建并填充 Outlook 邮件窗口
 V3 改进：完整 CID 嵌入（PR_ATTACH_CONTENT_ID）+ 保存切图功能
+
+⚠️ 本地运行原则承诺（本模块明确遵守）:
+  - 只调用 mail.Display(False) 打开邮件窗口，不调用 mail.Send()
+  - 不收集/上传任何用户数据
+  - 不调用任何外网 API/云服务
+  - 所有数据都在本地机器上处理
 """
 import sys
 import os
@@ -61,6 +67,7 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
                 )
 
         # Display(False) 非模态显示
+        # 【本地运行原则】绝不调用 mail.Send()，由用户手动检查后点发送
         mail.Display(False)
 
     except Exception as e:
