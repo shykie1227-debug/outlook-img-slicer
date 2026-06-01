@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
     QFrame, QGridLayout, QScrollArea,
-    QLineEdit, QSlider, QCheckBox
+    QLineEdit, QSlider, QCheckBox, QDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator
@@ -34,7 +34,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.4"
+VERSION = "4.6.5"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
