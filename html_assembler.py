@@ -46,8 +46,16 @@ def _build_map_block(map_name: str, hotspots: List[Hotspot],
     area_tags = []
     for h in hotspots:
         x1, y1, x2, y2 = _scale_coords(h.x1, h.y1, h.x2, h.y2, actual_w, display_w)
-        # alt 必填（Outlook 显示）
-        alt_text = h.text or h.url or "link"
+        # alt 优先级：text > url 域名 > "link" (Outlook 显示)
+        if h.text:
+            alt_text = h.text
+        else:
+            # 从 URL 提取域名作为 alt，Outlook 抦鼠标时能看到是什么链接
+            try:
+                from urllib.parse import urlparse
+                alt_text = urlparse(h.url).netloc or h.url
+            except Exception:
+                alt_text = h.url or "link"
         area_tags.append(
             f'<area shape="rect" coords="{x1},{y1},{x2},{y2}" '
             f'href="{h.url}" alt="{alt_text}" target="_blank" />'

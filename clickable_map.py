@@ -8,11 +8,11 @@
 
 热区对象：
   x1, y1, x2, y2 : 矩形坐标（基于切片像素，非缩略图）
-  text           : 按钮文字（用于显示 + alt）
-  url            : 跳转 URL
+  url            : 跳转 URL（必填）
+  text           : 按钮文字（可选，V4.6.1 起默认空，仅用于 alt 兜底）
 """
 from dataclasses import dataclass, asdict
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import json
 
 
@@ -22,8 +22,8 @@ class Hotspot:
     y1: int
     x2: int
     y2: int
-    text: str
     url: str
+    text: str = ""  # 可选：仅用于 alt 兜底文字，不出现在图上
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -33,15 +33,29 @@ class Hotspot:
         return cls(
             x1=int(d["x1"]), y1=int(d["y1"]),
             x2=int(d["x2"]), y2=int(d["y2"]),
-            text=str(d.get("text", "")),
             url=str(d.get("url", "")),
+            text=str(d.get("text", "")),
         )
 
     def normalized(self) -> "Hotspot":
         """保证 (x1,y1) 是左上角、(x2,y2) 是右下角"""
         x1, x2 = sorted((self.x1, self.x2))
         y1, y2 = sorted((self.y1, self.y2))
-        return Hotspot(x1=x1, y1=y1, x2=x2, y2=y2, text=self.text, url=self.url)
+        return Hotspot(x1=x1, y1=y1, x2=x2, y2=y2, url=self.url, text=self.text)
+
+    def rect(self) -> Tuple[int, int, int, int]:
+        """返回 (x1, y1, x2, y2) 标准化后的元组。"""
+        n = self.normalized()
+        return (n.x1, n.y1, n.x2, n.y2)
+
+
+# ── 错误码：让 UI 层可以无文案依赖地区分错误类型 ──
+class HotspotError:
+    EMPTY_URL = "URL 不能为空"
+    TOO_SMALL = "选区太小（需 ≥ 5×5px），请重新拖选"
+    DUPLICATE = "该区域已存在，请勿重复添加"
+    OUT_OF_RANGE = "热区索引越界"
+    NO_HOTSPOTS = "该切片未添加任何热区"
 
 
 class HotspotMap:
@@ -51,8 +65,66 @@ class HotspotMap:
         # key = slice 文件名（如 "slice_001.png"），value = List[Hotspot]
         self._map: Dict[str, List[Hotspot]] = {}
 
-    def add(self, slice_filename: str, hotspot: Hotspot):
-        self._map.setdefault(slice_filename, []).append(hotspot.normalized())
+    def add(self, slice_filename: str, hotspot: Hotspot) -> Tuple[bool, str]:
+        """
+        添加热区，自动跳过：
+        - URL 为空
+        - 区域过小（宽/高 < 5px）
+        - 与该切片上已有热区完全重叠
+
+        Returns:
+            (True, "")  表示添加成功
+            (False, reason) 表示被拦截，reason 为说明文案
+        """
+        url = (hotspot.url or "").strip()
+        if not url:
+            return False, HotspotError.EMPTY_URL
+        # 自动补 https 协议
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = "https://" + url
+        h = Hotspot(
+            x1=hotspot.x1, y1=hotspot.y1,
+            x2=hotspot.x2, y2=hotspot.y2,
+            url=url, text=hotspot.text,
+        ).normalized()
+        if h.x2 - h.x1 < 5 or h.y2 - h.y1 < 5:
+            return False, HotspotError.TOO_SMALL
+        for existing in self._map.get(slice_filename, []):
+            if (existing.x1, existing.y1, existing.x2, existing.y2) == (h.x1, h.y1, h.x2, h.y2):
+                return False, HotspotError.DUPLICATE
+        self._map.setdefault(slice_filename, []).append(h)
+        return True, ""
+
+    def update(self, slice_filename: str, index: int, hotspot: Hotspot) -> Tuple[bool, str]:
+        """
+        替换指定 index 的热区（用于编辑功能）。
+        重复检查会跳过自身。
+        """
+        if slice_filename not in self._map:
+            return False, HotspotError.NO_HOTSPOTS
+        lst = self._map[slice_filename]
+        if not (0 <= index < len(lst)):
+            return False, HotspotError.OUT_OF_RANGE
+        url = (hotspot.url or "").strip()
+        if not url:
+            return False, HotspotError.EMPTY_URL
+        # 自动补 https 协议
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = "https://" + url
+        h = Hotspot(
+            x1=hotspot.x1, y1=hotspot.y1,
+            x2=hotspot.x2, y2=hotspot.y2,
+            url=url, text=hotspot.text,
+        ).normalized()
+        if h.x2 - h.x1 < 5 or h.y2 - h.y1 < 5:
+            return False, HotspotError.TOO_SMALL
+        for i, existing in enumerate(lst):
+            if i == index:
+                continue
+            if (existing.x1, existing.y1, existing.x2, existing.y2) == (h.x1, h.y1, h.x2, h.y2):
+                return False, HotspotError.DUPLICATE
+        lst[index] = h
+        return True, ""
 
     def remove(self, slice_filename: str, index: int) -> Optional[Hotspot]:
         if slice_filename not in self._map:
@@ -86,7 +158,10 @@ class HotspotMap:
         data = json.loads(s) if s else {}
         for k, hs_list in data.items():
             for h in hs_list:
-                m.add(k, Hotspot.from_dict(h))
+                ok, _ = m.add(k, Hotspot.from_dict(h))
+                if not ok:
+                    # 跳过重复/无效的旧数据，不让一个坏记录炸掉全量加载
+                    continue
         return m
 
     def clear(self):
