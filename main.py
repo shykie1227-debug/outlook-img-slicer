@@ -23,12 +23,15 @@ from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetr
 from image_slicer import detect_and_slice, get_image_info, auto_merge_images
 from pdf_slicer import pdf_to_images
 from ppt_slicer import pptx_to_images
+from psd_slicer import psd_to_images
+from clickable_map import HotspotMap
+from hotspot_editor import HotspotEditorDialog
 from html_assembler import assemble_html, generate_plain_html
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 
 
-VERSION = "4.5"
+VERSION = "4.6"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -42,7 +45,8 @@ class Config:
     WINDOW_WIDTH = 760
     WINDOW_HEIGHT = 720
     SUPPORTED_EXTENSIONS = (
-        ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf", ".pptx", ".ppt"
+        ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif",
+        ".pdf", ".pptx", ".ppt", ".psd"
     )
 
 
@@ -154,7 +158,7 @@ class DropZone(QFrame):
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
         self.title_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; border: none;")
-        self.tip_label = QLabel("支持 JPG · PNG · PDF · PPT，点击上传")
+        self.tip_label = QLabel("支持 JPG · PNG · PDF · PPT · PSD，点击上传")
         self.tip_label.setAlignment(Qt.AlignCenter)
         self.tip_label.setFont(_font("Microsoft YaHei", 12))
         self.tip_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent; border: none;")
@@ -236,6 +240,8 @@ class ProcessWorker(QThread):
                 slice_paths = self._convert_and_slice(pdf_to_images, "pdf_page", 45, 75)
             elif ext in (".pptx", ".ppt"):
                 slice_paths = self._convert_and_slice(pptx_to_images, "ppt_page", 45, 75)
+            elif ext == ".psd":
+                slice_paths = self._convert_and_slice(psd_to_images, "psd_page", 45, 75)
             else:
                 slice_paths = detect_and_slice(self.file_path, max_height=1728, smart=self.smart, target_width=self.width)
             self.progress.emit(100)
@@ -253,6 +259,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.slice_paths: List[str] = []
         self.worker: Optional[ProcessWorker] = None
+        self.hotspot_map = HotspotMap()
         self._build_ui()
 
     def _build_ui(self):
@@ -361,6 +368,16 @@ class MainWindow(QMainWindow):
         self.btn_copy_html.setFixedSize(_btn_size("📋 复制HTML", 12, extra_w=20, height=34))
         self.btn_copy_html.clicked.connect(self._copy_html)
         toolbar2.addWidget(self.btn_copy_html)
+
+        self.btn_hotspot = QPushButton("🎯 添加可点击按钮")
+        self.btn_hotspot.setFont(_font("Microsoft YaHei", 12))
+        self.btn_hotspot.setCursor(Qt.PointingHandCursor)
+        self.btn_hotspot.setEnabled(False)
+        self.btn_hotspot.setStyleSheet(_btn_ghost())
+        self.btn_hotspot.setFixedSize(_btn_size("🎯 添加可点击按钮", 12, extra_w=20, height=34))
+        self.btn_hotspot.setToolTip("为切片添加可点击热区，在邮件中点圈位置跳转 URL")
+        self.btn_hotspot.clicked.connect(self._open_hotspot_editor)
+        toolbar2.addWidget(self.btn_hotspot)
 
         toolbar2.addStretch()
         root.addLayout(toolbar2)
@@ -474,7 +491,7 @@ class MainWindow(QMainWindow):
     def _reset_drop_zone(self):
         self.drop_zone.title_label.setText("拖拽图片到此处")
         self.drop_zone.icon_label.setText("📂")
-        self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT，点击上传")
+        self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT · PSD，点击上传")
 
     def _on_width_edited(self):
         """手动输入完成时同步到滑块，超限弹窗提醒"""
@@ -513,7 +530,7 @@ class MainWindow(QMainWindow):
     def _select_file(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "选择图片、PDF 或 PPT", "",
-            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf);;PPT/PPTX (*.pptx *.ppt)"
+            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf);;PPT/PPTX (*.pptx *.ppt);;PSD (*.psd)"
         )
         if paths:
             self._handle_dropped_files(paths)
@@ -533,7 +550,7 @@ class MainWindow(QMainWindow):
         # 过滤合法后缀
         valid = [p for p in paths if Path(p).suffix.lower() in Config.SUPPORTED_EXTENSIONS]
         if not valid:
-            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF 或 PPT 文件。")
+            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF、PPT 或 PSD 文件。")
             return
 
         if len(valid) > 1:
@@ -591,7 +608,7 @@ class MainWindow(QMainWindow):
         """单图/合并后处理的统一入口"""
         ext = Path(path).suffix.lower()
         # 安全检查
-        if ext not in (".pdf", ".pptx", ".ppt"):
+        if ext not in (".pdf", ".pptx", ".ppt", ".psd"):
             try:
                 check_image_safety(path)
             except ImageSafetyError as e:
@@ -645,6 +662,9 @@ class MainWindow(QMainWindow):
         self.btn_send.setEnabled(bool(paths))
         self.btn_save.setEnabled(bool(paths))
         self.btn_copy_html.setEnabled(bool(paths))
+        self.btn_hotspot.setEnabled(bool(paths))
+        # 重新处理时清空旧热区
+        self.hotspot_map.clear()
 
         # 体积检测
         size_mb = estimate_email_size_mb(paths) if paths else 0
@@ -679,9 +699,13 @@ class MainWindow(QMainWindow):
             thumb.setScaledContents(True)
             thumb.setStyleSheet(
                 f"background: {Theme.CARD}; border-radius: 8px; border: 1px solid {Theme.BORDER};"
+                f"QToolTip {{ background: #1D1D1F; color: white; border: none; padding: 4px 8px; }}"
             )
             pixmap = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             thumb.setPixmap(pixmap)
+            thumb.setToolTip(f"切片 {i + 1}: {Path(path).name}\n点击编辑可点击按钮")
+            thumb.setCursor(Qt.PointingHandCursor)
+            thumb.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
             self.thumb_grid.addWidget(thumb, row, col)
         self.preview_area.show()
 
@@ -706,7 +730,10 @@ class MainWindow(QMainWindow):
         if not self.slice_paths:
             return
         try:
-            html = generate_plain_html(self.slice_paths, self._get_width())
+            html = generate_plain_html(
+                self.slice_paths, self._get_width(),
+                hotspots=self.hotspot_map if not self.hotspot_map.is_empty() else None,
+            )
             mime = QMimeData()
             # HTML 格式：Outlook/Word 粘贴时正确渲染
             mime.setHtml(html)
@@ -773,7 +800,10 @@ class MainWindow(QMainWindow):
                 )
 
         try:
-            html_content = assemble_html(self.slice_paths, self._get_width())
+            html_content = assemble_html(
+                self.slice_paths, self._get_width(),
+                hotspots=self.hotspot_map if not self.hotspot_map.is_empty() else None,
+            )
             subject = self.input_subject.text().strip() or "长图邮件"
             create_email_with_images(
                 html_content, subject=subject, to="", image_paths=self.slice_paths
@@ -788,6 +818,7 @@ class MainWindow(QMainWindow):
         if self.worker is not None:
             self.worker.deleteLater()
             self.worker = None
+        self.hotspot_map.clear()
         self._reset_drop_zone()
         self.input_subject.clear()
         self.edit_width.setText(str(Config.DEFAULT_WIDTH))
@@ -796,7 +827,42 @@ class MainWindow(QMainWindow):
         self.btn_send.setEnabled(False)
         self.btn_save.setEnabled(False)
         self.btn_copy_html.setEnabled(False)
+        self.btn_hotspot.setEnabled(False)
         self._set_status("")
+
+    def _on_thumb_clicked(self, ev, path: str, idx: int):
+        """点击缩略图 → 打开热区编辑器"""
+        if ev.button() == Qt.LeftButton:
+            self._open_hotspot_editor_for_slice(path)
+
+    def _open_hotspot_editor(self):
+        """「添加可点击按钮」按钮 → 弹出切片选择 + 打开编辑器"""
+        if not self.slice_paths:
+            return
+        if len(self.slice_paths) == 1:
+            self._open_hotspot_editor_for_slice(self.slice_paths[0])
+            return
+        # 多切片：弹窗让用户选一个
+        from PySide6.QtWidgets import QInputDialog
+        items = [f"切片 {i + 1}: {Path(p).name}" for i, p in enumerate(self.slice_paths)]
+        choice, ok = QInputDialog.getItem(
+            self, "选择要编辑的切片", "为哪个切片添加可点击按钮？", items, 0, False
+        )
+        if not ok:
+            return
+        idx = items.index(choice)
+        self._open_hotspot_editor_for_slice(self.slice_paths[idx])
+
+    def _open_hotspot_editor_for_slice(self, slice_path: str):
+        dlg = HotspotEditorDialog(slice_path, self.hotspot_map, self)
+        dlg.exec()
+        # 同步热区状态提示
+        if not self.hotspot_map.is_empty():
+            self._set_status(
+                f"🎯 已为 {len(self.hotspot_map.all_slices())} 个切片添加共 "
+                f"{self.hotspot_map.total_count()} 个可点击按钮",
+                "success",
+            )
 
 
 if __name__ == "__main__":

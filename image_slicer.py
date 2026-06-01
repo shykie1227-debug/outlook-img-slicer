@@ -17,12 +17,14 @@ from image_safety import check_image_safety, ImageSafetyError
 SMART_SCAN_RATIO = 0.5        # 扫描窗口 = 切片高度 * 此比率（自适应）
 SMART_MIN_SCAN = 80           # 扫描窗口最小 px
 SMART_MAX_SCAN = 800          # 扫描窗口最大 px
-SMART_MIN_SPACING = 16        # 至少连续 N 行空白才算安全断点
-SMART_TEXT_BUFFER = 28        # 切点上下 N px 内不能有文字/线条行（防“贴边切断”）
+SMART_MIN_SPACING = 20        # 至少连续 N 行空白才算安全断点
+SMART_TEXT_BUFFER = 32        # 切点上下 N px 内不能有文字/线条行（防“贴边切断”）
 SMART_MIN_BUFFER_VIOLATIONS = 0  # 缓冲带允许的最大文字行数
-BLANK_VARIANCE_THRESHOLD = 10 # 灰度标准差 < 此值视为"行内无变量"（空白/纯色行）
-BLANK_BRIGHTNESS_MIN = 180    # 空白行平均亮度下限（排除深色纯色区）
-TEXTURE_VARIANCE_MIN = 12     # 文字行灰度标准差下限（防止误判灰度不均的图片为文字）
+BLANK_VARIANCE_THRESHOLD = 6  # 灰度标准差 < 此值视为"行内无变量"（空白/纯色行）
+BLANK_TRANSITION_MAX = 0.04   # 过渡比 > 此值说明该行仍有文字/线条（更严）
+BLANK_BRIGHTNESS_MIN = 170    # 空白行平均亮度下限（排除深色纯色区）
+TEXTURE_VARIANCE_MIN = 8      # 文字行灰度标准差下限（防止漏检小字号/细线条）
+TEXTURE_TRANSITION_MIN = 0.08 # 文字行过渡比下限（防止漏检反白文字）
 
 # 动态亮度阈值：低于此亮度视为"非空白"
 # 若图像整体偏暗，使用自适应 percentile
@@ -81,9 +83,10 @@ def _is_safe_blank(pixels, y: int, width: int, adaptive_threshold: float = 220) 
     """
     判断第 y 行是否为"安全的空白行"（可在此处切图）。
 
-    双条件：
+    三重条件（更严）：
     1. 亮度足够高（背景色），排除深色纯色区
     2. 灰度方差足够低（无纹理），排除文字/图片/线条
+    3. 过渡比足够低（跳变不频繁），排除稀疏文字
 
     Args:
         pixels: 像素加载器
@@ -106,17 +109,26 @@ def _is_safe_blank(pixels, y: int, width: int, adaptive_threshold: float = 220) 
     if std_dev > BLANK_VARIANCE_THRESHOLD:
         return False
 
-    if transition_ratio > 0.06:
+    # 条件 3：过渡比必须足够低（排除稀疏文字/虚线）
+    if transition_ratio > BLANK_TRANSITION_MAX:
         return False
 
     return True
 
 
 def _is_text_like(mean_brightness: float, std_dev: float, transition_ratio: float) -> bool:
-    """粗略识别文字/线条密集行，用于回退评分避开正文。"""
-    if mean_brightness <= 35 or mean_brightness >= 252:
+    """
+    识别文字/线条密集行，用于回退评分和加墙检查。
+    同步收紧阈值以避免漏检小字号/细线条/反白文字。
+    """
+    if mean_brightness <= 30 or mean_brightness >= 254:
         return False
-    return std_dev >= TEXTURE_VARIANCE_MIN and transition_ratio >= 0.12
+    # 两个条件任一满足即视为文字行（并集而非交集，更严）
+    if std_dev >= TEXTURE_VARIANCE_MIN and transition_ratio >= TEXTURE_TRANSITION_MIN:
+        return True
+    if std_dev >= TEXTURE_VARIANCE_MIN * 1.8 and transition_ratio >= 0.04:
+        return True
+    return False
 
 
 def _count_text_rows_in_band(pixels, y_start: int, y_end: int, width: int) -> int:

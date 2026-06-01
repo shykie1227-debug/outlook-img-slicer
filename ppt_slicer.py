@@ -104,26 +104,21 @@ def _try_powerpoint_export(pptx_path: str, dpi: int = 150) -> List[Image.Image] 
 
 
 # ────────────────────────────────────────────
-# 方案 2：LibreOffice soffice（跨平台保真）
+# 方案 2：LibreOffice soffice（Windows 跨机保真）
 # ────────────────────────────────────────────
 def _find_soffice() -> str | None:
     """
-    跨平台查找 LibreOffice 可执行文件。
-    PATH 优先，回退到平台常见安装路径（Windows 注册表路径过多，留给 shutil.which 处理）。
+    Windows 下查找 LibreOffice 可执行文件。
+    常见安装路径：
+      • 默认安装路径 C:\Program Files\LibreOffice\program\soffice.exe
+      • 用户级安装   C:\Program Files (x86)\LibreOffice\program\soffice.exe
+      • PATH 里的    soffice / soffice.exe
     """
     candidates = [
-        "soffice", "soffice.exe",
-        # macOS Homebrew (Apple Silicon / Intel)
-        "/opt/homebrew/bin/soffice",
-        "/usr/local/bin/soffice",
-        # macOS 官方 .dmg 安装
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        # Linux snap / flatpak
-        "/snap/bin/libreoffice",
-        "/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice",
-        # Linux 系统包
-        "/usr/bin/soffice",
-        "/usr/lib/libreoffice/program/soffice",
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        r"C:\Program Files\LibreOffice\program\soffice.com",
+        "soffice.exe", "soffice",
     ]
     for c in candidates:
         if os.path.isfile(c) and os.access(c, os.X_OK):
