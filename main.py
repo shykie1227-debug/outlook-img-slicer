@@ -31,9 +31,10 @@ from html_assembler import assemble_html, generate_plain_html
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL, SORT_DRAG_ORDER
+from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.2"
+VERSION = "4.6.3"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -586,8 +587,13 @@ class MainWindow(QMainWindow):
                 # 多图：走原有的「智能拼图」弹窗
                 self._handle_multi_files(valid, save_dir=save_dir)
         elif mode == MODE_EXPORT:
-            # 图片导出模式：V4.6.2 新增
-            self._export_images(valid, save_dir=save_dir)
+            # 图片导出模式：V4.6.3 弹新窗选格式（JPG/PNG + 透明底 + 路径）
+            export_dlg = ExportFormatDialog(valid, self)
+            if export_dlg.exec() != QDialog.Accepted:
+                return
+            er = export_dlg.get_result()
+            self._export_images(valid, save_dir=er["save_dir"],
+                                fmt=er["format"], keep_alpha=er["keep_alpha"])
 
     def _handle_multi_files(self, paths: List[str]):
         """多张图片 → 弹框询问是否智能拼图"""
@@ -634,28 +640,96 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "拼图失败", str(exc))
 
-    def _export_images(self, paths: List[str], save_dir: Optional[str] = None):
-        """图片导出模式：多图合并为长图，或单图直接保存到指定路径。"""
+    def _export_images(self, paths: List[str], save_dir: Optional[str] = None,
+                       fmt: str = "png", keep_alpha: bool = True):
+        """
+        图片导出模式（V4.6.3 重写）：
+        - fmt: 'png' (支持透明) / 'jpg' (强制白底)
+        - keep_alpha: 是否保留透明底（仅 png 有效）
+        - 多图自动合并为长图，再按选定格式保存
+        """
         self._set_status("正在图片导出...", "info")
         try:
-            if len(paths) == 1:
-                # 单张：直接复制到保存目录（或临时目录）
-                result_path = paths[0]
-            else:
-                # 多张：合并为长图
-                result_path = auto_merge_images(paths, direction="vertical")
+            # 1) 加载所有图片到内存（处理透明底）
+            from PIL import Image as PILImage
+            from io import BytesIO
+            from PIL import Image as _PI
+            images = []
+            for p in paths:
+                img = _PI.open(p)
+                # PNG 保留透明底则保留 RGBA；否则转 RGB
+                if fmt == "png" and keep_alpha:
+                    if img.mode != "RGBA":
+                        img = img.convert("RGBA")
+                else:
+                    # JPG 强制白底 / PNG 不保留透明
+                    if img.mode in ("RGBA", "LA", "P"):
+                        bg = PILImage.new("RGB", img.size, (255, 255, 255))
+                        if img.mode in ("RGBA", "LA"):
+                            bg.paste(img, mask=img.split()[-1])
+                        else:
+                            bg.paste(img.convert("RGB"))
+                        img = bg
+                    elif img.mode != "RGB":
+                        img = img.convert("RGB")
+                images.append(img)
 
-            if save_dir:
-                dst = os.path.join(save_dir, Path(result_path).name)
-                shutil.copy2(result_path, dst)
-                QMessageBox.information(self, "导出成功",
-                    f"✅ 图片已导出至：\n{dst}")
-                self._set_status(f"✅ 图片已导出至：{dst}", "success")
+            # 2) 单图直接保存 / 多图合并
+            if len(images) == 1:
+                merged = images[0]
             else:
-                QMessageBox.information(self, "导出完成",
-                    f"✅ 图片已合并（未指定保存路径，用临时目录）")
-                self._set_status("✅ 图片导出完成", "success")
+                # 多图：纵向拼接（保持原 RGBA/RGB）
+                widths = [im.width for im in images]
+                heights = [im.height for im in images]
+                canvas_w = max(widths)
+                canvas_h = sum(heights)
+                # 按第一张图的 mode 决定画布 mode
+                if images[0].mode == "RGBA":
+                    canvas = PILImage.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+                else:
+                    canvas = PILImage.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
+                y = 0
+                for im in images:
+                    x = (canvas_w - im.width) // 2
+                    if im.mode == "RGBA" and canvas.mode == "RGBA":
+                        canvas.alpha_composite(im, (x, y))
+                    else:
+                        canvas.paste(im, (x, y))
+                    y += im.height
+                merged = canvas
 
+            # 3) 保存到目标路径
+            if not save_dir:
+                save_dir = QFileDialog.getExistingDirectory(self, "选择保存目录")
+                if not save_dir:
+                    self._set_status("已取消导出", "info")
+                    return
+
+            ext = "png" if fmt == "png" else "jpg"
+            suffix = f"_{os.getpid()}" if len(paths) > 1 else ""
+            base_name = "merged" if len(paths) > 1 else Path(paths[0]).stem
+            fname = f"{base_name}{suffix}.{ext}"
+            dst = os.path.join(save_dir, fname)
+
+            if fmt == "jpg":
+                # JPG 不支持 RGBA → 强制转 RGB
+                if merged.mode != "RGB":
+                    bg = PILImage.new("RGB", merged.size, (255, 255, 255))
+                    if merged.mode in ("RGBA", "LA"):
+                        bg.paste(merged, mask=merged.split()[-1])
+                    else:
+                        bg.paste(merged.convert("RGB"))
+                    merged = bg
+                merged.save(dst, "JPEG", quality=95)
+            else:
+                # PNG：保留原 mode（RGBA 或 RGB）
+                merged.save(dst, "PNG")
+
+            QMessageBox.information(self, "导出成功",
+                f"✅ 图片已导出至：\n{dst}\n\n"
+                f"格式：{ext.upper()}\n"
+                f"透明底：{'保留' if (fmt=='png' and keep_alpha) else '白底'}")
+            self._set_status(f"✅ 图片已导出至：{dst}", "success")
             self.reset_app()
             self._set_status("✅ 导出完成，可继续拖入新图片", "success")
         except Exception as exc:
