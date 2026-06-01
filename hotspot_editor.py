@@ -35,7 +35,7 @@ from urllib.parse import urlparse
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QScrollArea, QListWidget, QListWidgetItem, QMessageBox,
-    QDialogButtonBox, QInputDialog
+    QDialogButtonBox, QInputDialog, QFrame
 )
 from PySide6.QtCore import Qt, QRect, QPoint, Signal
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QMouseEvent, QFont
@@ -231,15 +231,40 @@ class HotspotEditorDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        # 提示
-        tip = QLabel(
-            "💡 在图片上拖动鼠标框选可点击区域 → 填 URL → 添加\n"
-            "   已有热区以橙色虚线框显示，可在下方列表编辑/删除/重选区域。"
+        # ── 顶部新手引导（3 步图示 + 实时状态） ──
+        guide = QFrame()
+        guide.setStyleSheet(
+            "QFrame { background: #EFF6FF; border: 1px solid #BFDBFE; "
+            "border-radius: 8px; padding: 10px; }"
         )
-        tip.setFont(QFont("Microsoft YaHei", 10))
-        tip.setStyleSheet("color: #6B7280; background: transparent;")
-        tip.setWordWrap(True)
-        root.addWidget(tip)
+        guide_layout = QVBoxLayout(guide)
+        guide_layout.setContentsMargins(12, 8, 12, 8)
+        guide_layout.setSpacing(4)
+
+        guide_title = QLabel("🎯 3 步添加可点击按钮")
+        guide_title.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
+        guide_title.setStyleSheet("color: #1E3A8A; background: transparent;")
+        guide_layout.addWidget(guide_title)
+
+        guide_steps = QLabel(
+            "  ① 在上方图片上 <b>按住鼠标左键拖动</b> 框选可点击区域\n"
+            "  ② 在下方 <b>URL 框</b> 粘贴或输入链接（自动补 https://）\n"
+            "  ③ 点 <b>✓ 添加</b> 按钮，重复 ①②③ 可添加多个"
+        )
+        guide_steps.setFont(QFont("Microsoft YaHei", 10))
+        guide_steps.setStyleSheet("color: #1E40AF; background: transparent;")
+        guide_steps.setWordWrap(True)
+        guide_layout.addWidget(guide_steps)
+
+        # 状态提示条（用于"添加成功"等实时反馈）
+        self.status_label = QLabel("📍 提示：框选区域会自动激活 URL 输入框")
+        self.status_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        self.status_label.setStyleSheet(
+            "color: #0078D4; background: #DBEAFE; padding: 6px 10px; "
+            "border-radius: 4px;"
+        )
+        guide_layout.addWidget(self.status_label)
+        root.addWidget(guide)
 
         # 图片画布
         scroll = QScrollArea()
@@ -337,7 +362,6 @@ class HotspotEditorDialog(QDialog):
     # ── 状态机 ──────────────────────────────
     def _on_selection(self, rect: QRect):
         """用户在画布上拖出矩形 → 提示当前选区信息"""
-        # 改区域模式下，绿色显示"新选区"；普通模式蓝色
         if self.canvas.mode == ImageCanvas.MODE_EDIT:
             prefix = "✎ 新选区"
         else:
@@ -346,7 +370,31 @@ class HotspotEditorDialog(QDialog):
             f"{prefix}: x={rect.x()}, y={rect.y()}, "
             f"w={rect.width()}, h={rect.height()}"
         )
+        # V4.6.4：状态条提示
+        self._set_status(
+            f"📐 已框选 {rect.width()}×{rect.height()}px — 粘贴 URL 后按回车或点 ✓ 添加",
+            "info",
+        )
         self.input_url.setFocus()
+        # 选 URL 框全选便于直接粘贴覆盖
+        self.input_url.selectAll()
+
+    def _set_status(self, text: str, kind: str = "info"):
+        """更新顶部状态条（替代模态弹窗的非阻塞反馈）"""
+        if not hasattr(self, "status_label"):
+            return
+        colors = {
+            "info":    ("#0078D4", "#DBEAFE"),  # 蓝底蓝字
+            "success": ("#059669", "#D1FAE5"),  # 绿底绿字
+            "warning": ("#D97706", "#FEF3C7"),  # 黄底黄字
+            "error":   ("#DC2626", "#FEE2E2"),  # 红底红字
+        }
+        fg, bg = colors.get(kind, colors["info"])
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(
+            f"color: {fg}; background: {bg}; padding: 6px 10px; "
+            f"border-radius: 4px; font-weight: bold;"
+        )
 
     def _clear_pending(self):
         """清除当前画布选区（不影响已添加的热区）"""
@@ -384,10 +432,10 @@ class HotspotEditorDialog(QDialog):
             if not ok:
                 QMessageBox.warning(self, "无法更新", reason)
                 return
-            # 用 HotspotMap.update 已写入的是新数据，刷新本地副本
             self._current = self.hotspot_map.get(self.slice_filename)
             self._after_change(edit_mode_done=True)
-            QMessageBox.information(self, "已更新", f"热区 {idx + 1} 已更新。")
+            # V4.6.4：状态条反馈（不再弹模态对话框）
+            self._set_status(f"✅ 热区 #{idx + 1} 已更新（{len(self._current)} 个）", "success")
         else:
             # 添加模式
             ok, reason = self.hotspot_map.add(self.slice_filename, candidate)
@@ -396,6 +444,13 @@ class HotspotEditorDialog(QDialog):
                 return
             self._current = self.hotspot_map.get(self.slice_filename)
             self._after_change(edit_mode_done=False)
+            # V4.6.4：状态条反馈 + 标记最新热区 + 滚动到列表底部
+            new_idx = len(self._current) - 1
+            self._set_status(
+                f"✅ 已添加热区 #{new_idx + 1}（共 {len(self._current)} 个）— 继续拖选可添加更多",
+                "success",
+            )
+            self._highlight_latest = new_idx
 
     def _after_change(self, edit_mode_done: bool):
         """添加/更新后清理状态"""

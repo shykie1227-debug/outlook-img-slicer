@@ -34,7 +34,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.3"
+VERSION = "4.6.4"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -818,6 +818,8 @@ class MainWindow(QMainWindow):
             self.worker = None
 
     def _show_thumbnails(self, paths: List[str]):
+        """展示切片缩略图，V4.6.4 加角标 + 双行提示"""
+        from PySide6.QtWidgets import QVBoxLayout, QWidget
         while self.thumb_grid.count():
             item = self.thumb_grid.takeAt(0)
             if item.widget():
@@ -825,20 +827,50 @@ class MainWindow(QMainWindow):
         cols = 4
         for i, path in enumerate(paths):
             row, col = divmod(i, cols)
+            # 每个缩略图用 QWidget 包裹：上面图，下面文字标识
+            wrapper = QWidget()
+            wrapper.setFixedSize(128, 130)
+            wrapper.setCursor(Qt.PointingHandCursor)
+            wrapper.setToolTip(
+                f"切片 {i + 1}: {Path(path).name}\n"
+                f"💡 点击可添加/编辑可点击按钮（热区）"
+            )
+            wrapper.setStyleSheet(
+                "QWidget { background: transparent; }"
+                "QWidget:hover { background: #EFF6FF; border-radius: 8px; }"
+            )
+            wrapper_layout = QVBoxLayout(wrapper)
+            wrapper_layout.setContentsMargins(4, 4, 4, 4)
+            wrapper_layout.setSpacing(2)
+
+            # 图片
             thumb = QLabel()
             thumb.setFixedSize(120, 100)
             thumb.setScaledContents(True)
             thumb.setStyleSheet(
                 f"background: {Theme.CARD}; border-radius: 8px; border: 1px solid {Theme.BORDER};"
-                f"QToolTip {{ background: #1D1D1F; color: white; border: none; padding: 4px 8px; }}"
             )
             pixmap = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             thumb.setPixmap(pixmap)
-            thumb.setToolTip(f"切片 {i + 1}: {Path(path).name}\n点击编辑可点击按钮")
-            thumb.setCursor(Qt.PointingHandCursor)
-            thumb.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
-            self.thumb_grid.addWidget(thumb, row, col)
+            wrapper_layout.addWidget(thumb)
+
+            # 文字标识
+            label = QLabel(f"#{i+1} ✏️ 编辑热区")
+            label.setFont(QFont("Microsoft YaHei", 9))
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet("color: #0078D4; background: transparent; padding: 2px;")
+            wrapper_layout.addWidget(label)
+
+            # 点击事件
+            wrapper.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
+            self.thumb_grid.addWidget(wrapper, row, col)
         self.preview_area.show()
+        # V4.6.4：状态条提示缩略图可点
+        if paths:
+            self._set_status(
+                f"🖼️ 已生成 {len(paths)} 张切片 — 点击下方任一缩略图可添加可点击热区",
+                "info",
+            )
 
     def _save_slices(self):
         if not self.slice_paths:
