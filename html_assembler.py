@@ -67,6 +67,58 @@ def _build_map_block(map_name: str, hotspots: List[Hotspot],
     )
 
 
+def _build_cta_row(hotspots: List[Hotspot]) -> str:
+    """
+    为 Outlook 邮件生成「可点击 CTA 链接列表」。
+
+    为什么需要这个？
+      Outlook 使用 Word 渲染引擎解析邮件 HTML，Word 引擎不解析 <map>/<area>，
+      所以仅靠图片热区在 Outlook 中不可点。
+      为了让 Outlook 用户也能点击跳转，在每张有热区的切片下方追加一个
+      带热区编号 + 域名的可点击链接列表。
+
+    Outlook 兼容性：
+      ✅ Outlook 2007/2010/2013/2016/2019/2021/365
+      ✅ Outlook for Mac
+      ✅ Outlook web (outlook.com)
+      ✅ Gmail / 其他 web 邮箱
+
+    Returns:
+        <tr>...</tr> HTML 字符串（直接拼接进主 table）
+    """
+    if not hotspots:
+        return ""
+    items = []
+    for idx, h in enumerate(hotspots, 1):
+        # 提取域名作为显示文本（比完整 URL 短，用户友好）
+        try:
+            from urllib.parse import urlparse
+            display = urlparse(h.url).netloc or h.url
+        except Exception:
+            display = h.url
+        # alt 文本优先用 text，否则用域名
+        link_text = h.text if h.text else display
+        items.append(
+            f'<a href="{h.url}" target="_blank" '
+            f'style="color: #0078D4; text-decoration: none; '
+            f'font-family: Microsoft YaHei, Arial, sans-serif; font-size: 14px;">'
+            f'🔗 [{idx}] {link_text}'
+            f'</a>'
+        )
+    # 用 <br> 分隔多个链接，避免在 Outlook 表格里出现奇怪间距
+    links_html = "<br>".join(items)
+    return (
+        f'<tr>\n'
+        f'<td align="center" style="'
+        f'padding: 12px 8px 8px 8px; margin: 0; '
+        f'background-color: #F9FAFB;'
+        f'">\n'
+        f'{links_html}\n'
+        f'</td>\n'
+        f'</tr>'
+    )
+
+
 def assemble_html(image_paths: List[str], original_width: int = 650,
                   hotspots: Optional[HotspotMap] = None) -> str:
     """
@@ -111,6 +163,10 @@ def assemble_html(image_paths: List[str], original_width: int = 650,
             f'</td>\n'
             f'</tr>\n'
         )
+        # 「双保险」：在每张有热区的切片下方追加可点击 CTA 链接列表
+        # （Outlook Word 引擎不解析 <map>/<area>，但能解析 <a> 链接）
+        if slice_hotspots:
+            img_rows += _build_cta_row(slice_hotspots) + "\n"
 
     html = (
         f'<html xmlns="http://www.w3.org/1999/xhtml">\n'
@@ -183,6 +239,9 @@ def generate_plain_html(image_paths: List[str], original_width: int = 650,
             f'</td>\n'
             f'</tr>\n'
         )
+        # 双保险：复制到剪贴板的 HTML 也加 CTA 链接列表
+        if slice_hotspots:
+            img_rows += _build_cta_row(slice_hotspots) + "\n"
 
     html = (
         f'<html xmlns="http://www.w3.org/1999/xhtml">\n'

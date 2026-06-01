@@ -1,17 +1,20 @@
 """
-PSD 解析模块
-将 PSD 文档展平为单张 PIL Image（自动合成所有可见图层），再走和普通图片一样的切片流程。
+PSD / PSB 解析模块
+将 Photoshop 文档展平为单张 PIL Image（自动合成所有可见图层），再走和普通图片一样的切片流程。
 
 核心思路：psd-tools 提供 PSDImage.composite()，直接按 Photoshop「合并可见图层」的方式
 渲染成 PIL Image，文字、形状、图层蒙版、混合模式都会被正确合成。
 
-支持格式：.psd（Photoshop Document）
-不支持：.psb（Large Document Format）—— 提示用户先在 Photoshop 另存为 PSD
+支持格式：
+  - .psd（Photoshop Document）—— 最大 30,000×30,000 像素
+  - .psb（Photoshop Large Document Format）—— 最大 300,000×300,000 像素
+两种格式文件头都是 '8BPS'，psd-tools 透明处理，代码逻辑相同。
 
 依赖提示：psd_tools 内部依赖 numpy（仅在运行时需要，不在顶层 import 以避免
 主程序未用 PSD 功能时启动报错）。本模块通过 _ensure_dependencies() 懒加载验证。
 """
 from typing import List
+from pathlib import Path
 from PIL import Image
 
 _PSDImage = None  # 懒加载，模块导入时不去强求 psd_tools/numpy
@@ -45,14 +48,15 @@ def _ensure_dependencies():
 
 
 def _load_psd(psd_path: str):
-    """打开 PSD 文件并做基本校验。"""
+    """打开 PSD/PSB 文件并做基本校验。"""
     PSDImage = _ensure_dependencies()
-    if not psd_path.lower().endswith(".psd"):
-        raise ValueError(f"不是有效的 PSD 文件: {psd_path}")
+    ext = Path(psd_path).suffix.lower()
+    if ext not in (".psd", ".psb"):
+        raise ValueError(f"不是有效的 PSD/PSB 文件: {psd_path}")
     try:
         return PSDImage.open(psd_path)
     except Exception as e:
-        raise RuntimeError(f"PSD 文件解析失败: {e}")
+        raise RuntimeError(f"PSD/PSB 文件解析失败: {e}")
 
 
 def psd_to_images(psd_path: str, dpi: int = 150) -> List[Image.Image]:

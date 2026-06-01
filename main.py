@@ -47,7 +47,7 @@ class Config:
     WINDOW_HEIGHT = 720
     SUPPORTED_EXTENSIONS = (
         ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif",
-        ".pdf", ".pptx", ".ppt", ".psd"
+        ".pdf", ".pptx", ".ppt", ".psd", ".psb"
     )
 
 
@@ -159,7 +159,7 @@ class DropZone(QFrame):
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
         self.title_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; border: none;")
-        self.tip_label = QLabel("支持 JPG · PNG · PDF · PPT · PSD，点击上传")
+        self.tip_label = QLabel("支持 JPG · PNG · PDF · PPT · PSD/PSB，点击上传")
         self.tip_label.setAlignment(Qt.AlignCenter)
         self.tip_label.setFont(_font("Microsoft YaHei", 12))
         self.tip_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent; border: none;")
@@ -241,7 +241,7 @@ class ProcessWorker(QThread):
                 slice_paths = self._convert_and_slice(pdf_to_images, "pdf_page", 45, 75)
             elif ext in (".pptx", ".ppt"):
                 slice_paths = self._convert_and_slice(pptx_to_images, "ppt_page", 45, 75)
-            elif ext == ".psd":
+            elif ext in (".psd", ".psb"):
                 # 懒加载 psd_slicer，依赖 psd_tools + numpy
                 from psd_slicer import psd_to_images
                 slice_paths = self._convert_and_slice(psd_to_images, "psd_page", 45, 75)
@@ -494,7 +494,7 @@ class MainWindow(QMainWindow):
     def _reset_drop_zone(self):
         self.drop_zone.title_label.setText("拖拽图片到此处")
         self.drop_zone.icon_label.setText("📂")
-        self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT · PSD，点击上传")
+        self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT · PSD/PSB，点击上传")
 
     def _on_width_edited(self):
         """手动输入完成时同步到滑块，超限弹窗提醒"""
@@ -533,7 +533,7 @@ class MainWindow(QMainWindow):
     def _select_file(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "选择图片、PDF 或 PPT", "",
-            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf);;PPT/PPTX (*.pptx *.ppt);;PSD (*.psd)"
+            "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.gif);;PDF (*.pdf);;PPT/PPTX (*.pptx *.ppt);;PSD/PSB (*.psd *.psb)"
         )
         if paths:
             self._handle_dropped_files(paths)
@@ -553,7 +553,7 @@ class MainWindow(QMainWindow):
         # 过滤合法后缀
         valid = [p for p in paths if Path(p).suffix.lower() in Config.SUPPORTED_EXTENSIONS]
         if not valid:
-            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF、PPT 或 PSD 文件。")
+            QMessageBox.warning(self, "格式不支持", "请选择图片、PDF、PPT 或 PSD/PSB 文件。")
             return
 
         if len(valid) > 1:
@@ -611,7 +611,7 @@ class MainWindow(QMainWindow):
         """单图/合并后处理的统一入口"""
         ext = Path(path).suffix.lower()
         # 安全检查
-        if ext not in (".pdf", ".pptx", ".ppt", ".psd"):
+        if ext not in (".pdf", ".pptx", ".ppt", ".psd", ".psb"):
             try:
                 check_image_safety(path)
             except ImageSafetyError as e:
@@ -624,7 +624,7 @@ class MainWindow(QMainWindow):
                     return
 
         # 检查切片数量
-        if ext not in (".pdf", ".pptx", ".ppt"):
+        if ext not in (".pdf", ".pptx", ".ppt", ".psd", ".psb"):
             try:
                 info = get_image_info(path)
                 sc = (info["height"] + Config.MAX_HEIGHT_PER_SLICE - 1) // Config.MAX_HEIGHT_PER_SLICE
