@@ -30,6 +30,7 @@ from hotspot_editor import HotspotEditorDialog
 from html_assembler import assemble_html, generate_plain_html
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
+from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL, SORT_DRAG_ORDER
 
 
 VERSION = "4.6.1"
@@ -549,21 +550,44 @@ class MainWindow(QMainWindow):
         self._handle_dropped_files([temp_path])
 
     def _handle_dropped_files(self, paths: List[str]):
-        """入口：处理一次拖入/选择的一批文件"""
+        """
+        入口：处理一次拖入/选择的一批文件。
+        V4.6.2 重构：拖入后弹「处理模式选择」弹窗（切图 / 图片导出 + 排序 + 保存路径）。
+        """
         # 过滤合法后缀
         valid = [p for p in paths if Path(p).suffix.lower() in Config.SUPPORTED_EXTENSIONS]
         if not valid:
             QMessageBox.warning(self, "格式不支持", "请选择图片、PDF、PPT 或 PSD/PSB 文件。")
             return
 
-        if len(valid) > 1:
-            # 按文件名自然排序，保证顺序可预测
+        # 弹模式选择弹窗（V4.6.2 新增）
+        dlg = ProcessModeDialog(valid, self)
+        if dlg.exec() != QDialog.Accepted:
+            return  # 用户取消
+
+        result = dlg.get_result()
+        mode = result["mode"]
+        sort_mode = result["sort_mode"]
+        save_dir = result["save_dir"]
+
+        # 按选择的排序方式排序
+        if sort_mode == SORT_NATURAL:
             def natural_key(s):
                 return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', Path(s).stem)]
-            valid.sort(key=natural_key)
-            self._handle_multi_files(valid)
-        else:
-            self._start_processing(valid[0])
+            valid = sorted(valid, key=natural_key)
+        # SORT_DRAG_ORDER: 保持拖入顺序，不排序
+
+        # 路由
+        if mode == MODE_SLICE:
+            # 切图模式：原 V4.6.1 路径
+            if len(valid) == 1:
+                self._start_processing(valid[0], save_dir=save_dir)
+            else:
+                # 多图：走原有的「智能拼图」弹窗
+                self._handle_multi_files(valid, save_dir=save_dir)
+        elif mode == MODE_EXPORT:
+            # 图片导出模式：V4.6.2 新增
+            self._export_images(valid, save_dir=save_dir)
 
     def _handle_multi_files(self, paths: List[str]):
         """多张图片 → 弹框询问是否智能拼图"""
@@ -583,7 +607,7 @@ class MainWindow(QMainWindow):
             return
         if btn_box.clickedButton() == btn_single:
             # 仅处理第一张
-            self._start_processing(paths[0])
+            self._start_processing(paths[0], save_dir=save_dir)
             self._set_status("💡 多图模式下仅处理了第一张图片，其余已忽略", "info")
             return
 
@@ -591,12 +615,15 @@ class MainWindow(QMainWindow):
         self._set_status("正在智能拼接多张图片...", "info")
         try:
             merged_path = auto_merge_images(paths, direction="vertical")
-            # 保存合并后的图片
-            save_dir = QFileDialog.getExistingDirectory(self, "选择保存合并图片的位置", "")
+            # V4.6.2 优化：主弹窗已选的保存路径优先；否则再问
+            if not save_dir:
+                save_dir = QFileDialog.getExistingDirectory(self, "选择保存合并图片的位置", "")
             if not save_dir:
                 QMessageBox.information(self, "提示", "已取消保存，合并后的图片仅用于本次临时切片。")
             else:
-                fname = f"merged_{os.getpid()}.jpg"
+                # 保留原文件格式，不强制改 .jpg
+                src_ext = Path(merged_path).suffix.lower() or ".jpg"
+                fname = f"merged_{os.getpid()}{src_ext}"
                 save_path = os.path.join(save_dir, fname)
                 shutil.copy2(merged_path, save_path)
                 self._set_status(f"✅ 合并图片已保存至：{save_path}", "success")
@@ -607,7 +634,34 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "拼图失败", str(exc))
 
-    def _start_processing(self, path: str):
+    def _export_images(self, paths: List[str], save_dir: Optional[str] = None):
+        """图片导出模式：多图合并为长图，或单图直接保存到指定路径。"""
+        self._set_status("正在图片导出...", "info")
+        try:
+            if len(paths) == 1:
+                # 单张：直接复制到保存目录（或临时目录）
+                result_path = paths[0]
+            else:
+                # 多张：合并为长图
+                result_path = auto_merge_images(paths, direction="vertical")
+
+            if save_dir:
+                dst = os.path.join(save_dir, Path(result_path).name)
+                shutil.copy2(result_path, dst)
+                QMessageBox.information(self, "导出成功",
+                    f"✅ 图片已导出至：\n{dst}")
+                self._set_status(f"✅ 图片已导出至：{dst}", "success")
+            else:
+                QMessageBox.information(self, "导出完成",
+                    f"✅ 图片已合并（未指定保存路径，用临时目录）")
+                self._set_status("✅ 图片导出完成", "success")
+
+            self.reset_app()
+            self._set_status("✅ 导出完成，可继续拖入新图片", "success")
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", str(exc))
+
+    def _start_processing(self, path: str, save_dir: Optional[str] = None):
         """单图/合并后处理的统一入口"""
         ext = Path(path).suffix.lower()
         # 安全检查
