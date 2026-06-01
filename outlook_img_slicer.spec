@@ -31,6 +31,13 @@ hiddenimports = [
     # V4 新增模块
     "image_safety",
     "html_assembler",
+    # V4.6 新增：PSD 支持（psd-tools 依赖 numpy）
+    "psd_slicer",
+    "psd_tools",
+    "psd_tools.api.psd_image",
+    "psd_tools.api.pil_io",
+    "psd_tools.api.layers",
+    "numpy",
 ]
 
 a = Analysis(
@@ -45,7 +52,6 @@ a = Analysis(
     excludes=[
         "tkinter",
         "matplotlib",
-        "numpy",
         "scipy",
         "pandas",
         "jupyter",
@@ -56,6 +62,7 @@ a = Analysis(
         "jax",
         "torch",
         "tensorflow",
+        # numpy 不再排除：psd-tools 内部依赖
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

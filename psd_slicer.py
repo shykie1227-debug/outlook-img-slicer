@@ -7,21 +7,46 @@ PSD 解析模块
 
 支持格式：.psd（Photoshop Document）
 不支持：.psb（Large Document Format）—— 提示用户先在 Photoshop 另存为 PSD
+
+依赖提示：psd_tools 内部依赖 numpy（仅在运行时需要，不在顶层 import 以避免
+主程序未用 PSD 功能时启动报错）。本模块通过 _ensure_dependencies() 懒加载验证。
 """
 from typing import List
 from PIL import Image
 
-try:
-    from psd_tools import PSDImage
-except ImportError as e:
-    raise ImportError(
-        "缺少 psd-tools 库，请运行 'pip install psd-tools' 安装。"
-        f"原始错误: {e}"
-    )
+_PSDImage = None  # 懒加载，模块导入时不去强求 psd_tools/numpy
 
 
-def _load_psd(psd_path: str) -> PSDImage:
+def _ensure_dependencies():
+    """
+    首次调用时验证依赖是否可用，缺失时给出针对性提示。
+    放在函数内而不是模块顶部，是为了避免主程序未使用 PSD 时连带启动失败。
+    """
+    global _PSDImage
+    if _PSDImage is not None:
+        return _PSDImage
+    try:
+        from psd_tools import PSDImage as _PSDI
+        _PSDImage = _PSDI
+        return _PSDImage
+    except ImportError as e:
+        missing = []
+        if "numpy" in str(e).lower() or "No module named 'numpy'" in str(e):
+            missing.append("numpy")
+        if "psd_tools" in str(e).lower() or "No module named 'psd_tools'" in str(e):
+            missing.append("psd-tools")
+        if not missing:
+            missing.append("psd-tools / numpy")
+        raise ImportError(
+            "PSD 支持需要额外依赖，请运行以下命令安装后重启程序：\n"
+            f"  pip install {' '.join(missing)}\n"
+            f"原始错误: {e}"
+        )
+
+
+def _load_psd(psd_path: str):
     """打开 PSD 文件并做基本校验。"""
+    PSDImage = _ensure_dependencies()
     if not psd_path.lower().endswith(".psd"):
         raise ValueError(f"不是有效的 PSD 文件: {psd_path}")
     try:

@@ -37,6 +37,8 @@ def check_and_install_deps():
         "pymupdf": "PyMuPDF",
         "PySide6": "PySide6",
         "pptx": "python-pptx",
+        "psd_tools": "psd-tools",
+        "numpy": "numpy",
     }
     required = list(import_to_pip.keys())
     missing = []

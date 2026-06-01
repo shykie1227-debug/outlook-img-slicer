@@ -23,7 +23,8 @@ from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetr
 from image_slicer import detect_and_slice, get_image_info, auto_merge_images
 from pdf_slicer import pdf_to_images
 from ppt_slicer import pptx_to_images
-from psd_slicer import psd_to_images
+# psd_slicer 依赖 psd_tools + numpy，仅在用户上传 .psd 时懒加载，避免主程序启动报错
+# from psd_slicer import psd_to_images
 from clickable_map import HotspotMap
 from hotspot_editor import HotspotEditorDialog
 from html_assembler import assemble_html, generate_plain_html
@@ -241,6 +242,8 @@ class ProcessWorker(QThread):
             elif ext in (".pptx", ".ppt"):
                 slice_paths = self._convert_and_slice(pptx_to_images, "ppt_page", 45, 75)
             elif ext == ".psd":
+                # 懒加载 psd_slicer，依赖 psd_tools + numpy
+                from psd_slicer import psd_to_images
                 slice_paths = self._convert_and_slice(psd_to_images, "psd_page", 45, 75)
             else:
                 slice_paths = detect_and_slice(self.file_path, max_height=1728, smart=self.smart, target_width=self.width)
