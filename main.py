@@ -39,8 +39,8 @@ class Config:
     DEFAULT_WIDTH = 960
     MAX_HEIGHT_PER_SLICE = 1728
     MAX_SLICE_COUNT = 20
-    WINDOW_WIDTH = 720
-    WINDOW_HEIGHT = 640
+    WINDOW_WIDTH = 760
+    WINDOW_HEIGHT = 720
     SUPPORTED_EXTENSIONS = (
         ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".pdf", ".pptx", ".ppt"
     )
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         self.setWindowTitle(Config.APP_TITLE)
-        self.setMinimumSize(640, 660)
+        self.setMinimumSize(720, 720)
         self.resize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
 
         container = QWidget()
@@ -333,6 +333,13 @@ class MainWindow(QMainWindow):
         self.slider_width.valueChanged.connect(self._on_slider_changed)
         toolbar.addWidget(self.slider_width)
 
+        toolbar.addStretch()
+        root.addLayout(toolbar)
+
+        # ══ 第二行：智能切图 + 复制HTML（右对齐） ═══
+        toolbar2 = QHBoxLayout()
+        toolbar2.setSpacing(10)
+
         self.chk_smart = QCheckBox("智能切图")
         self.chk_smart.setFont(_font("Microsoft YaHei", 12))
         self.chk_smart.setChecked(False)  # 默认等分切图
@@ -344,7 +351,7 @@ class MainWindow(QMainWindow):
             f"QCheckBox::indicator:checked {{ background: {Theme.PRIMARY}; "
             f"border-color: {Theme.PRIMARY}; }}"
         )
-        toolbar.addWidget(self.chk_smart)
+        toolbar2.addWidget(self.chk_smart)
 
         self.btn_copy_html = QPushButton("📋 复制HTML")
         self.btn_copy_html.setFont(_font("Microsoft YaHei", 12))
@@ -353,10 +360,10 @@ class MainWindow(QMainWindow):
         self.btn_copy_html.setStyleSheet(_btn_ghost())
         self.btn_copy_html.setFixedSize(_btn_size("📋 复制HTML", 12, extra_w=20, height=34))
         self.btn_copy_html.clicked.connect(self._copy_html)
-        toolbar.addWidget(self.btn_copy_html)
+        toolbar2.addWidget(self.btn_copy_html)
 
-        toolbar.addStretch()
-        root.addLayout(toolbar)
+        toolbar2.addStretch()
+        root.addLayout(toolbar2)
 
         # ══ 邮件标题 ════════════════════════
         subject_lbl = QLabel("邮件标题（可选）")

@@ -106,39 +106,109 @@ def _try_powerpoint_export(pptx_path: str, dpi: int = 150) -> List[Image.Image] 
 # ────────────────────────────────────────────
 # 方案 2：LibreOffice soffice（跨平台保真）
 # ────────────────────────────────────────────
+def _find_soffice() -> str | None:
+    """
+    跨平台查找 LibreOffice 可执行文件。
+    PATH 优先，回退到平台常见安装路径（Windows 注册表路径过多，留给 shutil.which 处理）。
+    """
+    candidates = [
+        "soffice", "soffice.exe",
+        # macOS Homebrew (Apple Silicon / Intel)
+        "/opt/homebrew/bin/soffice",
+        "/usr/local/bin/soffice",
+        # macOS 官方 .dmg 安装
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        # Linux snap / flatpak
+        "/snap/bin/libreoffice",
+        "/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice",
+        # Linux 系统包
+        "/usr/bin/soffice",
+        "/usr/lib/libreoffice/program/soffice",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return shutil.which("soffice") or shutil.which("soffice.exe")
+
+
+def _soffice_export(pptx_path: str, outdir: str, target_format: str) -> bool:
+    """
+    调用 soffice 导出整个文件为目标格式（pdf/png/jpg）。
+    返回 True 表示转换成功。
+    """
+    soffice = _find_soffice()
+    if soffice is None:
+        return False
+    try:
+        # 使用独立 user profile 避免多实例冲突；指定安全目录
+        profile_dir = tempfile.mkdtemp(prefix="soffice_profile_")
+        cmd = [
+            soffice,
+            "--headless",
+            "--nologo", "--nofirststartwizard", "--norestore",
+            f"-env:UserInstallation=file://{profile_dir}",
+            "--convert-to", target_format,
+            "--outdir", outdir,
+            os.path.abspath(pptx_path),
+        ]
+        result = subprocess.run(
+            cmd, capture_output=True, timeout=180, text=True
+        )
+        shutil.rmtree(profile_dir, ignore_errors=True)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
 def _try_soffice_render(pptx_path: str, dpi: int = 150) -> List[Image.Image] | None:
     """
-    soffice --headless --convert-to png 将每页导出为 PNG。
-    优点：跨平台，形状/文字渲染好。
-    缺点：需要安装 LibreOffice，部分复杂动画效果略逊于 PowerPoint。
+    LibreOffice 渲染 PPT 全保真方案（文字 + 形状 + 嵌入图 + SmartArt）。
+
+    关键设计：先导出为 PDF（多页一次性输出，无命名错乱问题），
+    再通过 PyMuPDF/pdf2image 把每页转成 PNG。
+    这样保证文字、形状、SmartArt、艺术字都按幻灯片原本的版式渲染成位图，
+    后续可以走和普通图片一样的切片流程。
     """
-    soffice = shutil.which("soffice") or shutil.which("soffice.exe")
-    if soffice is None:
+    if _find_soffice() is None:
         return None
 
     temp_dir = tempfile.mkdtemp(prefix="pptx_render_")
     try:
-        result = subprocess.run(
-            [soffice, "--headless", "--convert-to", "png",
-             "--outdir", temp_dir, pptx_path],
-            capture_output=True, timeout=180
-        )
-        if result.returncode != 0:
+        if not _soffice_export(pptx_path, temp_dir, "pdf"):
             return None
 
-        png_files = sorted(Path(temp_dir).glob("*.png"), key=lambda p: p.stem)
-        if not png_files:
+        pdf_files = sorted(Path(temp_dir).glob("*.pdf"), key=lambda p: p.stem)
+        if not pdf_files:
             return None
 
-        images = []
-        for f in png_files:
-            img = Image.open(f).convert("RGB")
-            # soffice 默认 96dpi → 等比缩放到目标 dpi
-            if dpi != 96:
-                new_w = int(img.width * dpi / 96)
-                new_h = int(img.height * dpi / 96)
-                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            images.append(img)
+        # 优先 PyMuPDF（纯 Python，无需 poppler），回退 pdf2image
+        images: List[Image.Image] = []
+        try:
+            import fitz  # PyMuPDF
+            for pdf_file in pdf_files:
+                doc = fitz.open(str(pdf_file))
+                try:
+                    # dpi=150 → zoom=150/72≈2.083
+                    zoom = dpi / 72.0
+                    mat = fitz.Matrix(zoom, zoom)
+                    for page in doc:
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        # 直接构造 PIL Image 避免中间文件 IO
+                        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                        images.append(img)
+                finally:
+                    doc.close()
+        except ImportError:
+            # 回退到 pdf2image（需要系统安装 poppler）
+            try:
+                from pdf2image import convert_from_path
+                for pdf_file in pdf_files:
+                    images.extend(convert_from_path(str(pdf_file), dpi=dpi))
+            except Exception:
+                return None
+
+        if not images:
+            return None
         return images
     except Exception:
         return None
@@ -187,8 +257,12 @@ def _try_pptx_extract(pptx_path: str, dpi: int = 150) -> List[Image.Image]:
 # ────────────────────────────────────────────
 def pptx_to_images(pptx_path: str, dpi: int = 150) -> List[Image.Image]:
     """
-    将 PPT/PPTX 每页渲染为 PIL Image。
+    将 PPT/PPTX 每页渲染为 PIL Image（保真渲染：文字 + 形状 + 图）。
     优先 PowerPoint COM（Windows + Office）→ LibreOffice soffice → python-pptx（兜底）。
+
+    注意：方案 1/2 都会把整页渲染成位图（包括文字、形状、SmartArt），
+    不会出现「图是图、字是字」的问题。
+    只有退到方案 3（python-pptx）时才会出现内容丢失，此时会发出明确警告。
 
     Args:
         pptx_path: PPT/PPTX 文件路径
@@ -202,14 +276,18 @@ def pptx_to_images(pptx_path: str, dpi: int = 150) -> List[Image.Image]:
     if images:
         return images
 
-    # 方案 2：LibreOffice soffice
+    # 方案 2：LibreOffice soffice（跨平台保真）
     images = _try_soffice_render(pptx_path, dpi)
     if images:
         return images
 
     # 方案 3：python-pptx（最后兜底，内容可能缺失）
-    # 此处打印警告，方便用户排查
-    print("[警告] PPT 解析使用了 python-pptx 方案，"
-          "仅能提取嵌入图片，文字/形状/SmartArt 内容可能丢失。"
-          "建议在 Windows 上安装 Microsoft PowerPoint 以获得完整保真渲染。")
+    print(
+        "[警告] PPT 解析退到 python-pptx 方案，仅能提取嵌入图片，"
+        "文字/形状/SmartArt 内容会丢失。\n"
+        "  修复建议：\n"
+        "    • Windows: 安装 Microsoft PowerPoint（程序自动走 COM 渲染）\n"
+        "    • macOS/Linux: 安装 LibreOffice（https://www.libreoffice.org/）\n"
+        "  安装后重启程序即可获得完整保真渲染。"
+    )
     return _try_pptx_extract(pptx_path, dpi)

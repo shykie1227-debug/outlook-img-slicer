@@ -14,10 +14,12 @@ from image_safety import check_image_safety, ImageSafetyError
 
 
 # ── 智能切图常量 ────────────────────────────
-SMART_SCAN_RATIO = 0.25       # 扫描窗口 = 切片高度 * 此比率（自适应）
-SMART_MIN_SCAN = 60           # 扫描窗口最小 px
-SMART_MAX_SCAN = 500          # 扫描窗口最大 px
-SMART_MIN_SPACING = 12        # 至少连续 N 行空白才算安全断点
+SMART_SCAN_RATIO = 0.5        # 扫描窗口 = 切片高度 * 此比率（自适应）
+SMART_MIN_SCAN = 80           # 扫描窗口最小 px
+SMART_MAX_SCAN = 800          # 扫描窗口最大 px
+SMART_MIN_SPACING = 16        # 至少连续 N 行空白才算安全断点
+SMART_TEXT_BUFFER = 28        # 切点上下 N px 内不能有文字/线条行（防“贴边切断”）
+SMART_MIN_BUFFER_VIOLATIONS = 0  # 缓冲带允许的最大文字行数
 BLANK_VARIANCE_THRESHOLD = 10 # 灰度标准差 < 此值视为"行内无变量"（空白/纯色行）
 BLANK_BRIGHTNESS_MIN = 180    # 空白行平均亮度下限（排除深色纯色区）
 TEXTURE_VARIANCE_MIN = 12     # 文字行灰度标准差下限（防止误判灰度不均的图片为文字）
@@ -117,6 +119,23 @@ def _is_text_like(mean_brightness: float, std_dev: float, transition_ratio: floa
     return std_dev >= TEXTURE_VARIANCE_MIN and transition_ratio >= 0.12
 
 
+def _count_text_rows_in_band(pixels, y_start: int, y_end: int, width: int) -> int:
+    """
+    统计 [y_start, y_end) 区间内的「文字/线条行」数量。
+    用于检查切点上下缓冲带是否靠近文字区（“加墙”逻辑）。
+    """
+    if y_end <= y_start:
+        return 0
+    text_rows = 0
+    for y in range(y_start, y_end):
+        mean, std, samples, trans = _row_stats(pixels, y, width)
+        if samples < 5:
+            continue
+        if _is_text_like(mean, std, trans):
+            text_rows += 1
+    return text_rows
+
+
 def _row_content_score(pixels, y: int, width: int, adaptive_threshold: float) -> float:
     """
     计算一行作为切点的“内容风险”分数，越低越适合切图。
@@ -213,6 +232,19 @@ def _find_smart_cut(pixels, width: int, height: int, target_cut: int,
                 # 选择连续空白行的中间位置作为切割点
                 cut_pos = y + streak // 2
 
+                # ── “加墙”检查：上下缓冲带内不能有文字/线条行 ───────
+                upper_start = max(0, cut_pos - SMART_TEXT_BUFFER)
+                lower_end = min(height, cut_pos + SMART_TEXT_BUFFER)
+                # 跳过空白带本身，只检查上下两端
+                text_in_buffer = (
+                    _count_text_rows_in_band(pixels, upper_start, y, width)
+                    + _count_text_rows_in_band(pixels, y + streak, lower_end, width)
+                )
+                if text_in_buffer > SMART_MIN_BUFFER_VIOLATIONS:
+                    # 上下靠近文字区，该断点不安全，惩罚后继续扫
+                    y = yy
+                    continue
+
                 # ── 评分公式 ──
                 #  空白行越多越好，越靠近 target_cut 越好
                 #  权重：空白行数 (×2) + 距离惩罚 (负，×0.2)
@@ -249,6 +281,14 @@ def _find_smart_cut(pixels, width: int, height: int, target_cut: int,
 
         avg_score = score / valid_rows
         avg_score += abs(y - target_cut) * 0.15
+
+        # “加墙”惩罚：切点上下缓冲带内文字行越多，风险越高
+        text_in_buffer = (
+            _count_text_rows_in_band(pixels, max(0, y - SMART_TEXT_BUFFER), y, width)
+            + _count_text_rows_in_band(pixels, y + 1, min(height, y + SMART_TEXT_BUFFER + 1), width)
+        )
+        avg_score += text_in_buffer * 25.0
+
         if avg_score < best_fallback_score:
             best_fallback_score = avg_score
             best_fallback = y
