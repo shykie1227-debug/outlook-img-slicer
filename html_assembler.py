@@ -54,24 +54,25 @@ def _get_img_dimensions(img_path: str) -> tuple:
         return img.size
 
 
-def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[str] = None, alt: str = "",
-                    original_width: int = 0) -> str:
+def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional[str] = None,
+              alt: str = "", original_width: int = 0, is_base64: bool = False) -> str:
     """
-    生成一张切片的 <tr>...</tr>：
-      - href 为 None:  普通图，<img>
-      - href 有值:    链接图，<a href="..."><img></a>
+    生成一张切片的 <td>...</td>（V4.6.9 修复纵向→横向拼接）。
 
-    V4.6.9 修复：original_width 是原图总宽度（如 1000px）。
-    当原图被物理切割成 N 段（200/400/400），每段实际宽 = actual_w，
-    HTML 显示宽 = display_w * (actual_w / original_width) 拼接 = 完整原图按 display_w 缩放。
-    原代码 display_w = actual_w 映射（不看原图宽）导致 N 段拼接 = N×display_w，远超原图。
+    拆 _build_image_row 的原因：
+      之前每段占一整 <tr> → 纵向堆叠 → V1 物理切割产物重叠成
+      “碎片化”视觉。现在改为同 source_index 的多段拼成一行 <tr>，
+      每段 1 个 <td> 横向并排，恢反原图。
+
+    Args:
+        cid_or_src: 若是 base64 模式（复制到剪贴板）则传 data:xxx；CID 模式传 cid:xxx
+        is_base64: True = generate_plain_html 路径，False = assemble_html 路径
     """
     try:
         actual_w, actual_h = _get_img_dimensions(slice_path)
     except Exception:
         actual_w, actual_h = 650, 650
 
-    # V4.6.9 修复：按原图宽比例分配显示宽度
     if original_width > 0 and actual_w > 0:
         ratio = actual_w / original_width
         seg_display_w = round(display_w * ratio)
@@ -79,12 +80,22 @@ def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[s
         seg_display_w = display_w
     seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
 
-    # alt 默认用文件名（Outlook 图片加载失败时显示）
     if not alt:
         alt = Path(slice_path).name
 
+    # base64 模式 vs CID 模式
+    if is_base64:
+        import base64
+        with open(slice_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        ext = Path(slice_path).suffix.lower().lstrip(".")
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+        src = f"data:{mime};base64,{b64}"
+    else:
+        src = cid_or_src
+
     img_tag = (
-        f'<img src="cid:{cid}" '
+        f'<img src="{src}" '
         f'width="{seg_display_w}" '
         f'height="{seg_display_h}" '
         f'alt="{alt}" '
@@ -93,8 +104,6 @@ def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[s
     )
 
     if href:
-        # 链接切片：<a> 包图，Outlook 桌面端可点
-        # 不用 inline-block（Outlook Word 引擎忽略），用 <a> + <img> 最简结构
         inner = (
             f'<a href="{href}" target="_blank" '
             f'style="display: block; text-decoration: none; outline: none;">'
@@ -105,39 +114,75 @@ def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[s
         inner = img_tag
 
     return (
-        f'<tr>\n'
-        f'<td align="center" style="'
-        f'text-align: center; '
+        f'<td align="left" valign="top" style="'
         f'padding: 0; margin: 0; '
         f'font-size: 0; line-height: 0; '
-        f'border: 0;'
+        f'border: 0; vertical-align: top;'
         f'">'
         f'{inner}'
         f'</td>\n'
-        f'</tr>'
     )
+
+
+def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[str] = None, alt: str = "",
+                    original_width: int = 0) -> str:
+    """
+    兼容旧 API：返回 <tr><td>...</td></tr>。
+    V4.6.9 后推荐使用 _build_cell + 手工拼 <tr>（见 assemble_html）。
+    """
+    return (
+        f'<tr>\n'
+        f'{_build_cell(slice_path, cid, display_w, href, alt, original_width)}'
+        f'</tr>\n'
+    )
+
+
+def _group_by_source(slices: List[SliceItem]) -> List[List[SliceItem]]:
+    """
+    按 sort_key 整数部分（即 source_index）分组，同一原图的所有段（含 hotspot 派生竖条）为一组。
+    组内按 sort_key 小数部分升序，组间按 source_index 升序。
+
+    V4.6.9 重构：使用纯 sort_key 推导，不依赖 sort_key 外部存储。
+    """
+    sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+    groups: List[List[SliceItem]] = []
+    current_group: List[SliceItem] = []
+    current_source: int = None
+    for s in sorted_slices:
+        src_idx = int(s.sort_key)  # 1.001 → 1
+        if current_source is None or src_idx != current_source:
+            if current_group:
+                groups.append(current_group)
+            current_group = [s]
+            current_source = src_idx
+        else:
+            current_group.append(s)
+    if current_group:
+        groups.append(current_group)
+    return groups
 
 
 def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
 
-    V4.6.7 排序架构：入口处统一 sorted(slices, key=sort_key)，输出顺序
-    **唯一由 sort_key 决定**，与调用方传入的顺序无关。
-
-    Args:
-        slices: 切片列表（带/不带链接）
-        display_w: 邮件中显示的图片宽度（px），默认 650
+    V4.6.9 重构：同 source_index 的多段拼成 1 个 <tr>（横向拼接），
+    不同 source_index 之间用独立 <tr>（纵向堆叠）。这样:
+      1. 单张原图的所有段（包括 hotspot 派生竖条）拼成 1 行 → 恢反原图视觉
+      2. 多张原图（智能切图切了 N 段 Y）→ N 行 × K 列
     """
-    # V4.6.7：唯一排序点 — 不允许依赖任何隐式顺序
     sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+    groups = _group_by_source(sorted_slices)
     rows = ""
-    for i, s in enumerate(sorted_slices):
-        cid = f"slice_{i + 1:03d}"
-        # V4.6.9 修复：传 original_width 给 _build_image_row
-        # 避免多段拼接 = N×display_w 超越原图
-        rows += _build_image_row(s.path, cid, display_w, s.href, s.alt_text,
-                                 s.original_width) + "\n"
+    cid_counter = 0
+    for group in groups:
+        cells = ""
+        for s in group:
+            cid_counter += 1
+            cid = f"slice_{cid_counter:03d}"
+            cells += _build_cell(s.path, f"cid:{cid}", display_w, s.href, s.alt_text,
+                                 s.original_width, is_base64=False)
+        rows += f'<tr>\n{cells}</tr>\n'
 
     return (
         f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
@@ -170,54 +215,17 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     生成纯内联 base64 的 HTML，供复制到剪贴板使用（不进 Outlook，直接贴到 Gmail / 网页邮箱）。
 
-    V4.6.7 排序架构：入口处统一 sorted(slices, key=sort_key)。
+    V4.6.9 重构：同 assemble_html 一样按 source_index 分组横向拼接。
     """
-    import base64
     sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+    groups = _group_by_source(sorted_slices)
     rows = ""
-    for i, s in enumerate(sorted_slices):
-        with open(s.path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
-        ext = Path(s.path).suffix.lower().lstrip(".")
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
-        src = f"data:{mime};base64,{b64}"
-        try:
-            actual_w, actual_h = _get_img_dimensions(s.path)
-        except Exception:
-            actual_w, actual_h = 650, 650
-        # V4.6.9 修复：按原图宽比例分配
-        if s.original_width > 0 and actual_w > 0:
-            ratio = actual_w / s.original_width
-            seg_display_w = round(display_w * ratio)
-        else:
-            seg_display_w = display_w
-        seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
-        alt = s.alt_text or Path(s.path).name
-
-        img_tag = (
-            f'<img src="{src}" '
-            f'width="{seg_display_w}" height="{seg_display_h}" '
-            f'alt="{alt}" border="0" '
-            f'style="border: 0; display: block; outline: none; text-decoration: none;" />'
-        )
-        if s.href:
-            inner = (
-                f'<a href="{s.href}" target="_blank" '
-                f'style="display: block; text-decoration: none; outline: none;">'
-                f'{img_tag}</a>'
-            )
-        else:
-            inner = img_tag
-        rows += (
-            f'<tr>\n'
-            f'<td align="center" style="'
-            f'text-align: center; padding: 0; margin: 0; '
-            f'font-size: 0; line-height: 0; border: 0;'
-            f'">'
-            f'{inner}'
-            f'</td>\n'
-            f'</tr>\n'
-        )
+    for group in groups:
+        cells = ""
+        for s in group:
+            cells += _build_cell(s.path, "", display_w, s.href, s.alt_text,
+                                 s.original_width, is_base64=True)
+        rows += f'<tr>\n{cells}</tr>\n'
     return (
         f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
         f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
