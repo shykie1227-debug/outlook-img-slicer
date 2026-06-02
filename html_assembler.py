@@ -1,262 +1,192 @@
 """
-HTML 组装器模块
-生成仅用 <table> + inline-style 的 HTML，适配 Outlook 渲染引擎。
-禁止使用：flex · grid · position
-仅用：table · inline-style
+HTML 组装器模块（V4.6.6 V1 重写）
 
-Outlook/Word 图片渲染要点：
-- 必须设 width+height 双属性，Word 才不拉伸变形
-- 用 HTML width/height 属性而非 CSS（Word 对 CSS 支持差）
+V1 架构变更：
+  - 不再使用 HotspotMap（图上标注 + 物理切割已在 hotspot_slicer.py 完成）
+  - 不再输出 <map> + <area>（Outlook 桌面端不解析，删）
+  - 不再输出图外 CTA 文字链接行（"邮件中无任何额外元素"，删）
+  - 接受 List[SliceItem]，每项包含 (path, href)：
+      * href is None: 普通切片 → <img>
+      * href is str:  链接切片 → <a href><img></a>
 
-可点击热区（V4.6）：
-- 接受 hotspots: Dict[slice_filename, List[Hotspot]]
-- 输出 <map name="hotspots_001"> + <area shape="rect" coords="x1,y1,x2,y2" href="...">
-- 坐标在 HTML 中使用 display_width 等比缩放后的值（与图片实际渲染尺寸一致）
+Outlook 兼容性（第一目标 = Outlook Desktop / Word 引擎）：
+  ✅ 仅用 <table> + inline-style
+  ✅ <a><img></a> 是最基础 HTML，所有 Outlook 客户端可点
+  ✅ width + height HTML 属性（不用 CSS）
+  ✅ border="0" + style="display:block;" 消除图片间 1px 间隙
+  ✅ cellpadding="0" cellspacing="0" border="0" 消除 cell 间隙
 """
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Optional, Tuple, Dict
+from dataclasses import dataclass
 from PIL import Image
 
-from clickable_map import HotspotMap, Hotspot
+
+@dataclass
+class SliceItem:
+    """
+    一张物理切片 + 是否带链接。
+    hotspot_slicer.py 的输出直接转成 List[SliceItem]。
+    """
+    path: str
+    href: Optional[str] = None
+    alt_text: str = ""
 
 
 def _get_img_dimensions(img_path: str) -> tuple:
-    """获取图片实际像素尺寸"""
+    """获取图片实际像素尺寸 (width, height)"""
     with Image.open(img_path) as img:
-        return img.size  # (width, height)
+        return img.size
 
 
-def _scale_coords(x1: int, y1: int, x2: int, y2: int,
-                  actual_w: int, display_w: int) -> tuple:
-    """把图片原始像素坐标按 display 宽度等比缩放"""
-    if actual_w <= 0 or display_w <= 0:
-        return (x1, y1, x2, y2)
-    ratio = display_w / actual_w
-    return (
-        round(x1 * ratio), round(y1 * ratio),
-        round(x2 * ratio), round(y2 * ratio),
+def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[str] = None, alt: str = "") -> str:
+    """
+    生成一张切片的 <tr>...</tr>：
+      - href 为 None:  普通图，<img>
+      - href 有值:    链接图，<a href="..."><img></a>
+    """
+    try:
+        actual_w, actual_h = _get_img_dimensions(slice_path)
+        display_h = round(actual_h * display_w / actual_w)
+    except Exception:
+        display_w, display_h = 650, 650
+
+    # alt 默认用文件名（Outlook 图片加载失败时显示）
+    if not alt:
+        alt = Path(slice_path).name
+
+    img_tag = (
+        f'<img src="cid:{cid}" '
+        f'width="{display_w}" '
+        f'height="{display_h}" '
+        f'alt="{alt}" '
+        f'border="0" '
+        f'style="border: 0; display: block; outline: none; text-decoration: none;" />'
     )
 
-
-def _build_map_block(map_name: str, hotspots: List[Hotspot],
-                     actual_w: int, display_w: int) -> str:
-    """生成单个 <map>...</map> 块"""
-    if not hotspots:
-        return ""
-    area_tags = []
-    for h in hotspots:
-        x1, y1, x2, y2 = _scale_coords(h.x1, h.y1, h.x2, h.y2, actual_w, display_w)
-        # alt 优先级：text > url 域名 > "link" (Outlook 显示)
-        if h.text:
-            alt_text = h.text
-        else:
-            # 从 URL 提取域名作为 alt，Outlook 抦鼠标时能看到是什么链接
-            try:
-                from urllib.parse import urlparse
-                alt_text = urlparse(h.url).netloc or h.url
-            except Exception:
-                alt_text = h.url or "link"
-        area_tags.append(
-            f'<area shape="rect" coords="{x1},{y1},{x2},{y2}" '
-            f'href="{h.url}" alt="{alt_text}" target="_blank" />'
-        )
-    return (
-        f'<map name="{map_name}">\n'
-        + "\n".join(area_tags) + "\n"
-        f'</map>'
-    )
-
-
-def _build_cta_row(hotspots: List[Hotspot]) -> str:
-    """
-    为 Outlook 邮件生成「可点击 CTA 链接列表」。
-
-    为什么需要这个？
-      Outlook 使用 Word 渲染引擎解析邮件 HTML，Word 引擎不解析 <map>/<area>，
-      所以仅靠图片热区在 Outlook 中不可点。
-      为了让 Outlook 用户也能点击跳转，在每张有热区的切片下方追加一个
-      带热区编号 + 域名的可点击链接列表。
-
-    Outlook 兼容性：
-      ✅ Outlook 2007/2010/2013/2016/2019/2021/365
-      ✅ Outlook for Mac
-      ✅ Outlook web (outlook.com)
-      ✅ Gmail / 其他 web 邮箱
-
-    Returns:
-        <tr>...</tr> HTML 字符串（直接拼接进主 table）
-    """
-    if not hotspots:
-        return ""
-    items = []
-    for idx, h in enumerate(hotspots, 1):
-        # 提取域名作为显示文本（比完整 URL 短，用户友好）
-        try:
-            from urllib.parse import urlparse
-            display = urlparse(h.url).netloc or h.url
-        except Exception:
-            display = h.url
-        # alt 文本优先用 text，否则用域名
-        link_text = h.text if h.text else display
-        items.append(
-            f'<a href="{h.url}" target="_blank" '
-            f'style="color: #0078D4; text-decoration: none; '
-            f'font-family: Microsoft YaHei, Arial, sans-serif; font-size: 14px;">'
-            f'🔗 [{idx}] {link_text}'
+    if href:
+        # 链接切片：<a> 包图，Outlook 桌面端可点
+        # 不用 inline-block（Outlook Word 引擎忽略），用 <a> + <img> 最简结构
+        inner = (
+            f'<a href="{href}" target="_blank" '
+            f'style="display: block; text-decoration: none; outline: none;">'
+            f'{img_tag}'
             f'</a>'
         )
-    # 用 <br> 分隔多个链接，避免在 Outlook 表格里出现奇怪间距
-    links_html = "<br>".join(items)
+    else:
+        inner = img_tag
+
     return (
         f'<tr>\n'
         f'<td align="center" style="'
-        f'padding: 12px 8px 8px 8px; margin: 0; '
-        f'background-color: #F9FAFB;'
-        f'">\n'
-        f'{links_html}\n'
+        f'text-align: center; '
+        f'padding: 0; margin: 0; '
+        f'font-size: 0; line-height: 0; '
+        f'border: 0;'
+        f'">'
+        f'{inner}'
         f'</td>\n'
         f'</tr>'
     )
 
 
-def assemble_html(image_paths: List[str], original_width: int = 650,
-                  hotspots: Optional[HotspotMap] = None) -> str:
+def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
-    每张图读取实际尺寸，按 display_width 等比计算 height。
-    如果传 hotspots，则在每张切片上叠加可点击热区 <map>+<area>。
+
+    Args:
+        slices: 切片列表（带/不带链接）
+        display_w: 邮件中显示的图片宽度（px），默认 650
     """
-    img_rows = ""
-    map_blocks = []
-
-    for i, path in enumerate(image_paths):
+    rows = ""
+    for i, s in enumerate(slices):
         cid = f"slice_{i + 1:03d}"
-        slice_filename = Path(path).name
-        try:
-            actual_w, actual_h = _get_img_dimensions(path)
-            display_h = round(actual_h * original_width / actual_w)
-        except Exception:
-            actual_w, display_h = original_width, original_width
+        rows += _build_image_row(s.path, cid, display_w, s.href, s.alt_text) + "\n"
 
-        # 如果该切片有热区，则加上 usemap 属性
-        usemap_attr = ""
-        map_name = f"hotspots_{i + 1:03d}"
-        slice_hotspots = hotspots.get(slice_filename) if hotspots else []
-        if slice_hotspots:
-            usemap_attr = f' usemap="#{map_name}"'
-            map_blocks.append(
-                _build_map_block(map_name, slice_hotspots, actual_w, original_width)
-            )
-
-        img_rows += (
-            f'<tr>\n'
-            f'<td align="center" style="'
-            f'text-align: center; '
-            f'padding: 0; margin: 0; '
-            f'font-size: 0; line-height: 0;'
-            f'">'
-            f'<img src="cid:{cid}" '
-            f'alt="slice_{i + 1}" '
-            f'width="{original_width}" '
-            f'height="{display_h}"{usemap_attr} '
-            f'style="border: 0; display: block;" />\n'
-            f'</td>\n'
-            f'</tr>\n'
-        )
-        # 「双保险」：在每张有热区的切片下方追加可点击 CTA 链接列表
-        # （Outlook Word 引擎不解析 <map>/<area>，但能解析 <a> 链接）
-        if slice_hotspots:
-            img_rows += _build_cta_row(slice_hotspots) + "\n"
-
-    html = (
-        f'<html xmlns="http://www.w3.org/1999/xhtml">\n'
+    return (
+        f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
+        f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
+        f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">\n'
         f'<head>\n'
         f'<meta http-equiv="Content-Type" content="text/html; charset=utf-8">\n'
+        f'<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
         f'<title>长图邮件</title>\n'
         f'</head>\n'
-        f'<body style="margin:0;padding:0;background-color:#ffffff;">\n'
+        f'<body style="margin: 0; padding: 0; background-color: #ffffff;">\n'
         f'<table cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
-        f'style="border-collapse: collapse;" >\n'
-        f'{img_rows}'
+        f'width="{display_w}" '
+        f'style="border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
+        f'{rows}'
         f'</table>\n'
-        + "\n".join(map_blocks) + "\n"
         f'</body>\n'
         f'</html>'
     )
-    return html
 
 
-def get_cid_map(image_paths: List[str]) -> Dict[int, str]:
-    return {i: f"slice_{i + 1:03d}" for i in range(len(image_paths))}
+def get_cid_map(slices: List[SliceItem]) -> Dict[int, str]:
+    """返回 {index: cid} 映射，给 outlook_sender.py 用。"""
+    return {i: f"slice_{i + 1:03d}" for i in range(len(slices))}
 
 
-def generate_plain_html(image_paths: List[str], original_width: int = 650,
-                        hotspots: Optional[HotspotMap] = None) -> str:
+def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
-    生成纯内联 base64 的 HTML，供复制到剪贴板使用。
-    每张图读取实际尺寸，等比计算 height，防止 Word/Outlook 拉伸变形。
+    生成纯内联 base64 的 HTML，供复制到剪贴板使用（不进 Outlook，直接贴到 Gmail / 网页邮箱）。
     """
     import base64
-
-    img_rows = ""
-    map_blocks = []
-
-    for i, path in enumerate(image_paths):
-        with open(path, "rb") as f:
+    rows = ""
+    for i, s in enumerate(slices):
+        with open(s.path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("ascii")
-        ext = Path(path).suffix.lower().lstrip(".")
+        ext = Path(s.path).suffix.lower().lstrip(".")
         mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
         src = f"data:{mime};base64,{b64}"
-        slice_filename = Path(path).name
-
         try:
-            actual_w, actual_h = _get_img_dimensions(path)
-            display_h = round(actual_h * original_width / actual_w)
+            actual_w, actual_h = _get_img_dimensions(s.path)
+            display_h = round(actual_h * display_w / actual_w)
         except Exception:
-            actual_w, display_h = original_width, original_width
+            display_w, display_h = 650, 650
+        alt = s.alt_text or Path(s.path).name
 
-        usemap_attr = ""
-        map_name = f"hotspots_{i + 1:03d}"
-        slice_hotspots = hotspots.get(slice_filename) if hotspots else []
-        if slice_hotspots:
-            usemap_attr = f' usemap="#{map_name}"'
-            map_blocks.append(
-                _build_map_block(map_name, slice_hotspots, actual_w, original_width)
+        img_tag = (
+            f'<img src="{src}" '
+            f'width="{display_w}" height="{display_h}" '
+            f'alt="{alt}" border="0" '
+            f'style="border: 0; display: block; outline: none; text-decoration: none;" />'
+        )
+        if s.href:
+            inner = (
+                f'<a href="{s.href}" target="_blank" '
+                f'style="display: block; text-decoration: none; outline: none;">'
+                f'{img_tag}</a>'
             )
-
-        img_rows += (
+        else:
+            inner = img_tag
+        rows += (
             f'<tr>\n'
             f'<td align="center" style="'
             f'text-align: center; padding: 0; margin: 0; '
-            f'font-size: 0; line-height: 0;'
+            f'font-size: 0; line-height: 0; border: 0;'
             f'">'
-            f'<img src="{src}" '
-            f'alt="slice_{i + 1}" '
-            f'width="{original_width}" '
-            f'height="{display_h}"{usemap_attr} '
-            f'style="border: 0; display: block;" />\n'
+            f'{inner}'
             f'</td>\n'
             f'</tr>\n'
         )
-        # 双保险：复制到剪贴板的 HTML 也加 CTA 链接列表
-        if slice_hotspots:
-            img_rows += _build_cta_row(slice_hotspots) + "\n"
-
-    html = (
+    return (
+        f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
+        f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
         f'<html xmlns="http://www.w3.org/1999/xhtml">\n'
         f'<head>\n'
         f'<meta http-equiv="Content-Type" content="text/html; charset=utf-8">\n'
         f'<title>长图邮件</title>\n'
         f'</head>\n'
-        f'<body style="margin:0;padding:0;background-color:#ffffff;">\n'
+        f'<body style="margin: 0; padding: 0; background-color: #ffffff;">\n'
         f'<table cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
+        f'width="{display_w}" '
         f'style="border-collapse: collapse;">\n'
-        f'{img_rows}'
+        f'{rows}'
         f'</table>\n'
-        + "\n".join(map_blocks) + "\n"
         f'</body>\n'
         f'</html>'
     )
-    return html

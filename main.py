@@ -27,14 +27,15 @@ from ppt_slicer import pptx_to_images
 # from psd_slicer import psd_to_images
 from clickable_map import HotspotMap
 from hotspot_editor import HotspotEditorDialog
-from html_assembler import assemble_html, generate_plain_html
+from html_assembler import assemble_html, generate_plain_html, SliceItem
+from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL, SORT_DRAG_ORDER
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.5"
+VERSION = "4.6.6"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -888,14 +889,42 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
 
+    def _build_slices_with_hotspots(self) -> List[SliceItem]:
+        """
+        V4.6.6 V1：根据 hotspot_map 物理切割切片，生成 List[SliceItem]。
+
+        返回的每项是 (path, href)：
+          - href=None: 普通切片 → <img>
+          - href=str:  链接切片 → <a href><img></a>
+        """
+        if not self.slice_paths:
+            return []
+        from pathlib import Path
+        # 把 hotspot_map 按切片名分组
+        hotspots_by_slice: Dict[str, List[Hotspot]] = {}
+        for fname in self.hotspot_map.all_slices():
+            hotspots_by_slice[fname] = self.hotspot_map.get(fname)
+        # 物理切割
+        new_paths, link_map = slice_paths_by_hotspots(self.slice_paths, hotspots_by_slice)
+        # 转为 SliceItem 列表
+        return [
+            SliceItem(
+                path=p,
+                href=link_map.get(Path(p).name),
+                alt_text=self.hotspot_map.get(Path(p).name)[0].text
+                    if self.hotspot_map.get(Path(p).name) and self.hotspot_map.get(Path(p).name)[0].text
+                    else ""
+            )
+            for p in new_paths
+        ]
+
     def _copy_html(self):
         """复制 HTML 到剪贴板（同时写入 HTML 和纯文本格式）"""
         if not self.slice_paths:
             return
         try:
             html = generate_plain_html(
-                self.slice_paths, self._get_width(),
-                hotspots=self.hotspot_map if not self.hotspot_map.is_empty() else None,
+                self._build_slices_with_hotspots(), self._get_width()
             )
             mime = QMimeData()
             # HTML 格式：Outlook/Word 粘贴时正确渲染
@@ -963,13 +992,11 @@ class MainWindow(QMainWindow):
                 )
 
         try:
-            html_content = assemble_html(
-                self.slice_paths, self._get_width(),
-                hotspots=self.hotspot_map if not self.hotspot_map.is_empty() else None,
-            )
+            slices = self._build_slices_with_hotspots()
+            html_content = assemble_html(slices, self._get_width())
             subject = self.input_subject.text().strip() or "长图邮件"
             create_email_with_images(
-                html_content, subject=subject, to="", image_paths=self.slice_paths
+                html_content, subject=subject, to="", image_paths=[s.path for s in slices]
             )
             self._set_status("✅ 邮件窗口已打开，请检查后发送", "success")
         except Exception as exc:
@@ -1019,11 +1046,12 @@ class MainWindow(QMainWindow):
     def _open_hotspot_editor_for_slice(self, slice_path: str):
         dlg = HotspotEditorDialog(slice_path, self.hotspot_map, self)
         dlg.exec()
-        # 同步热区状态提示
+        # V4.6.6 V1：热区已标注，将在发送/复制时按 hotspot 纵向切割
         if not self.hotspot_map.is_empty():
             self._set_status(
                 f"🎯 已为 {len(self.hotspot_map.all_slices())} 个切片添加共 "
-                f"{self.hotspot_map.total_count()} 个可点击按钮",
+                f"{self.hotspot_map.total_count()} 个可点击按钮 "
+                f"（V1：发送时按 hotspot 物理切割，原图上无任何标注）",
                 "success",
             )
 
