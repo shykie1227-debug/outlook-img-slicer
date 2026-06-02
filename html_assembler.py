@@ -67,38 +67,21 @@ def _build_map_block(map_name: str, hotspots: List[Hotspot],
     )
 
 
-def _build_cta_buttons(hotspots: List[Hotspot]) -> str:
+def _build_cta_row(hotspots: List[Hotspot]) -> str:
     """
-    为 Outlook 邮件生成「可点击 CTA 按钮组」（V4.6.6 重构）。
+    为 Outlook 邮件生成「可点击 CTA 链接列表」。
 
-    背景：
-      客户大多用 Outlook 桌面端（Word 渲染引擎），该引擎：
-      ❌ 不解析 <map>/<area>（图上 hotspot 不可点）
-      ❌ 忽略 position:absolute（透明叠层不可点）
-      ✅ 能解析 <a> 链接 + 嵌套 <table> + bgcolor 属性
-      故「图上不可点」的固有限制只能通过「图外可点击元素」解决。
+    为什么需要这个？
+      Outlook 使用 Word 渲染引擎解析邮件 HTML，Word 引擎不解析 <map>/<area>，
+      所以仅靠图片热区在 Outlook 中不可点。
+      为了让 Outlook 用户也能点击跳转，在每张有热区的切片下方追加一个
+      带热区编号 + 域名的可点击链接列表。
 
-    V4.6.5 的问题：
-      图外用纯文字链接（`🔗 [1] example.com`）体验差：
-      - 没有按钮感，像占位符
-      - 多个链接挤在一行
-      - 用户反馈"看着像文字而不是按钮"
-
-    V4.6.6 目标：
-      把图外的「文字链接」升级为「Outlook 兼容的网站风格按钮」：
-      - 单一品牌色 #0078D4（蓝）
-      - 蓝底白字 / 圆角（Outlook 忽略圆角会变方角，不影响可点）
-      - 多个按钮并排居中（嵌套 table 布局，Outlook 最稳）
-      - 按钮文字优先用用户的 text 字段，否则用域名
-      - 整组按钮放在独立行（与原图分离，不遮挡原图）
-
-    Outlook 兼容性铁律（必须遵守）：
-      ✅ 嵌套 <table> 布局
-      ✅ bgcolor 属性（不用 CSS background-color，部分版本失效）
-      ✅ inline-style（Word 引擎忽略 <style> 块）
-      ✅ cellpadding/cellspacing="0"（避免 cell 间隙）
-      ❌ 不用 flex / grid / position
-      ❌ 不用 CSS 变量
+    Outlook 兼容性：
+      ✅ Outlook 2007/2010/2013/2016/2019/2021/365
+      ✅ Outlook for Mac
+      ✅ Outlook web (outlook.com)
+      ✅ Gmail / 其他 web 邮箱
 
     Returns:
         <tr>...</tr> HTML 字符串（直接拼接进主 table）
@@ -113,53 +96,24 @@ def _build_cta_buttons(hotspots: List[Hotspot]) -> str:
             display = urlparse(h.url).netloc or h.url
         except Exception:
             display = h.url
-        # 按钮文字优先用用户填的 text，否则用域名；超长按显示宽度截断
-        link_text = h.text.strip() if (h.text and h.text.strip()) else display
-        # 中文按 2 字符宽度算（按钮内最多 14 个"显示单位"）
-        _WIDTH_LIMIT = 14
-        _display_w = 0
-        _truncated = []
-        for _ch in link_text:
-            _display_w += 2 if ord(_ch) > 127 else 1
-            if _display_w > _WIDTH_LIMIT:
-                _truncated.append("…")
-                break
-            _truncated.append(_ch)
-        link_text = "".join(_truncated)
-        # 按钮：bgcolor（Outlook 兼容）+ CSS 兜底（web 邮件）
+        # alt 文本优先用 text，否则用域名
+        link_text = h.text if h.text else display
         items.append(
-            f'<td style="padding: 6px;">\n'
-            f'<table cellpadding="0" cellspacing="0" border="0" '
-            f'style="border-collapse: collapse;">\n'
-            f'<tr>\n'
-            f'<td bgcolor="#0078D4" '
-            f'style="background-color: #0078D4; '
-            f'padding: 10px 22px; '
-            f'border-radius: 6px; '
-            f'font-family: Microsoft YaHei, Arial, sans-serif;">\n'
             f'<a href="{h.url}" target="_blank" '
-            f'style="color: #FFFFFF; text-decoration: none; '
-            f'font-size: 14px; font-weight: 600; '
-            f'display: inline-block; '
-            f'line-height: 1.2;">{link_text}</a>\n'
-            f'</td>\n'
-            f'</tr>\n'
-            f'</table>\n'
-            f'</td>'
+            f'style="color: #0078D4; text-decoration: none; '
+            f'font-family: Microsoft YaHei, Arial, sans-serif; font-size: 14px;">'
+            f'🔗 [{idx}] {link_text}'
+            f'</a>'
         )
-    # 按钮行：用嵌套 table 横向并排，居中显示
+    # 用 <br> 分隔多个链接，避免在 Outlook 表格里出现奇怪间距
+    links_html = "<br>".join(items)
     return (
         f'<tr>\n'
         f'<td align="center" style="'
-        f'padding: 14px 8px 16px 8px; margin: 0; '
-        f'background-color: #FFFFFF;'
+        f'padding: 12px 8px 8px 8px; margin: 0; '
+        f'background-color: #F9FAFB;'
         f'">\n'
-        f'<table cellpadding="0" cellspacing="0" border="0" align="center" '
-        f'style="border-collapse: collapse; margin: 0 auto;">\n'
-        f'<tr>\n'
-        + "\n".join(items) + "\n"
-        f'</tr>\n'
-        f'</table>\n'
+        f'{links_html}\n'
         f'</td>\n'
         f'</tr>'
     )
@@ -209,10 +163,10 @@ def assemble_html(image_paths: List[str], original_width: int = 650,
             f'</td>\n'
             f'</tr>\n'
         )
-        # V4.6.6：在每张有热区的切片下方追加可点击 CTA 按钮组
-        # （Outlook Word 引擎不解析 <map>/<area>，故用「图外按钮」保证桌面端可点）
+        # 「双保险」：在每张有热区的切片下方追加可点击 CTA 链接列表
+        # （Outlook Word 引擎不解析 <map>/<area>，但能解析 <a> 链接）
         if slice_hotspots:
-            img_rows += _build_cta_buttons(slice_hotspots) + "\n"
+            img_rows += _build_cta_row(slice_hotspots) + "\n"
 
     html = (
         f'<html xmlns="http://www.w3.org/1999/xhtml">\n'
@@ -285,9 +239,9 @@ def generate_plain_html(image_paths: List[str], original_width: int = 650,
             f'</td>\n'
             f'</tr>\n'
         )
-        # V4.6.6：复制到剪贴板的 HTML 也加 CTA 按钮组
+        # 双保险：复制到剪贴板的 HTML 也加 CTA 链接列表
         if slice_hotspots:
-            img_rows += _build_cta_buttons(slice_hotspots) + "\n"
+            img_rows += _build_cta_row(slice_hotspots) + "\n"
 
     html = (
         f'<html xmlns="http://www.w3.org/1999/xhtml">\n'
