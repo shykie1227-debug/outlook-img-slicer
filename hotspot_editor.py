@@ -81,15 +81,20 @@ class ImageCanvas(QLabel):
     MODE_EDIT = "edit"
 
     def __init__(self, image_path: str, actual_size: Tuple[int, int],
-                 hotspots: List[Hotspot], parent=None):
+                 hotspots: List[Hotspot], parent=None,
+                 target_width: int = 800):
         super().__init__(parent)
         self.image_path = image_path
         self.actual_w, self.actual_h = actual_size
         self.hotspots = hotspots
         self.mode = self.MODE_DRAW
+        # V4.6.8：可配置 target_width（默认 800）。
+        # 画布只设最小尺寸 = target_width，但允许随父容器 resize 缩放图片
+        # 这样小窗口下图片也会等比缩小到适合宽度，**不在画布外产生滚动条**
+        # 原图高于画布可见区时仅在 Y 方向出现 scroll（QScrollArea 负责）
 
-        # 渲染尺寸（按宽度 800 等比缩放用于编辑）
-        self.display_w = 800
+        self._target_width = target_width
+        self.display_w = target_width
         self.display_h = int(self.actual_h * self.display_w / self.actual_w) if self.actual_w else 600
         self.scale = self.display_w / self.actual_w if self.actual_w else 1.0
 
@@ -99,7 +104,9 @@ class ImageCanvas(QLabel):
             Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.setPixmap(self.pixmap)
-        self.setFixedSize(self.display_w, self.display_h)
+        # V4.6.8：删除 setFixedSize，改用 setMinimumSize，让画布能随父容器缩放
+        # 注意：setMinimumSize.width 仍然是 display_w，缩小后画布会留空
+        self.setMinimumSize(self.display_w, self.display_h)
         self.setStyleSheet("border: 1px solid #D1D5DB; background: #F3F4F6;")
 
         # 拖框选状态
@@ -224,8 +231,12 @@ class HotspotEditorDialog(QDialog):
             self.actual_w, self.actual_h = im.size
 
         self.setWindowTitle(f"热区编辑：{self.slice_filename}")
-        self.setMinimumSize(900, 720)
+        # V4.6.8：最小尺寸改为 640x480，原 900x720 在 1366x768 屏上下都超出
+        self.setMinimumSize(640, 480)
+        self.resize(880, 640)  # 默认尺寸，窗口可继续拖大变小
         self._build_ui()
+        # V4.6.8：初始 fit 一次画布宽度（处理小窗口打开场景）
+        self._refit_canvas_to_size()
         self._refresh()
 
     # ── UI 构造 ──────────────────────────────
@@ -269,19 +280,25 @@ class HotspotEditorDialog(QDialog):
         guide_layout.addWidget(self.status_label)
         root.addWidget(guide)
 
-        # 图片画布
+        # 图片画布（V4.6.8：高度自适应，不写死）
         scroll = QScrollArea()
-        scroll.setWidgetResizable(False)
-        scroll.setFixedHeight(360)
+        scroll.setWidgetResizable(True)  # 改为 True，让画布随滚动区域大小变化
+        scroll.setMinimumHeight(220)  # 最小高度，防止窗体拖太小时画布消失
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setStyleSheet(
             "QScrollArea { border: 1px solid #E4E7EC; border-radius: 8px; background: #F9FAFB; }"
         )
+        # V4.6.8：画布接受“期望宽度”参数，会按这个宽度等比缩放图片
+        # 默认为 800（小窗口也能显示完整），画布有 scroll 可在原图超出时滚动
         self.canvas = ImageCanvas(
-            self.slice_path, (self.actual_w, self.actual_h), self._current
+            self.slice_path, (self.actual_w, self.actual_h), self._current,
+            target_width=800
         )
         self.canvas.selection_changed.connect(self._on_selection)
         scroll.setWidget(self.canvas)
-        root.addWidget(scroll)
+        # stretch=1 让画布在窗口 resize 时获取最多空间（与列表争抢）
+        root.addWidget(scroll, 1)
 
         # 输入区：只 URL
         input_row = QHBoxLayout()
@@ -343,10 +360,12 @@ class HotspotEditorDialog(QDialog):
             "QListWidget::item { padding: 6px; border-bottom: 1px solid #F3F4F6; }"
             "QListWidget::item:selected { background: #EFF6FF; color: #1E3A8A; }"
         )
-        self.list_widget.setFixedHeight(160)
+        # V4.6.8：删除 setFixedHeight(160)，改为最小高度 + 拉伸比例
+        self.list_widget.setMinimumHeight(120)
         # 双击 → 编辑 URL
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
-        root.addWidget(self.list_widget)
+        # stretch=1 让列表在窗口 resize 时与画布争抢空间（默认 1:1 分配）
+        root.addWidget(self.list_widget, 1)
 
         # 底部按钮
         bottom = QHBoxLayout()
@@ -361,6 +380,53 @@ class HotspotEditorDialog(QDialog):
         self.btn_close.clicked.connect(self._save_and_close)
         bottom.addWidget(self.btn_close)
         root.addLayout(bottom)
+
+    # ── 窗口尺寸自适应（V4.6.8）──────────────────────────────
+    def resizeEvent(self, event):
+        """窗口 resize 时，按当前宽度重新计算画布渲染尺寸。"""
+        super().resizeEvent(event)
+        self._refit_canvas_to_size()
+
+    def _refit_canvas_to_size(self):
+        """
+        V4.6.8 简化：画布按宽度自适应窗口，高度按原图比例自由伸展。
+        长图在 scroll 容器内 Y 方向滚动（与浏览器看长图行为一致），
+        但**列表/URL/状态/完成按钮永远固定在底部**（不被画布挤出窗口），
+        这是相对 V4.6.7 的核心改进。
+
+        Trade-off 诚实说明：
+          长图在小窗口下仍需 scroll Y 滚动——这是物理约束（3000px 图塞进 480px
+          窗口必然滚动），无解。若用户希望"不滚动"模式，需 V4.6.9 加
+          fit-to-height 切换按钮。
+        """
+        if not hasattr(self, "canvas") or self.canvas is None:
+            return
+        from PySide6.QtWidgets import QScrollArea
+        # 找画布的父 QScrollArea
+        parent = self.canvas.parent()
+        while parent is not None and not isinstance(parent, QScrollArea):
+            parent = parent.parent()
+        if parent is None:
+            return
+        viewport_w = max(parent.viewport().width(), 200)
+        natural_w = self.canvas._target_width
+        # 按宽度自适应（避免横向滚动条）
+        # 但不能超过原图实际宽度（避免极窄原图被拉伸到 800px 出现模糊）
+        new_w = min(natural_w, viewport_w - 4, self.canvas.actual_w)
+        new_h = int(self.canvas.actual_h * new_w / self.canvas.actual_w) if self.canvas.actual_w else 600
+        if new_w == self.canvas.display_w and new_h == self.canvas.display_h:
+            return
+        scale = new_w / self.canvas.actual_w if self.canvas.actual_w else 1.0
+        from PySide6.QtGui import QPixmap
+        from PySide6.QtCore import Qt
+        src_pix = QPixmap(self.canvas.image_path)
+        self.canvas.pixmap = src_pix.scaled(new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.canvas.setPixmap(self.canvas.pixmap)
+        self.canvas.display_w = new_w
+        self.canvas.display_h = new_h
+        self.canvas.scale = scale
+        self.canvas.setMinimumSize(new_w, new_h)
+        self.canvas.update()
 
     # ── 状态机 ──────────────────────────────
     def _on_selection(self, rect: QRect):
