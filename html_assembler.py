@@ -34,11 +34,18 @@ class SliceItem:
       - HTML 输出前须 sorted(slices, key=lambda s: s.sort_key)
       - 原切片 sort_key = source_index（整数 1.0, 2.0, 3.0, ...）
       - Hotspot 派生竖条 sort_key = source_index + N*0.001
+
+    V4.6.9：加 original_width 字段，记录**该切片所属原图**的宽度。
+    V1 物理切割后，链接竖条只是原图一部分 X 范围。
+    HTML 输出时，每段需按 actual_w / original_w 比例分配 display_w，
+    否则多段拼起来 = 原图宽 × N倍 ＝ 邮件里**图被拉伸错乱**。
     """
     path: str
     href: Optional[str] = None
     alt_text: str = ""
     sort_key: float = 0.0
+    # V4.6.9 修复：原图宽度，用于多段拼接时按比例缩放
+    original_width: int = 0
 
 
 def _get_img_dimensions(img_path: str) -> tuple:
@@ -47,17 +54,30 @@ def _get_img_dimensions(img_path: str) -> tuple:
         return img.size
 
 
-def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[str] = None, alt: str = "") -> str:
+def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[str] = None, alt: str = "",
+                    original_width: int = 0) -> str:
     """
     生成一张切片的 <tr>...</tr>：
       - href 为 None:  普通图，<img>
       - href 有值:    链接图，<a href="..."><img></a>
+
+    V4.6.9 修复：original_width 是原图总宽度（如 1000px）。
+    当原图被物理切割成 N 段（200/400/400），每段实际宽 = actual_w，
+    HTML 显示宽 = display_w * (actual_w / original_width) 拼接 = 完整原图按 display_w 缩放。
+    原代码 display_w = actual_w 映射（不看原图宽）导致 N 段拼接 = N×display_w，远超原图。
     """
     try:
         actual_w, actual_h = _get_img_dimensions(slice_path)
-        display_h = round(actual_h * display_w / actual_w)
     except Exception:
-        display_w, display_h = 650, 650
+        actual_w, actual_h = 650, 650
+
+    # V4.6.9 修复：按原图宽比例分配显示宽度
+    if original_width > 0 and actual_w > 0:
+        ratio = actual_w / original_width
+        seg_display_w = round(display_w * ratio)
+    else:
+        seg_display_w = display_w
+    seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
 
     # alt 默认用文件名（Outlook 图片加载失败时显示）
     if not alt:
@@ -65,8 +85,8 @@ def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[s
 
     img_tag = (
         f'<img src="cid:{cid}" '
-        f'width="{display_w}" '
-        f'height="{display_h}" '
+        f'width="{seg_display_w}" '
+        f'height="{seg_display_h}" '
         f'alt="{alt}" '
         f'border="0" '
         f'style="border: 0; display: block; outline: none; text-decoration: none;" />'
@@ -114,7 +134,10 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     rows = ""
     for i, s in enumerate(sorted_slices):
         cid = f"slice_{i + 1:03d}"
-        rows += _build_image_row(s.path, cid, display_w, s.href, s.alt_text) + "\n"
+        # V4.6.9 修复：传 original_width 给 _build_image_row
+        # 避免多段拼接 = N×display_w 超越原图
+        rows += _build_image_row(s.path, cid, display_w, s.href, s.alt_text,
+                                 s.original_width) + "\n"
 
     return (
         f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
@@ -160,14 +183,20 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
         src = f"data:{mime};base64,{b64}"
         try:
             actual_w, actual_h = _get_img_dimensions(s.path)
-            display_h = round(actual_h * display_w / actual_w)
         except Exception:
-            display_w, display_h = 650, 650
+            actual_w, actual_h = 650, 650
+        # V4.6.9 修复：按原图宽比例分配
+        if s.original_width > 0 and actual_w > 0:
+            ratio = actual_w / s.original_width
+            seg_display_w = round(display_w * ratio)
+        else:
+            seg_display_w = display_w
+        seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
         alt = s.alt_text or Path(s.path).name
 
         img_tag = (
             f'<img src="{src}" '
-            f'width="{display_w}" height="{display_h}" '
+            f'width="{seg_display_w}" height="{seg_display_h}" '
             f'alt="{alt}" border="0" '
             f'style="border: 0; display: block; outline: none; text-decoration: none;" />'
         )

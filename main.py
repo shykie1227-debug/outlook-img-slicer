@@ -924,16 +924,39 @@ class MainWindow(QMainWindow):
         slices_with_key, link_map = slice_paths_by_hotspots(
             self.slice_paths, hotspots_by_slice, source_index_map=self.slice_source_index
         )
+        # V4.6.9 修复：记录每张切片的"原图宽度"，用于 HTML 多段拼接按比例缩放
+        # 同一 source_index 的所有 hotspot 派生切片属于同一张原图
+        # 同一原图的所有切片（包括原切片 + 派生切片）共享 original_width = 原图 w
+        # 这里用 source_index_map 即可找到原图（它存的是"原切片 → source_index"）
+        # 反向：source_index → 原切片路径
+        from PIL import Image as _PIL_Image
+        si_to_orig: Dict[float, str] = {}
+        for fname, si in self.slice_source_index.items():
+            si_to_orig[si] = os.path.join(os.path.dirname(self.slice_paths[0]) if self.slice_paths else '.', fname)
+        # 缓存原图宽
+        orig_w_cache: Dict[str, int] = {}
+
         items: List[SliceItem] = []
         for p, sk in slices_with_key:
             name = Path(p).name
             hs_list = self.hotspot_map.get(name)
             alt_text = hs_list[0].text if hs_list and hs_list[0].text else ""
+            # V4.6.9：找原图（sort_key 的整数部分 = source_index）
+            source_idx = int(sk)  # 1, 2, 3, ...
+            orig_path = si_to_orig.get(float(source_idx), '')
+            if orig_path and orig_path not in orig_w_cache:
+                try:
+                    with _PIL_Image.open(orig_path) as im:
+                        orig_w_cache[orig_path] = im.size[0]
+                except Exception:
+                    orig_w_cache[orig_path] = 0
+            orig_w = orig_w_cache.get(orig_path, 0)
             items.append(SliceItem(
                 path=p,
                 href=link_map.get(name),
                 alt_text=alt_text,
                 sort_key=sk,
+                original_width=orig_w,
             ))
         return items
 
