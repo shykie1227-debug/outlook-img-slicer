@@ -35,7 +35,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.8"
+VERSION = "4.6.9"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -800,6 +800,11 @@ class MainWindow(QMainWindow):
         self.slice_source_index = {
             os.path.basename(p): float(i + 1) for i, p in enumerate(paths)
         }
+        # V4.6.9 修复：重新切图时必须清空 hotspot_map，
+        # 避免旧图的 hotspot 污染新图（特别是新图上多点几次不同切片时）
+        # 如果有残留 hotspot，发送时 hotspots_by_slice 会包含旧名，slice_paths 找不到
+        # → 旧 hotspot 实际上不会起作用（B 的文件名查不到），但 hotspot_map 越变越乱
+        self.hotspot_map.clear()
         self.progress_bar.hide()
         self.btn_send.setEnabled(bool(paths))
         self.btn_save.setEnabled(bool(paths))
