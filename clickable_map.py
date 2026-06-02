@@ -24,6 +24,8 @@ class Hotspot:
     y2: int
     url: str
     text: str = ""  # 可选：仅用于 alt 兜底文字，不出现在图上
+    # ── V4.6.7 排序架构 ──
+    source_index: float = 0.0  # 标注时所属原切片的 source_index（int=1.0, 2.0, ...）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -35,6 +37,7 @@ class Hotspot:
             x2=int(d["x2"]), y2=int(d["y2"]),
             url=str(d.get("url", "")),
             text=str(d.get("text", "")),
+            source_index=float(d.get("source_index", 0.0)),
         )
 
     def normalized(self) -> "Hotspot":
@@ -65,12 +68,17 @@ class HotspotMap:
         # key = slice 文件名（如 "slice_001.png"），value = List[Hotspot]
         self._map: Dict[str, List[Hotspot]] = {}
 
-    def add(self, slice_filename: str, hotspot: Hotspot) -> Tuple[bool, str]:
+    def add(self, slice_filename: str, hotspot: Hotspot, source_index: float = 0.0) -> Tuple[bool, str]:
         """
         添加热区，自动跳过：
         - URL 为空
         - 区域过小（宽/高 < 5px）
         - 与该切片上已有热区完全重叠
+
+        Args:
+            slice_filename: 切片文件名
+            hotspot: 标注数据
+            source_index: 该切片在原始顺序中的位置（V4.6.7 排序架构）
 
         Returns:
             (True, "")  表示添加成功
@@ -86,6 +94,7 @@ class HotspotMap:
             x1=hotspot.x1, y1=hotspot.y1,
             x2=hotspot.x2, y2=hotspot.y2,
             url=url, text=hotspot.text,
+            source_index=source_index,
         ).normalized()
         if h.x2 - h.x1 < 5 or h.y2 - h.y1 < 5:
             return False, HotspotError.TOO_SMALL

@@ -204,15 +204,18 @@ class ImageCanvas(QLabel):
 class HotspotEditorDialog(QDialog):
     """单张切片的热区编辑对话框（V4.6.1 重设计）。"""
 
-    def __init__(self, slice_path: str, hotspot_map: HotspotMap, parent=None):
+    def __init__(self, slice_path: str, hotspot_map: HotspotMap, parent=None,
+                 source_index: float = 0.0):
         super().__init__(parent)
         self.slice_path = slice_path
         self.slice_filename = Path(slice_path).name
         self.hotspot_map = hotspot_map
+        # V4.6.7 排序架构：标注时记录该切片的 source_index
+        self.source_index = source_index
         # 当前切片热区副本（编辑期间操作副本，关闭时再回写）
         self._current: List[Hotspot] = [
             Hotspot(x1=h.x1, y1=h.y1, x2=h.x2, y2=h.y2,
-                    url=h.url, text=h.text)
+                    url=h.url, text=h.text, source_index=h.source_index or source_index)
             for h in hotspot_map.get(self.slice_filename)
         ]
 
@@ -423,6 +426,7 @@ class HotspotEditorDialog(QDialog):
             x2=pending.x() + pending.width(),
             y2=pending.y() + pending.height(),
             url=url, text="",
+            source_index=self.source_index,  # V4.6.7
         )
 
         if self.canvas.mode == ImageCanvas.MODE_EDIT:
@@ -486,7 +490,8 @@ class HotspotEditorDialog(QDialog):
             QMessageBox.warning(self, "URL 不能为空", "请填写有效的 URL。")
             return
         candidate = Hotspot(x1=h.x1, y1=h.y1, x2=h.x2, y2=h.y2,
-                            url=new_url, text=h.text)
+                            url=new_url, text=h.text,
+                            source_index=h.source_index or self.source_index)
         ok, reason = self.hotspot_map.update(self.slice_filename, idx, candidate)
         if not ok:
             QMessageBox.warning(self, "无法更新", reason)

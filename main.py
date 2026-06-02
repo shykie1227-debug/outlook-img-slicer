@@ -8,7 +8,7 @@ import re
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
@@ -25,7 +25,7 @@ from pdf_slicer import pdf_to_images
 from ppt_slicer import pptx_to_images
 # psd_slicer 依赖 psd_tools + numpy，仅在用户上传 .psd 时懒加载，避免主程序启动报错
 # from psd_slicer import psd_to_images
-from clickable_map import HotspotMap
+from clickable_map import HotspotMap, Hotspot
 from hotspot_editor import HotspotEditorDialog
 from html_assembler import assemble_html, generate_plain_html, SliceItem
 from hotspot_slicer import slice_paths_by_hotspots
@@ -35,7 +35,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.6"
+VERSION = "4.6.7"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -264,6 +264,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.slice_paths: List[str] = []
+        # V4.6.7 排序架构：原切片的 source_index 映射
+        # key = slice 文件名，value = source_index（浮点：原切片=整数，Hotspot派生=整数+N*0.001）
+        # **不依赖** slice_paths 顺序、文件名、目录遍历
+        self.slice_source_index: Dict[str, float] = {}
         self.worker: Optional[ProcessWorker] = None
         self.hotspot_map = HotspotMap()
         self._build_ui()
@@ -790,6 +794,12 @@ class MainWindow(QMainWindow):
 
     def _on_processed(self, paths: List[str]):
         self.slice_paths = paths
+        # V4.6.7：按生成顺序填 source_index（原切片 = 1.0, 2.0, 3.0, ...）
+        # 这里的“顺序”由 image_slicer.detect_and_slice 返回顺序决定
+        # —— _build_slices_with_hotspots 会用本映射，未误用 path.index() 兑底
+        self.slice_source_index = {
+            os.path.basename(p): float(i + 1) for i, p in enumerate(paths)
+        }
         self.progress_bar.hide()
         self.btn_send.setEnabled(bool(paths))
         self.btn_save.setEnabled(bool(paths))
@@ -891,32 +901,36 @@ class MainWindow(QMainWindow):
 
     def _build_slices_with_hotspots(self) -> List[SliceItem]:
         """
-        V4.6.6 V1：根据 hotspot_map 物理切割切片，生成 List[SliceItem]。
+        V4.6.6 V1 + V4.6.7 排序架构：根据 hotspot_map 物理切割切片，生成 List[SliceItem]。
 
-        返回的每项是 (path, href)：
+        每项是 (path, href, sort_key)：
           - href=None: 普通切片 → <img>
           - href=str:  链接切片 → <a href><img></a>
+          - sort_key: V4.6.7 排序架构唯一依据，html_assembler 会按它排序
         """
         if not self.slice_paths:
             return []
         from pathlib import Path
-        # 把 hotspot_map 按切片名分组
+        # hotspot_map 按切片名分组
         hotspots_by_slice: Dict[str, List[Hotspot]] = {}
         for fname in self.hotspot_map.all_slices():
             hotspots_by_slice[fname] = self.hotspot_map.get(fname)
-        # 物理切割
-        new_paths, link_map = slice_paths_by_hotspots(self.slice_paths, hotspots_by_slice)
-        # 转为 SliceItem 列表
-        return [
-            SliceItem(
+        # V4.6.7：传 source_index_map 避免 hotspot_slicer 兜底按 path.index() 隐式顺序
+        slices_with_key, link_map = slice_paths_by_hotspots(
+            self.slice_paths, hotspots_by_slice, source_index_map=self.slice_source_index
+        )
+        items: List[SliceItem] = []
+        for p, sk in slices_with_key:
+            name = Path(p).name
+            hs_list = self.hotspot_map.get(name)
+            alt_text = hs_list[0].text if hs_list and hs_list[0].text else ""
+            items.append(SliceItem(
                 path=p,
-                href=link_map.get(Path(p).name),
-                alt_text=self.hotspot_map.get(Path(p).name)[0].text
-                    if self.hotspot_map.get(Path(p).name) and self.hotspot_map.get(Path(p).name)[0].text
-                    else ""
-            )
-            for p in new_paths
-        ]
+                href=link_map.get(name),
+                alt_text=alt_text,
+                sort_key=sk,
+            ))
+        return items
 
     def _copy_html(self):
         """复制 HTML 到剪贴板（同时写入 HTML 和纯文本格式）"""
@@ -1044,7 +1058,7 @@ class MainWindow(QMainWindow):
         self._open_hotspot_editor_for_slice(self.slice_paths[idx])
 
     def _open_hotspot_editor_for_slice(self, slice_path: str):
-        dlg = HotspotEditorDialog(slice_path, self.hotspot_map, self)
+        dlg = HotspotEditorDialog(slice_path, self.hotspot_map, self, source_index=self.slice_source_index.get(os.path.basename(slice_path), 0.0))
         dlg.exec()
         # V4.6.6 V1：热区已标注，将在发送/复制时按 hotspot 纵向切割
         if not self.hotspot_map.is_empty():

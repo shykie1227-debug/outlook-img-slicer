@@ -56,6 +56,7 @@ class CutStripe:
     y2: int
     href: str = None
     hotspot_text: str = ""
+    sort_key: float = 0.0  # V4.6.7 排序架构
 
 
 def validate_hotspots_no_overlap(
@@ -131,7 +132,8 @@ def build_stripe_assignments(
 
 def slice_image_with_hotspots(
     img: Image.Image,
-    hotspots: List[Hotspot]
+    hotspots: List[Hotspot],
+    source_index: float = 0.0
 ) -> List[CutStripe]:
     """
     V1 主入口：按 hotspot 的 X 范围纵向切割原图。
@@ -139,9 +141,10 @@ def slice_image_with_hotspots(
     Args:
         img: 原图（PIL Image, RGB）
         hotspots: 用户标注的所有 hotspot
+        source_index: 原切片的 sort_key 基底（决定派生竖条的 sort_key）
 
     Returns:
-        List[CutStripe]: 从上到下、从左到右的竖条列表
+        List[CutStripe]: 按 X 从左到右排列的竖条列表
     """
     img_w, img_h = img.size
 
@@ -156,12 +159,10 @@ def slice_image_with_hotspots(
     # 3) 分配 hotspot 到对应竖条
     assignments = build_stripe_assignments(cut_lines, hotspots)
 
-    # 4) 物理切割
+    # 4) 物理切割（V4.6.7 sort_key 架构：source_index + N*0.001）
     stripes: List[CutStripe] = []
     for i in range(len(cut_lines) - 1):
         x1, x2 = cut_lines[i], cut_lines[i + 1]
-        # 切割：每条竖条横跨完整 Y
-        # box = (left, upper, right, lower) PIL 用法
         stripe_img = img.crop((x1, 0, x2, img_h))
         href, text = assignments.get(i, (None, ""))
         stripes.append(CutStripe(
@@ -170,50 +171,65 @@ def slice_image_with_hotspots(
             y1=0, y2=img_h,
             href=href,
             hotspot_text=text,
+            sort_key=source_index + (i + 1) * 0.001,
         ))
     return stripes
 
 
 def slice_paths_by_hotspots(
     image_paths: List[str],
-    hotspots_by_slice: dict
-) -> Tuple[List[str], dict]:
+    hotspots_by_slice: dict,
+    source_index_map: dict = None
+) -> Tuple[List[Tuple[str, float]], dict]:
     """
     高级入口：对一组切片路径，按各自的 hotspot 重新物理切割。
-    适配 V4.6.5 之前"先按智能切图生成 paths，再对每张 path 标注 hotspot"的流程。
+
+    V4.6.7 排序架构：返回 List[(path, sort_key)]，调用方按 sort_key 排序后输出 HTML。
+    **不依赖** append 顺序、文件名、目录遍历、os.listdir 等任何隐式顺序。
 
     Args:
         image_paths: 原始切片路径列表
         hotspots_by_slice: {slice_filename: List[Hotspot]}
+        source_index_map: {slice_filename: source_index}
+                          V4.6.7 强制要求调用方传入，避免隐式依赖 path 顺序
 
     Returns:
-        (new_paths, link_map)：
-        - new_paths: 重新切割后的新切片路径列表
-        - link_map: {new_filename: href or None}  记录每张新切片是否带链接
+        (slices_with_key, link_map)：
+        - slices_with_key: List[(path, sort_key)]，调用方须 sorted(..., key=lambda x: x[1])
+        - link_map: {filename: href or None}
     """
     import os
     from PIL import Image
-    new_paths: List[str] = []
+
+    slices_with_key: List[Tuple[str, float]] = []
     link_map: dict = {}
-    base_dir = os.path.dirname(image_paths[0]) if image_paths else "."
-    counter = 0
+    if not image_paths:
+        return slices_with_key, link_map
+    base_dir = os.path.dirname(image_paths[0])
+    counter = 0  # 文件名唯一性用，不参与排序
+
     for path in image_paths:
         fname = os.path.basename(path)
+        if source_index_map is not None and fname in source_index_map:
+            source_index = source_index_map[fname]
+        else:
+            # 兜底：仍按 path 顺序（仅用于调用方忘记传 source_index_map 时）
+            source_index = float(image_paths.index(path) + 1)
         hots = hotspots_by_slice.get(fname, [])
         with Image.open(path) as img:
             img = img.convert("RGB")
             if not hots:
-                # 无 hotspot：原样保留
-                new_paths.append(path)
+                # 无 hotspot：原切片保留，sort_key = source_index
+                slices_with_key.append((path, source_index))
                 link_map[fname] = None
                 continue
-            # 有 hotspot：物理切割
-            stripes = slice_image_with_hotspots(img, hots)
+            # 有 hotspot：物理切割，每条竖条 sort_key = source_index + N*0.001
+            stripes = slice_image_with_hotspots(img, hots, source_index=source_index)
             for s in stripes:
                 counter += 1
                 new_name = f"hs_{counter:03d}.png"
                 new_path = os.path.join(base_dir, new_name)
                 s.image.save(new_path, "PNG")
-                new_paths.append(new_path)
+                slices_with_key.append((new_path, s.sort_key))
                 link_map[new_name] = s.href
-    return new_paths, link_map
+    return slices_with_key, link_map
