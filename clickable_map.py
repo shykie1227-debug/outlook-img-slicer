@@ -41,10 +41,14 @@ class Hotspot:
         )
 
     def normalized(self) -> "Hotspot":
-        """保证 (x1,y1) 是左上角、(x2,y2) 是右下角"""
+        """保证 (x1,y1) 是左上角、(x2,y2) 是右下角。V4.6.7 修复：透传 source_index。"""
         x1, x2 = sorted((self.x1, self.x2))
         y1, y2 = sorted((self.y1, self.y2))
-        return Hotspot(x1=x1, y1=y1, x2=x2, y2=y2, url=self.url, text=self.text)
+        return Hotspot(
+            x1=x1, y1=y1, x2=x2, y2=y2,
+            url=self.url, text=self.text,
+            source_index=self.source_index,
+        )
 
     def rect(self) -> Tuple[int, int, int, int]:
         """返回 (x1, y1, x2, y2) 标准化后的元组。"""
@@ -108,6 +112,7 @@ class HotspotMap:
         """
         替换指定 index 的热区（用于编辑功能）。
         重复检查会跳过自身。
+        V4.6.7 修复：透传 source_index，避免 update 路径丢失排序上下文。
         """
         if slice_filename not in self._map:
             return False, HotspotError.NO_HOTSPOTS
@@ -120,10 +125,13 @@ class HotspotMap:
         # 自动补 https 协议
         if not (url.startswith("http://") or url.startswith("https://")):
             url = "https://" + url
+        # V4.6.7：保留原 source_index，若调用方未传则从原 hotspot 取
+        source_index = hotspot.source_index or lst[index].source_index
         h = Hotspot(
             x1=hotspot.x1, y1=hotspot.y1,
             x2=hotspot.x2, y2=hotspot.y2,
             url=url, text=hotspot.text,
+            source_index=source_index,
         ).normalized()
         if h.x2 - h.x1 < 5 or h.y2 - h.y1 < 5:
             return False, HotspotError.TOO_SMALL
@@ -167,7 +175,9 @@ class HotspotMap:
         data = json.loads(s) if s else {}
         for k, hs_list in data.items():
             for h in hs_list:
-                ok, _ = m.add(k, Hotspot.from_dict(h))
+                # V4.6.7 修复：透传 source_index，避免从 JSON 加载后丢失排序上下文
+                hs = Hotspot.from_dict(h)
+                ok, _ = m.add(k, hs, source_index=hs.source_index)
                 if not ok:
                     # 跳过重复/无效的旧数据，不让一个坏记录炸掉全量加载
                     continue

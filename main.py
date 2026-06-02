@@ -1009,8 +1009,12 @@ class MainWindow(QMainWindow):
             slices = self._build_slices_with_hotspots()
             html_content = assemble_html(slices, self._get_width())
             subject = self.input_subject.text().strip() or "长图邮件"
+            # V4.6.7：传 slices 让 outlook_sender 按 sort_key 排序后取 path
+            # image_paths 保留向后兼容
             create_email_with_images(
-                html_content, subject=subject, to="", image_paths=[s.path for s in slices]
+                html_content, subject=subject, to="",
+                slices=slices,
+                image_paths=[s.path for s in slices]
             )
             self._set_status("✅ 邮件窗口已打开，请检查后发送", "success")
         except Exception as exc:
@@ -1018,6 +1022,8 @@ class MainWindow(QMainWindow):
 
     def reset_app(self):
         self.slice_paths = []
+        # V4.6.7 修复：重置时同步清空 source_index 映射，避免残留
+        self.slice_source_index = {}
         self.file_path = None
         if self.worker is not None:
             self.worker.deleteLater()

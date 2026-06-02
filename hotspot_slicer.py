@@ -208,13 +208,13 @@ def slice_paths_by_hotspots(
     base_dir = os.path.dirname(image_paths[0])
     counter = 0  # 文件名唯一性用，不参与排序
 
-    for path in image_paths:
+    for idx, path in enumerate(image_paths):
         fname = os.path.basename(path)
         if source_index_map is not None and fname in source_index_map:
             source_index = source_index_map[fname]
         else:
-            # 兜底：仍按 path 顺序（仅用于调用方忘记传 source_index_map 时）
-            source_index = float(image_paths.index(path) + 1)
+            # 兜底：O(1) 枚举索引，避免 O(N) image_paths.index() 性能 + 重复路径 bug
+            source_index = float(idx + 1)
         hots = hotspots_by_slice.get(fname, [])
         with Image.open(path) as img:
             img = img.convert("RGB")

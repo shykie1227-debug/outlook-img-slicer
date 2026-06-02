@@ -15,24 +15,44 @@ import shutil
 
 
 def create_email_with_images(html_content: str, subject: str = "", to: str = "",
-                            image_paths: list = None, save_dir: str = ""):
+                            image_paths=None, save_dir: str = "",
+                            slices=None):
     """
     创建 Outlook 邮件窗口并填充 HTML 内容（V3 CID 版）
+
+    V4.6.7 修复：接受 slices: List[SliceItem]，按 sort_key 排序后取 paths。
+    这样 image_paths（按顺序）与 html_content 里的 cid:slice_XXX 顺序完全一致。
 
     Args:
         html_content: 邮件正文 HTML（使用 cid:slice_XXX）
         subject: 邮件主题
         to: 收件人邮箱地址（可选）
-        image_paths: 图片路径列表（用于 CID 嵌入）
+        image_paths: 备用：纯路径列表（与 slices 二选一）
         save_dir: 若指定，则在发送前将切片保存到此目录（保存切图功能）
+        slices: V4.6.7 推荐传 List[SliceItem]，按 sort_key 排序后取 path
     """
     if sys.platform != "win32":
         raise RuntimeError("此功能仅在 Windows 系统下支持 Outlook 自动化。")
 
+    # V4.6.7：从 slices 取按 sort_key 排序的 path 列表
+    # image_paths 作为向后兼容，但 slices 优先
+    if slices is not None:
+        from html_assembler import SliceItem
+        try:
+            sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+            sorted_paths = [s.path for s in sorted_slices]
+        except AttributeError:
+            # 兼容 image_paths 传 str 列表
+            sorted_paths = list(slices)
+    elif image_paths is not None:
+        sorted_paths = list(image_paths)
+    else:
+        sorted_paths = []
+
     # 保存切图功能
-    if save_dir and image_paths:
+    if save_dir and sorted_paths:
         os.makedirs(save_dir, exist_ok=True)
-        for path in image_paths:
+        for path in sorted_paths:
             fname = os.path.basename(path)
             dst = os.path.join(save_dir, fname)
             shutil.copy2(path, dst)
@@ -55,16 +75,15 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
         if to:
             mail.To = to
 
-        # 通过 MAPI 逐个设置附件的 Content-ID（CID）
-        if image_paths:
-            from html_assembler import get_cid_map
-            cid_map = get_cid_map(image_paths)
-            for i, path in enumerate(image_paths):
-                cid = cid_map[i]
-                att = mail.Attachments.Add(path)
-                att.PropertyAccessor.SetProperty(
-                    "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
-                )
+        # V4.6.7：按 sort_key 排序后的路径与 html 里的 cid 一一对应
+        # 不再调 get_cid_map，直接 enumerate 生成 cid
+        from html_assembler import SliceItem as _SI
+        for i, path in enumerate(sorted_paths):
+            cid = f"slice_{i + 1:03d}"
+            att = mail.Attachments.Add(path)
+            att.PropertyAccessor.SetProperty(
+                "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
+            )
 
         # Display(False) 非模态显示
         # 【本地运行原则】绝不调用 mail.Send()，由用户手动检查后点发送
