@@ -19,6 +19,7 @@ Outlook 兼容性（第一目标 = Outlook Desktop / Word 引擎）：
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
+from html import escape
 from PIL import Image
 
 
@@ -55,7 +56,9 @@ def _get_img_dimensions(img_path: str) -> tuple:
 
 
 def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional[str] = None,
-              alt: str = "", original_width: int = 0, is_base64: bool = False) -> str:
+              alt: str = "", original_width: int = 0, is_base64: bool = False,
+              forced_display_w: Optional[int] = None,
+              forced_display_h: Optional[int] = None) -> str:
     """
     生成一张切片的 <td>...</td>（V4.6.9 修复纵向→横向拼接）。
 
@@ -73,15 +76,21 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
     except Exception:
         actual_w, actual_h = 650, 650
 
-    if original_width > 0 and actual_w > 0:
+    if forced_display_w is not None:
+        seg_display_w = max(1, int(forced_display_w))
+    elif original_width > 0 and actual_w > 0:
         ratio = actual_w / original_width
         seg_display_w = round(display_w * ratio)
     else:
         seg_display_w = display_w
-    seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
+    if forced_display_h is not None:
+        seg_display_h = max(1, int(forced_display_h))
+    else:
+        seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
 
     if not alt:
         alt = Path(slice_path).name
+    safe_alt = escape(alt, quote=True)
 
     # base64 模式 vs CID 模式
     if is_base64:
@@ -93,20 +102,25 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         src = f"data:{mime};base64,{b64}"
     else:
         src = cid_or_src
+    safe_src = escape(src, quote=True)
 
     img_tag = (
-        f'<img src="{src}" '
+        f'<img src="{safe_src}" '
         f'width="{seg_display_w}" '
         f'height="{seg_display_h}" '
-        f'alt="{alt}" '
+        f'alt="{safe_alt}" '
         f'border="0" '
-        f'style="border: 0; display: block; outline: none; text-decoration: none;" />'
+        f'style="width: {seg_display_w}px; height: {seg_display_h}px; '
+        f'border: 0; display: block; outline: none; text-decoration: none; '
+        f'vertical-align: top; -ms-interpolation-mode: bicubic;" />'
     )
 
     if href:
+        safe_href = escape(href, quote=True)
         inner = (
-            f'<a href="{href}" target="_blank" '
-            f'style="display: block; text-decoration: none; outline: none;">'
+            f'<a href="{safe_href}" target="_blank" '
+            f'style="display: block; width: {seg_display_w}px; height: {seg_display_h}px; '
+            f'text-decoration: none; outline: none; border: 0;">'
             f'{img_tag}'
             f'</a>'
         )
@@ -114,7 +128,8 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         inner = img_tag
 
     return (
-        f'<td align="left" valign="top" style="'
+        f'<td align="left" valign="top" width="{seg_display_w}" style="'
+        f'width: {seg_display_w}px; '
         f'padding: 0; margin: 0; '
         f'font-size: 0; line-height: 0; '
         f'border: 0; vertical-align: top;'
@@ -162,6 +177,73 @@ def _group_by_source(slices: List[SliceItem]) -> List[List[SliceItem]]:
     return groups
 
 
+def _allocate_group_widths(group: List[SliceItem], display_w: int) -> Dict[str, int]:
+    """
+    为同一原图的横向分段分配显示宽度，保证总和严格等于 display_w。
+
+    Outlook 的 Word 引擎对表格宽度非常敏感。逐段 round() 可能让一行总宽
+    变成 display_w±1px，实际发送时容易被重排或换行，表现为标注切片错位。
+    """
+    if not group:
+        return {}
+    if len(group) == 1:
+        return {group[0].path: display_w}
+
+    dims: List[Tuple[SliceItem, int]] = []
+    for s in group:
+        try:
+            actual_w, _ = _get_img_dimensions(s.path)
+        except Exception:
+            actual_w = 0
+        dims.append((s, actual_w))
+
+    total_actual_w = sum(w for _, w in dims if w > 0)
+    if total_actual_w <= 0:
+        base = max(1, display_w // len(group))
+        widths = [base] * len(group)
+        widths[-1] += display_w - sum(widths)
+        return {s.path: max(1, w) for (s, _), w in zip(dims, widths)}
+
+    raw = [(w / total_actual_w) * display_w for _, w in dims]
+    widths = [max(1, int(v)) for v in raw]
+    remainder = display_w - sum(widths)
+
+    fractions = sorted(
+        range(len(raw)),
+        key=lambda i: raw[i] - int(raw[i]),
+        reverse=(remainder > 0),
+    )
+    idx = 0
+    while remainder != 0 and fractions:
+        target = fractions[idx % len(fractions)]
+        if remainder > 0:
+            widths[target] += 1
+            remainder -= 1
+        elif widths[target] > 1:
+            widths[target] -= 1
+            remainder += 1
+        idx += 1
+
+    return {s.path: w for (s, _), w in zip(dims, widths)}
+
+
+def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
+    """同一原图的横向分段必须使用同一个显示高度，避免 Outlook 中上下错位。"""
+    total_w = 0
+    row_h = 0
+    for s in group:
+        try:
+            actual_w, actual_h = _get_img_dimensions(s.path)
+        except Exception:
+            continue
+        if actual_w > 0:
+            total_w += actual_w
+            row_h = max(row_h, actual_h)
+    if total_w <= 0 or row_h <= 0:
+        return display_w
+    return max(1, round(row_h * display_w / total_w))
+
+
 def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
@@ -176,12 +258,16 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     rows = ""
     cid_counter = 0
     for group in groups:
+        allocated_widths = _allocate_group_widths(group, display_w)
+        row_height = _compute_group_height(group, display_w)
         cells = ""
         for s in group:
             cid_counter += 1
             cid = f"slice_{cid_counter:03d}"
             cells += _build_cell(s.path, f"cid:{cid}", display_w, s.href, s.alt_text,
-                                 s.original_width, is_base64=False)
+                                 s.original_width, is_base64=False,
+                                 forced_display_w=allocated_widths.get(s.path),
+                                 forced_display_h=row_height)
         rows += f'<tr>\n{cells}</tr>\n'
 
     return (
@@ -197,7 +283,8 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
         f'<table cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
         f'width="{display_w}" '
-        f'style="border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
+        f'style="width: {display_w}px; border-collapse: collapse; table-layout: fixed; '
+        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
         f'{rows}'
         f'</table>\n'
         f'</body>\n'
@@ -221,10 +308,14 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     groups = _group_by_source(sorted_slices)
     rows = ""
     for group in groups:
+        allocated_widths = _allocate_group_widths(group, display_w)
+        row_height = _compute_group_height(group, display_w)
         cells = ""
         for s in group:
             cells += _build_cell(s.path, "", display_w, s.href, s.alt_text,
-                                 s.original_width, is_base64=True)
+                                 s.original_width, is_base64=True,
+                                 forced_display_w=allocated_widths.get(s.path),
+                                 forced_display_h=row_height)
         rows += f'<tr>\n{cells}</tr>\n'
     return (
         f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
@@ -238,7 +329,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
         f'<table cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
         f'width="{display_w}" '
-        f'style="border-collapse: collapse;">\n'
+        f'style="width: {display_w}px; border-collapse: collapse; table-layout: fixed;">\n'
         f'{rows}'
         f'</table>\n'
         f'</body>\n'

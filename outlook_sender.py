@@ -68,22 +68,30 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
         outlook = win32com.client.Dispatch("Outlook.Application")
         mail = outlook.CreateItem(0)  # 0 代表 olMailItem
 
-        # 设置邮件属性
-        mail.HTMLBody = html_content
-        if subject:
-            mail.Subject = subject
-        if to:
-            mail.To = to
-
         # V4.6.7：按 sort_key 排序后的路径与 html 里的 cid 一一对应
         # 不再调 get_cid_map，直接 enumerate 生成 cid
-        from html_assembler import SliceItem as _SI
         for i, path in enumerate(sorted_paths):
             cid = f"slice_{i + 1:03d}"
             att = mail.Attachments.Add(path)
             att.PropertyAccessor.SetProperty(
                 "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
             )
+            att.PropertyAccessor.SetProperty(
+                "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B", True
+            )
+            ext = os.path.splitext(path)[1].lower()
+            mime = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+            att.PropertyAccessor.SetProperty(
+                "http://schemas.microsoft.com/mapi/proptag/0x370E001F", mime
+            )
+
+        # 先注册 CID 附件，再写 HTMLBody，降低 Outlook/Word 重写正文时
+        # 丢失 cid 图片引用或 <a><img></a> 链接关系的概率。
+        mail.HTMLBody = html_content
+        if subject:
+            mail.Subject = subject
+        if to:
+            mail.To = to
 
         # Display(False) 非模态显示
         # 【本地运行原则】绝不调用 mail.Send()，由用户手动检查后点发送

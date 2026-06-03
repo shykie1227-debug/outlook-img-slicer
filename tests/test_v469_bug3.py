@@ -64,22 +64,21 @@ class TestV469Bug3MultiStripeWidth:
         widths = [int(w) for w in re.findall(r'<img[^>]*width="(\d+)"', html)]
         assert sum(widths) == 650, f'总宽应=650, 实际={sum(widths)}'
 
-    def test_no_original_width_falls_back_to_display_w(self):
-        """未传 original_width（兼容旧调用）→ 仍用 display_w"""
+    def test_no_original_width_still_keeps_group_width(self):
+        """未传 original_width 时，横向分组仍按实际图片宽度保证总宽 = display_w"""
         tmp = tempfile.mkdtemp(prefix='v469b3_')
         p = os.path.join(tmp, 'long.png')
         make_image(p, 1000, 500)
 
         sim = {'long.png': [Hotspot(400, 100, 600, 400, 'https://test.com', 'Btn', source_index=1.0)]}
         sk, lm = slice_paths_by_hotspots([p], sim, source_index_map={'long.png': 1.0})
-        # 不传 original_width（兼容旧）
+        # 不传 original_width：HTML 组装层仍可从实际切片像素宽度分配
         slices = [SliceItem(path=path, href=lm.get(os.path.basename(path)),
                             sort_key=k) for path, k in sk]
 
         html = generate_plain_html(slices, 650)
         widths = [int(w) for w in re.findall(r'<img[^>]*width="(\d+)"', html)]
-        # 兜底：每段都用 650（保持向后兼容）
-        assert widths == [650, 650, 650], f'兜底每段 650, 实际={widths}'
+        assert sum(widths) == 650, f'未传 original_width 也应总宽=650, 实际={sum(widths)}, 段={widths}'
 
     def test_multiple_hotspots_proportional(self):
         """1000x500 + 2 hotspot → 5 段 → 段宽按比例 → 总 650"""

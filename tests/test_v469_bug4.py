@@ -151,6 +151,44 @@ class TestV469Bug4HorizontalLayout:
         assert 'https://test.com' not in tds[0]
         assert 'https://test.com' not in tds[2]
 
+    def test_awkward_widths_sum_exactly_to_display_width(self):
+        """非整除宽度也必须严格凑齐 display_w，避免 Outlook 表格换行错位"""
+        tmp = tempfile.mkdtemp(prefix='v469b4_')
+        p = os.path.join(tmp, 'long.png')
+        make_image(p, 1000, 500)
+
+        sim = {'long.png': [
+            Hotspot(333, 0, 666, 500, 'https://test.com', 'T', source_index=1.0),
+        ]}
+        sk, lm = slice_paths_by_hotspots([p], sim, source_index_map={'long.png': 1.0})
+        slices = [SliceItem(path=path, href=lm.get(os.path.basename(path)),
+                            sort_key=k, original_width=1000) for path, k in sk]
+
+        html = generate_plain_html(slices, 650)
+        widths = [int(w) for w in re.findall(r'<img[^>]*width="(\d+)"', html)]
+        heights = [int(h) for h in re.findall(r'<img[^>]*height="(\d+)"', html)]
+        td_widths = [int(w) for w in re.findall(r'<td[^>]*width="(\d+)"', html)]
+        assert sum(widths) == 650, f'img 总宽应=650, 实际={sum(widths)}, 段={widths}'
+        assert td_widths == widths, f'td 宽度必须和 img 一致，td={td_widths}, img={widths}'
+        assert len(set(heights)) == 1, f'同一行所有分段高度必须一致，实际={heights}'
+
+    def test_href_and_alt_are_html_escaped(self):
+        """URL/alt 中的 & 等字符必须转义，否则 Outlook 可能截断 href"""
+        tmp = tempfile.mkdtemp(prefix='v469b4_')
+        p = os.path.join(tmp, 'long.png')
+        make_image(p, 1000, 500)
+
+        sim = {'long.png': [
+            Hotspot(400, 100, 600, 400, 'https://example.com/a?x=1&y=2', 'A&B', source_index=1.0),
+        ]}
+        sk, lm = slice_paths_by_hotspots([p], sim, source_index_map={'long.png': 1.0})
+        slices = [SliceItem(path=path, href=lm.get(os.path.basename(path)),
+                            alt_text='A&B', sort_key=k, original_width=1000) for path, k in sk]
+
+        html = generate_plain_html(slices, 650)
+        assert 'href="https://example.com/a?x=1&amp;y=2"' in html
+        assert 'alt="A&amp;B"' in html
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
