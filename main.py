@@ -35,7 +35,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.7.5"
+VERSION = "4.7.6"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -82,6 +82,35 @@ class Theme:
     DROPZONE_IDLE_BORDER = "#D1D5DB"
     DROPZONE_HOVER_BG = "#EFF6FF"
     DROPZONE_HOVER_BORDER = "#0078D4"
+
+
+def _load_psd_images(psd_path: str):
+    """按需加载 PSD/PSB 渲染器，避免主程序启动时强依赖 psd-tools。"""
+    from psd_slicer import psd_to_images
+    return psd_to_images(psd_path)
+
+
+def _render_source_to_images(path: str):
+    """
+    将任意受支持的输入文件渲染为 PIL Image 列表。
+
+    图片：直接读取
+    PDF：逐页渲染
+    PPT/PPTX：逐页渲染
+    PSD/PSB：展平图层后渲染
+    """
+    ext = Path(path).suffix.lower()
+    if ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"):
+        from PIL import Image as PILImage
+        with PILImage.open(path) as img:
+            return [img.convert("RGBA") if img.mode == "RGBA" else img.convert("RGB")]
+    if ext == ".pdf":
+        return pdf_to_images(path)
+    if ext in (".ppt", ".pptx"):
+        return pptx_to_images(path)
+    if ext in (".psd", ".psb"):
+        return _load_psd_images(path)
+    raise ValueError(f"不支持的导出格式: {path}")
 
 
 def _font(family: str = "Microsoft YaHei", size: int = 12, weight: int = QFont.Normal) -> QFont:
@@ -651,36 +680,65 @@ class MainWindow(QMainWindow):
     def _export_images(self, paths: List[str], save_dir: Optional[str] = None,
                        fmt: str = "png", keep_alpha: bool = True):
         """
-        图片导出模式（V4.6.3 重写）：
+        图片导出模式（V4.6.3 重写 + V4.7.6 架构升级）：
         - fmt: 'png' (支持透明) / 'jpg' (强制白底)
         - keep_alpha: 是否保留透明底（仅 png 有效）
         - 多图自动合并为长图，再按选定格式保存
+        - V4.7.6: 支持 JPG/PNG/BMP/WEBP/GIF/PDF/PPT/PPTX/PSD/PSB 任意受支持格式
+          (通过 _render_source_to_images 统一渲染成 PIL Image)
         """
         self._set_status("正在图片导出...", "info")
         try:
-            # 1) 加载所有图片到内存（处理透明底）
             from PIL import Image as PILImage
-            from io import BytesIO
-            from PIL import Image as _PI
+            from PyQt5.QtWidgets import QMessageBox
+            # V4.7.6: 多页文件大数量确认
+            from pathlib import Path
+            _exts_multi = (".pdf", ".ppt", ".pptx", ".psd", ".psb")
+            if any(Path(p).suffix.lower() in _exts_multi for p in paths):
+                # 预估总页数（一次性扫一遍）
+                total_pages = 0
+                for p in paths:
+                    try:
+                        total_pages += len(_render_source_to_images(p))
+                    except Exception:
+                        pass
+                if total_pages > 5:
+                    reply = QMessageBox.question(
+                        self, "多页文件确认",
+                        f"检测到多页文件，总计约 {total_pages} 页。\n"
+                        f"将合并为一张长图导出。是否继续？",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No,
+                    )
+                    if reply != QMessageBox.Yes:
+                        self._set_status("已取消导出", "info")
+                        return
+
+            # 1) V4.7.6: 用 _render_source_to_images 统一渲染（替代旧 _PI.open 直开）
             images = []
             for p in paths:
-                img = _PI.open(p)
-                # PNG 保留透明底则保留 RGBA；否则转 RGB
-                if fmt == "png" and keep_alpha:
-                    if img.mode != "RGBA":
-                        img = img.convert("RGBA")
-                else:
-                    # JPG 强制白底 / PNG 不保留透明
-                    if img.mode in ("RGBA", "LA", "P"):
-                        bg = PILImage.new("RGB", img.size, (255, 255, 255))
-                        if img.mode in ("RGBA", "LA"):
-                            bg.paste(img, mask=img.split()[-1])
-                        else:
-                            bg.paste(img.convert("RGB"))
-                        img = bg
-                    elif img.mode != "RGB":
-                        img = img.convert("RGB")
-                images.append(img)
+                try:
+                    rendered = _render_source_to_images(p)
+                except Exception as e:
+                    self._set_status(f"无法渲染 {Path(p).name}: {e}", "error")
+                    return
+                for img in rendered:
+                    # PNG 保留透明底则保留 RGBA；否则转 RGB
+                    if fmt == "png" and keep_alpha:
+                        if img.mode != "RGBA":
+                            img = img.convert("RGBA")
+                    else:
+                        # JPG 强制白底 / PNG 不保留透明
+                        if img.mode in ("RGBA", "LA", "P"):
+                            bg = PILImage.new("RGB", img.size, (255, 255, 255))
+                            if img.mode in ("RGBA", "LA"):
+                                bg.paste(img, mask=img.split()[-1])
+                            else:
+                                bg.paste(img.convert("RGB"))
+                            img = bg
+                        elif img.mode != "RGB":
+                            img = img.convert("RGB")
+                    images.append(img)
 
             # 2) 单图直接保存 / 多图合并
             if len(images) == 1:

@@ -110,10 +110,11 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         f'width="{seg_display_w}" '
         f'height="{seg_display_h}" '
         f'alt="{safe_alt}" '
-        f'border="0" '
+        f'border="0" hspace="0" vspace="0" '
         f'style="width: {seg_display_w}px; height: {seg_display_h}px; '
         f'border: 0; display: block; outline: none; text-decoration: none; '
-        f'vertical-align: top; -ms-interpolation-mode: bicubic;" />'
+        f'vertical-align: top; margin: 0; padding: 0; '
+        f'-ms-interpolation-mode: bicubic;" />'
     )
 
     if href:
