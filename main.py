@@ -27,7 +27,7 @@ from ppt_slicer import pptx_to_images
 # from psd_slicer import psd_to_images
 from clickable_map import HotspotMap, Hotspot
 from hotspot_editor import HotspotEditorDialog
-from html_assembler import assemble_html, generate_plain_html, SliceItem
+from html_assembler import assemble_html, generate_plain_html, materialize_display_slices, SliceItem
 from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
@@ -35,7 +35,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.6.9"
+VERSION = "4.7"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -965,8 +965,12 @@ class MainWindow(QMainWindow):
         if not self.slice_paths:
             return
         try:
+            display_w = self._get_width()
+            slices = materialize_display_slices(
+                self._build_slices_with_hotspots(), display_w
+            )
             html = generate_plain_html(
-                self._build_slices_with_hotspots(), self._get_width()
+                slices, display_w
             )
             mime = QMimeData()
             # HTML 格式：Outlook/Word 粘贴时正确渲染
@@ -1034,8 +1038,11 @@ class MainWindow(QMainWindow):
                 )
 
         try:
-            slices = self._build_slices_with_hotspots()
-            html_content = assemble_html(slices, self._get_width())
+            display_w = self._get_width()
+            slices = materialize_display_slices(
+                self._build_slices_with_hotspots(), display_w
+            )
+            html_content = assemble_html(slices, display_w)
             subject = self.input_subject.text().strip() or "长图邮件"
             # V4.6.7：传 slices 让 outlook_sender 按 sort_key 排序后取 path
             # image_paths 保留向后兼容

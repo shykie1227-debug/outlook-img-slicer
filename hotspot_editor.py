@@ -44,8 +44,8 @@ from clickable_map import HotspotMap, Hotspot
 
 
 # ── 颜色常量（独立出来便于复用） ──
-COLOR_BORDER_IDLE = QColor(255, 140, 0)         # 已有热区：橙色虚线
-COLOR_FILL_IDLE = QColor(255, 140, 0, 60)
+COLOR_BORDER_IDLE = QColor(5, 150, 105)         # 已有热区：绿色，表示已可点击
+COLOR_FILL_IDLE = QColor(16, 185, 129, 70)
 COLOR_BORDER_DRAW = QColor(0, 120, 212)         # 正在拖选：蓝色实线
 COLOR_FILL_DRAW = QColor(0, 120, 212, 40)
 COLOR_BORDER_EDIT = QColor(220, 38, 38)         # 改区域模式：红色实线
@@ -69,6 +69,15 @@ def _domain_of(url: str) -> str:
         return urlparse(url).netloc or url
     except Exception:
         return url
+
+
+def _shorten_url(url: str, max_len: int = 46) -> str:
+    """列表和画布徽章中显示 URL，过长时中间截断。"""
+    url = url or ""
+    if len(url) <= max_len:
+        return url
+    keep = max(8, (max_len - 3) // 2)
+    return f"{url[:keep]}...{url[-keep:]}"
 
 
 class ImageCanvas(QLabel):
@@ -174,7 +183,7 @@ class ImageCanvas(QLabel):
         super().paintEvent(ev)
         painter = QPainter(self)
 
-        # 已有热区：橙色虚线
+        # 已有热区：绿色虚线 + 可点击徽章
         for idx, h in enumerate(self.hotspots):
             x1 = int(h.x1 * self.scale)
             y1 = int(h.y1 * self.scale)
@@ -197,6 +206,20 @@ class ImageCanvas(QLabel):
             painter.setPen(QColor(255, 255, 255))
             painter.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
             painter.drawText(x1 + 4, y1 + 16, str(idx + 1))
+            badge_text = f"可点击 {idx + 1}: {_domain_of(h.url)}"
+            painter.setFont(QFont("Microsoft YaHei", 9, QFont.Bold))
+            metrics = painter.fontMetrics()
+            badge_w = min(max(metrics.horizontalAdvance(badge_text) + 12, 84), max(84, x2 - x1))
+            badge_h = 22
+            badge_x = x1
+            badge_y = max(0, y1 - badge_h - 2)
+            if badge_y == 0 and y1 < badge_h + 2:
+                badge_y = y1 + 2
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(5, 150, 105, 230))
+            painter.drawRoundedRect(badge_x, badge_y, badge_w, badge_h, 4, 4)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(badge_x + 6, badge_y + 16, badge_text)
 
         # 当前拖框选
         if self._dragging:
@@ -607,9 +630,9 @@ class HotspotEditorDialog(QDialog):
         for i, h in enumerate(self._current):
             domain = _domain_of(h.url)
             text = (
-                f"  [{i + 1}]  区域 {h.x1},{h.y1} → {h.x2},{h.y2}  "
+                f"  ✓ 可点击链接 [{i + 1}]  区域 {h.x1},{h.y1} → {h.x2},{h.y2}  "
                 f"({h.x2 - h.x1}×{h.y2 - h.y1}px)\n"
-                f"        URL: {domain}  {h.url if h.url == domain else ''}"
+                f"        {domain}  {_shorten_url(h.url)}"
             )
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, i)

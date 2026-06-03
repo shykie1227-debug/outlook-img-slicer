@@ -7,3 +7,19 @@ dist/
 build/
 DS_Store
 .DS_Store
+
+# === 本地开发日志（不入 git，每次覆盖会丢历史）===
+test.md
+*.local.md
+dev-log/
+dev-notes/
+scratch.md
+TODO.local.md
+
+# === AI 协作痕迹（不入 git）===
+.claude/
+.cursor/
+.copilot/
+.aider*
+.conversation.md
+CHAT_HISTORY.md

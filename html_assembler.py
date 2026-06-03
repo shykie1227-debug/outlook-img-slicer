@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
 from html import escape
+import uuid
 from PIL import Image
 
 
@@ -131,7 +132,7 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         f'<td align="left" valign="top" width="{seg_display_w}" style="'
         f'width: {seg_display_w}px; '
         f'padding: 0; margin: 0; '
-        f'font-size: 0; line-height: 0; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
         f'border: 0; vertical-align: top;'
         f'">'
         f'{inner}'
@@ -244,6 +245,99 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
     return max(1, round(row_h * display_w / total_w))
 
 
+def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
+                     is_base64: bool = False) -> Tuple[str, int]:
+    """
+    为一张原始切片生成完整外层行。
+
+    关键：外层 table 永远只有 1 列；每张原图自己的横向分段放进独立内层 table。
+    Outlook/Word 会把同一张 table 的列当作全局列网格，如果直接在外层混用
+    “多列 hotspot 行”和“单列普通行”，普通行会被前面多列宽度污染，表现为
+    左右错位、显示不全或局部重叠。
+    """
+    allocated_widths = _allocate_group_widths(group, display_w)
+    row_height = _compute_group_height(group, display_w)
+    cells = ""
+    for s in group:
+        if is_base64:
+            cid_or_src = ""
+        else:
+            cid_counter += 1
+            cid_or_src = f"cid:slice_{cid_counter:03d}"
+        cells += _build_cell(
+            s.path, cid_or_src, display_w, s.href, s.alt_text,
+            s.original_width, is_base64=is_base64,
+            forced_display_w=allocated_widths.get(s.path),
+            forced_display_h=row_height,
+        )
+
+    inner_table = (
+        f'<table cellpadding="0" cellspacing="0" border="0" align="center" '
+        f'width="{display_w}" '
+        f'style="width: {display_w}px; border-collapse: collapse; '
+        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
+        f'<tr style="height: {row_height}px;">\n'
+        f'{cells}'
+        f'</tr>\n'
+        f'</table>'
+    )
+    row = (
+        f'<tr>\n'
+        f'<td align="center" valign="top" width="{display_w}" style="'
+        f'width: {display_w}px; padding: 0; margin: 0; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+        f'border: 0; vertical-align: top;">'
+        f'{inner_table}'
+        f'</td>\n'
+        f'</tr>\n'
+    )
+    return row, cid_counter
+
+
+def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
+    """
+    生成一组“最终显示尺寸”的临时切片。
+
+    Outlook/Word 对多个相邻图片段分别缩放时，边缘插值容易产生 1px 竖缝或重叠。
+    这里提前把每段 resize 到 HTML 中声明的最终宽高，让 Outlook 只按 1:1 显示，
+    不再参与缩放计算。
+    """
+    if not slices:
+        return []
+
+    groups = _group_by_source(slices)
+    prepared: List[SliceItem] = []
+    out_dir = Path(slices[0].path).parent
+    batch = uuid.uuid4().hex[:8]
+    counter = 0
+
+    for group in groups:
+        allocated_widths = _allocate_group_widths(group, display_w)
+        row_height = _compute_group_height(group, display_w)
+        for s in group:
+            counter += 1
+            target_w = max(1, int(allocated_widths.get(s.path, display_w)))
+            target_h = max(1, int(row_height))
+            target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
+            try:
+                with Image.open(s.path) as img:
+                    img = img.convert("RGB")
+                    if img.size != (target_w, target_h):
+                        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                    img.save(target_path, "PNG")
+                prepared.append(SliceItem(
+                    path=str(target_path),
+                    href=s.href,
+                    alt_text=s.alt_text,
+                    sort_key=s.sort_key,
+                    original_width=display_w,
+                ))
+            except Exception:
+                prepared.append(s)
+
+    return prepared
+
+
 def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
@@ -258,17 +352,8 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     rows = ""
     cid_counter = 0
     for group in groups:
-        allocated_widths = _allocate_group_widths(group, display_w)
-        row_height = _compute_group_height(group, display_w)
-        cells = ""
-        for s in group:
-            cid_counter += 1
-            cid = f"slice_{cid_counter:03d}"
-            cells += _build_cell(s.path, f"cid:{cid}", display_w, s.href, s.alt_text,
-                                 s.original_width, is_base64=False,
-                                 forced_display_w=allocated_widths.get(s.path),
-                                 forced_display_h=row_height)
-        rows += f'<tr>\n{cells}</tr>\n'
+        row, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=False)
+        rows += row
 
     return (
         f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
@@ -283,7 +368,7 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
         f'<table cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
         f'width="{display_w}" '
-        f'style="width: {display_w}px; border-collapse: collapse; table-layout: fixed; '
+        f'style="width: {display_w}px; border-collapse: collapse; '
         f'mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
         f'{rows}'
         f'</table>\n'
@@ -307,16 +392,10 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     sorted_slices = sorted(slices, key=lambda s: s.sort_key)
     groups = _group_by_source(sorted_slices)
     rows = ""
+    cid_counter = 0
     for group in groups:
-        allocated_widths = _allocate_group_widths(group, display_w)
-        row_height = _compute_group_height(group, display_w)
-        cells = ""
-        for s in group:
-            cells += _build_cell(s.path, "", display_w, s.href, s.alt_text,
-                                 s.original_width, is_base64=True,
-                                 forced_display_w=allocated_widths.get(s.path),
-                                 forced_display_h=row_height)
-        rows += f'<tr>\n{cells}</tr>\n'
+        row, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=True)
+        rows += row
     return (
         f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
         f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
@@ -329,7 +408,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
         f'<table cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
         f'width="{display_w}" '
-        f'style="width: {display_w}px; border-collapse: collapse; table-layout: fixed;">\n'
+        f'style="width: {display_w}px; border-collapse: collapse;">\n'
         f'{rows}'
         f'</table>\n'
         f'</body>\n'

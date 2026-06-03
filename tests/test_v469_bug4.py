@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from PIL import Image
 from clickable_map import Hotspot
 from hotspot_slicer import slice_paths_by_hotspots
-from html_assembler import SliceItem, generate_plain_html
+from html_assembler import SliceItem, generate_plain_html, materialize_display_slices
 
 
 def make_image(path, w, h):
@@ -47,7 +47,7 @@ class TestV469Bug4HorizontalLayout:
         html = generate_plain_html(slices, 650)
         trs = re.findall(r'<tr>.*?</tr>', html, re.S)
         assert len(trs) == 1, f'应 1 个 <tr>，实际 {len(trs)}'
-        td_count = len(re.findall(r'<td[^>]*>', trs[0]))
+        td_count = len(re.findall(r'<img[^>]*', trs[0]))
         assert td_count == 3, f'应 3 个 <td>，实际 {td_count}'
 
     def test_no_hotspot_one_cell(self):
@@ -64,7 +64,7 @@ class TestV469Bug4HorizontalLayout:
         html = generate_plain_html(slices, 650)
         trs = re.findall(r'<tr>.*?</tr>', html, re.S)
         assert len(trs) == 1
-        td_count = len(re.findall(r'<td[^>]*>', trs[0]))
+        td_count = len(re.findall(r'<img[^>]*', trs[0]))
         assert td_count == 1, f'应 1 个 <td>，实际 {td_count}'
 
     def test_two_hotspots_five_cells_in_one_row(self):
@@ -84,7 +84,7 @@ class TestV469Bug4HorizontalLayout:
         html = generate_plain_html(slices, 650)
         trs = re.findall(r'<tr>.*?</tr>', html, re.S)
         assert len(trs) == 1
-        td_count = len(re.findall(r'<td[^>]*>', trs[0]))
+        td_count = len(re.findall(r'<img[^>]*', trs[0]))
         assert td_count == 5, f'应 5 个 <td>，实际 {td_count}'
 
     def test_two_images_two_rows(self):
@@ -108,7 +108,7 @@ class TestV469Bug4HorizontalLayout:
         trs = re.findall(r'<tr>.*?</tr>', html, re.S)
         assert len(trs) == 2, f'应 2 个 <tr>（每原图 1 行），实际 {len(trs)}'
         for tr in trs:
-            td_count = len(re.findall(r'<td[^>]*>', tr))
+            td_count = len(re.findall(r'<img[^>]*', tr))
             assert td_count == 3, f'每行应 3 个 <td>，实际 {td_count}'
 
     def test_total_width_equals_display_w(self):
@@ -169,7 +169,7 @@ class TestV469Bug4HorizontalLayout:
         heights = [int(h) for h in re.findall(r'<img[^>]*height="(\d+)"', html)]
         td_widths = [int(w) for w in re.findall(r'<td[^>]*width="(\d+)"', html)]
         assert sum(widths) == 650, f'img 总宽应=650, 实际={sum(widths)}, 段={widths}'
-        assert td_widths == widths, f'td 宽度必须和 img 一致，td={td_widths}, img={widths}'
+        assert td_widths[1:] == widths, f'内层 td 宽度必须和 img 一致，td={td_widths}, img={widths}'
         assert len(set(heights)) == 1, f'同一行所有分段高度必须一致，实际={heights}'
 
     def test_href_and_alt_are_html_escaped(self):
@@ -188,6 +188,29 @@ class TestV469Bug4HorizontalLayout:
         html = generate_plain_html(slices, 650)
         assert 'href="https://example.com/a?x=1&amp;y=2"' in html
         assert 'alt="A&amp;B"' in html
+
+    def test_materialized_slices_match_declared_display_size(self):
+        """发送前预渲染为最终显示尺寸，避免 Outlook 独立缩放产生竖缝"""
+        tmp = tempfile.mkdtemp(prefix='v469b4_')
+        p = os.path.join(tmp, 'long.png')
+        make_image(p, 1000, 500)
+
+        sim = {'long.png': [
+            Hotspot(333, 0, 666, 500, 'https://test.com', 'T', source_index=1.0),
+        ]}
+        sk, lm = slice_paths_by_hotspots([p], sim, source_index_map={'long.png': 1.0})
+        slices = [SliceItem(path=path, href=lm.get(os.path.basename(path)),
+                            sort_key=k, original_width=1000) for path, k in sk]
+
+        prepared = materialize_display_slices(slices, 650)
+        sizes = [Image.open(s.path).size for s in prepared]
+        assert sum(w for w, _ in sizes) == 650, f'预渲染总宽应=650，实际={sizes}'
+        assert len({h for _, h in sizes}) == 1, f'预渲染同一行高度必须一致，实际={sizes}'
+
+        html = generate_plain_html(prepared, 650)
+        widths = [int(w) for w in re.findall(r'<img[^>]*width="(\d+)"', html)]
+        heights = [int(h) for h in re.findall(r'<img[^>]*height="(\d+)"', html)]
+        assert [(w, h) for w, h in zip(widths, heights)] == sizes
 
 
 if __name__ == '__main__':
