@@ -48,12 +48,12 @@ class ExportFormatDialog(QDialog):
     Returns: (format, keep_alpha, save_dir) via .get_result()
     """
 
-    def __init__(self, file_paths: List[str], parent=None):
+    def __init__(self, file_paths: List[str], parent=None, initial_save_dir: Optional[str] = None):
         super().__init__(parent)
         self.file_paths = file_paths
         self.format: str = FMT_PNG  # 默认 PNG
         self.keep_alpha: bool = True  # 默认保留透明
-        self.save_dir: Optional[str] = None
+        self.save_dir: Optional[str] = initial_save_dir if initial_save_dir else None
         self._build_ui()
 
     def _build_ui(self):
@@ -127,6 +127,8 @@ class ExportFormatDialog(QDialog):
         self.input_save = QLineEdit()
         self.input_save.setPlaceholderText("例如 D:\\我的图片\\outlook-export")
         self.input_save.setFont(QFont("Microsoft YaHei", 10))
+        if self.save_dir:
+            self.input_save.setText(self.save_dir)
         save_layout.addWidget(self.input_save, 1)
 
         btn_browse = QPushButton("浏览…")

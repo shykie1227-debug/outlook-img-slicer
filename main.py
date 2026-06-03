@@ -35,7 +35,7 @@ from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.7"
+VERSION = "4.7.5"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -270,6 +270,7 @@ class MainWindow(QMainWindow):
         self.slice_source_index: Dict[str, float] = {}
         self.worker: Optional[ProcessWorker] = None
         self.hotspot_map = HotspotMap()
+        self.last_export_dir: Optional[str] = None
         self._build_ui()
 
     def _build_ui(self):
@@ -593,10 +594,12 @@ class MainWindow(QMainWindow):
                 self._handle_multi_files(valid, save_dir=save_dir)
         elif mode == MODE_EXPORT:
             # 图片导出模式：V4.6.3 弹新窗选格式（JPG/PNG + 透明底 + 路径）
-            export_dlg = ExportFormatDialog(valid, self)
+            initial_export_dir = save_dir or self.last_export_dir
+            export_dlg = ExportFormatDialog(valid, self, initial_save_dir=initial_export_dir)
             if export_dlg.exec() != QDialog.Accepted:
                 return
             er = export_dlg.get_result()
+            self.last_export_dir = er["save_dir"]
             self._export_images(valid, save_dir=er["save_dir"],
                                 fmt=er["format"], keep_alpha=er["keep_alpha"])
 
@@ -705,10 +708,13 @@ class MainWindow(QMainWindow):
 
             # 3) 保存到目标路径
             if not save_dir:
-                save_dir = QFileDialog.getExistingDirectory(self, "选择保存目录")
+                save_dir = QFileDialog.getExistingDirectory(
+                    self, "选择保存目录", self.last_export_dir or ""
+                )
                 if not save_dir:
                     self._set_status("已取消导出", "info")
                     return
+            self.last_export_dir = save_dir
 
             ext = "png" if fmt == "png" else "jpg"
             suffix = f"_{os.getpid()}" if len(paths) > 1 else ""

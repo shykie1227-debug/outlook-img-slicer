@@ -129,8 +129,8 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         inner = img_tag
 
     return (
-        f'<td align="left" valign="top" width="{seg_display_w}" style="'
-        f'width: {seg_display_w}px; '
+        f'<td align="left" valign="top" width="{seg_display_w}" height="{seg_display_h}" style="'
+        f'width: {seg_display_w}px; height: {seg_display_h}px; '
         f'padding: 0; margin: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
         f'border: 0; vertical-align: top;'
@@ -272,11 +272,12 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
         )
 
     inner_table = (
-        f'<table cellpadding="0" cellspacing="0" border="0" align="center" '
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
         f'width="{display_w}" '
-        f'style="width: {display_w}px; border-collapse: collapse; '
+        f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0; '
         f'mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
-        f'<tr style="height: {row_height}px;">\n'
+        f'<tr height="{row_height}" style="height: {row_height}px; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">\n'
         f'{cells}'
         f'</tr>\n'
         f'</table>'
@@ -314,17 +315,36 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
     for group in groups:
         allocated_widths = _allocate_group_widths(group, display_w)
         row_height = _compute_group_height(group, display_w)
-        for s in group:
-            counter += 1
-            target_w = max(1, int(allocated_widths.get(s.path, display_w)))
-            target_h = max(1, int(row_height))
-            target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
-            try:
+        try:
+            source_parts = []
+            total_w = 0
+            max_h = 0
+            for s in group:
                 with Image.open(s.path) as img:
-                    img = img.convert("RGB")
-                    if img.size != (target_w, target_h):
-                        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                    img.save(target_path, "PNG")
+                    part = img.convert("RGB")
+                    source_parts.append((s, part.copy()))
+                    total_w += part.width
+                    max_h = max(max_h, part.height)
+            if total_w <= 0 or max_h <= 0:
+                raise ValueError("invalid image size")
+
+            source_row = Image.new("RGB", (total_w, max_h), (255, 255, 255))
+            x = 0
+            for _, part in source_parts:
+                source_row.paste(part, (x, 0))
+                x += part.width
+
+            if source_row.size != (display_w, row_height):
+                source_row = source_row.resize((display_w, row_height), Image.Resampling.LANCZOS)
+
+            crop_x = 0
+            for s, _ in source_parts:
+                counter += 1
+                target_w = max(1, int(allocated_widths.get(s.path, display_w)))
+                target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
+                part = source_row.crop((crop_x, 0, crop_x + target_w, row_height))
+                part.save(target_path, "PNG")
+                crop_x += target_w
                 prepared.append(SliceItem(
                     path=str(target_path),
                     href=s.href,
@@ -332,7 +352,8 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                     sort_key=s.sort_key,
                     original_width=display_w,
                 ))
-            except Exception:
+        except Exception:
+            for s in group:
                 prepared.append(s)
 
     return prepared
@@ -365,10 +386,10 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
         f'<title>长图邮件</title>\n'
         f'</head>\n'
         f'<body style="margin: 0; padding: 0; background-color: #ffffff;">\n'
-        f'<table cellpadding="0" cellspacing="0" border="0" '
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
         f'width="{display_w}" '
-        f'style="width: {display_w}px; border-collapse: collapse; '
+        f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0; '
         f'mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
         f'{rows}'
         f'</table>\n'
@@ -405,10 +426,10 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
         f'<title>长图邮件</title>\n'
         f'</head>\n'
         f'<body style="margin: 0; padding: 0; background-color: #ffffff;">\n'
-        f'<table cellpadding="0" cellspacing="0" border="0" '
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         f'align="center" '
         f'width="{display_w}" '
-        f'style="width: {display_w}px; border-collapse: collapse;">\n'
+        f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0;">\n'
         f'{rows}'
         f'</table>\n'
         f'</body>\n'
