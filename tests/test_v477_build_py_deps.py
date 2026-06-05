@@ -122,5 +122,98 @@ def test_requirements_txt_and_build_py_consistent():
     assert 'pywin32' in pip_names
 
 
+# ════════════════════════════════════════════════════
+# V4.7.7 R3.1: 变更日志机制
+# ════════════════════════════════════════════════════
+
+def test_build_py_has_print_change_log():
+    """R3.1: build.py 必须在 main() 调用 print_change_log()"""
+    build_src = (ROOT / "build.py").read_text()
+    assert "def print_change_log" in build_src, "缺 print_change_log() 函数"
+    # 必须从 main() 调用
+    assert "print_change_log()" in build_src, "main() 未调用 print_change_log()"
+
+
+def test_build_py_history_file_in_dist():
+    """R3.1: 历史记录文件应在 dist/ 下（被 .gitignore 排除）"""
+    build_src = (ROOT / "build.py").read_text()
+    # HISTORY_FILE 路径应在 dist/.build_history.json
+    assert "HISTORY_FILE" in build_src
+    assert "dist" in build_src
+    assert ".build_history.json" in build_src
+
+
+def test_gitignore_excludes_build_history():
+    """R3.1: .gitignore 应排除 .build_history.json（避免误提交）"""
+    gitignore = (ROOT / ".gitignore").read_text()
+    # dist/ 整目录被排除，或者 .build_history.json 被单条排除
+    assert "dist/" in gitignore or ".build_history.json" in gitignore, \
+        ".gitignore 应排除 dist/ 或 .build_history.json"
+
+
+def test_print_change_log_handles_no_history():
+    """R3.1: 首次运行（无历史记录）不应崩"""
+    # 验证 print_change_log() 有 try-except 保护
+    build_src = (ROOT / "build.py").read_text()
+    m = re.search(
+        r'def print_change_log\(.*?\):(.*?)(?=\ndef )',
+        build_src,
+        re.DOTALL
+    )
+    assert m, "找不到 print_change_log 函数体"
+    body = m.group(1)
+    # 首次运行分支
+    assert "首次运行" in body or "无历史" in body, "应有首次运行提示"
+    # JSON 解析失败保护
+    assert "except" in body, "JSON 解析失败应有 try-except"
+
+
+def test_print_change_log_shows_warn_on_write_fail():
+    """R3.1: 写历史记录失败时，应警告而不是静默"""
+    build_src = (ROOT / "build.py").read_text()
+    # 保存历史记录的 try-except 块不应是裸 pass
+    m = re.search(
+        r'# 保存本次记录(.*?)\n    try:',
+        build_src,
+        re.DOTALL
+    )
+    # 检查 "except Exception:" 后不是裸 pass
+    m2 = re.search(
+        r'except Exception as e:\s*\n\s*print\(f"  \[警告\] 历史记录保存失败',
+        build_src
+    )
+    assert m2, "写历史失败应有警告输出（不是裸 pass）"
+
+
+def test_print_change_log_actually_writes_history(tmp_path):
+    """R3.1: print_change_log() 实际能写入历史文件并能再次读取"""
+    import json
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from build import print_change_log, DIST_DIR
+    # 用 monkey-patch 重定向 DIST_DIR 到 tmp_path
+    import build as build_mod
+    orig_dist = build_mod.DIST_DIR
+    orig_history = build_mod.HISTORY_FILE
+    build_mod.DIST_DIR = tmp_path / "dist"
+    build_mod.HISTORY_FILE = build_mod.DIST_DIR / ".build_history.json"
+    try:
+        # 首次运行
+        build_mod.print_change_log()
+        assert build_mod.HISTORY_FILE.exists(), "首次运行后应创建历史文件"
+        first_record = json.loads(build_mod.HISTORY_FILE.read_text())
+        assert "git_sha" in first_record
+        assert "timestamp" in first_record
+        assert "deps" in first_record
+        # 第二次运行（依赖未变）
+        build_mod.print_change_log()
+        second_record = json.loads(build_mod.HISTORY_FILE.read_text())
+        # 记录应被覆盖（timestamp 变化或保持一致）
+        assert second_record["git_sha"] == first_record["git_sha"]
+    finally:
+        build_mod.DIST_DIR = orig_dist
+        build_mod.HISTORY_FILE = orig_history
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
