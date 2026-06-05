@@ -215,5 +215,64 @@ def test_print_change_log_actually_writes_history(tmp_path):
         build_mod.HISTORY_FILE = orig_history
 
 
+def test_get_declared_deps_uses_utf8_encoding():
+    """R3.2: _get_declared_deps() 必须用 utf-8 encoding（防 Windows GBK UnicodeDecodeError）"""
+    build_src = (ROOT / "build.py").read_text()
+    # 找 _get_declared_deps 函数体
+    m = re.search(
+        r'def _get_declared_deps\(.*?\):(.*?)(?=\ndef )',
+        build_src,
+        re.DOTALL
+    )
+    assert m, "找不到 _get_declared_deps"
+    body = m.group(1)
+    # 必须显式 encoding='utf-8'
+    assert 'encoding="utf-8"' in body or "encoding='utf-8'" in body, \
+        "_get_declared_deps 必须用 encoding='utf-8' 读 requirements.txt"
+    # 还要 errors='replace' 作为兑底
+    assert 'errors="replace"' in body or "errors='replace'" in body, \
+        "_get_declared_deps 必须用 errors='replace' 防解码失败"
+
+
+def test_get_git_sha_uses_utf8_encoding():
+    """R3.2: _get_git_sha() 必须用 utf-8 encoding"""
+    build_src = (ROOT / "build.py").read_text()
+    m = re.search(
+        r'def _get_git_sha\(.*?\):(.*?)(?=\ndef )',
+        build_src,
+        re.DOTALL
+    )
+    assert m, "找不到 _get_git_sha"
+    body = m.group(1)
+    assert 'encoding="utf-8"' in body, \
+        "_get_git_sha subprocess.run 必须用 encoding='utf-8'"
+
+
+def test_get_declared_deps_handles_gbk_invalid_bytes(tmp_path):
+    """R3.2 集成测试: requirements.txt 含 GBK 无效字节时不应崩"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    import build as build_mod
+    # 造一个含 0xAC 的“中文 + GBK 异常字节”混合文件
+    bad_req = tmp_path / "requirements.txt"
+    bad_req.write_bytes(bytes([0x23, 0x20, 0x4F, 0x75, 0x74, 0x6C, 0x6F, 0x6F, 0x6B, 0x20,
+                                0xAC, 0x20,
+                                0xE4, 0x20,
+                                0xB0, 0xFC, 0xD7, 0xB1,
+                                0x0A,
+                                0x50, 0x69, 0x6C, 0x6C, 0x6F, 0x77, 0x3E, 0x3D, 0x31, 0x30, 0x2E, 0x30, 0x2E, 0x30, 0x0A]))  # # Outlook 0xAC 0xE4 中文(GBK) \n Pillow>=10.0.0 \n
+    # monkey-patch PROJECT_ROOT
+    orig = build_mod.PROJECT_ROOT
+    build_mod.PROJECT_ROOT = tmp_path
+    try:
+        deps = build_mod._get_declared_deps()
+        # 成功读到 Pillow>=10.0.0 是关键
+        assert "Pillow" in deps, f"应能读到 Pillow: {deps}"
+        # 错误替换不丢依赖
+        assert deps.get("Pillow") == "Pillow>=10.0.0"
+    finally:
+        build_mod.PROJECT_ROOT = orig
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

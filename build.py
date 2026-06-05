@@ -28,12 +28,14 @@ HISTORY_FILE = DIST_DIR / ".build_history.json"
 
 
 def _get_git_sha() -> str:
-    """取当前 git commit SHA（前 8 位），无 git 环境返回 'unknown'"""
+    """取当前 git commit SHA（前 8 位），无 git 环境返回 'unknown'
+    V4.7.7 R3.2: 显式 utf-8 + errors='replace'，兼容 Windows 中文系统（默认 gbk 乱码）"""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=PROJECT_ROOT,
             capture_output=True, text=True, timeout=5,
+            encoding="utf-8", errors="replace",
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -43,12 +45,20 @@ def _get_git_sha() -> str:
 
 
 def _get_declared_deps() -> dict:
-    """从 build.py 头部 + requirements.txt 提取“声明的依赖列表”"""
+    """从 build.py 头部 + requirements.txt 提取“声明的依赖列表”
+    V4.7.7 R3.2: read_text() 加 encoding='utf-8' errors='replace'，
+    修复 Windows 中文系统默认 gbk 解码 requirements.txt 中文注释时的 UnicodeDecodeError"""
     deps = {}
     # 1. requirements.txt（用户看到的官方源）
     req_file = PROJECT_ROOT / "requirements.txt"
     if req_file.exists():
-        for line in req_file.read_text().splitlines():
+        try:
+            # V4.7.7 R3.2: utf-8 + 错误替换，兼容 Windows 中文系统
+            text = req_file.read_text(encoding="utf-8", errors="replace")
+        except (OSError, IOError) as e:
+            print(f"  [警告] requirements.txt 读取失败: {e}")
+            text = ""
+        for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
@@ -118,7 +128,11 @@ def print_change_log():
     # 保存本次记录（best-effort，失败仅警告，不中断主流程）
     try:
         DIST_DIR.mkdir(exist_ok=True)
-        HISTORY_FILE.write_text(json.dumps(current_record, indent=2, ensure_ascii=False))
+        # V4.7.7 R3.2: 显式 utf-8，兼容 Windows 中文系统
+        HISTORY_FILE.write_text(
+            json.dumps(current_record, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
     except Exception as e:
         print(f"  [警告] 历史记录保存失败（不影响构建）: {type(e).__name__}: {e}")
 
