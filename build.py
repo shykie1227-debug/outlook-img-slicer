@@ -2,7 +2,9 @@
 """
 build.py - Outlook 长图插入工具 V3 一键打包脚本
 用法: python build.py
-依赖: pip install pyinstaller Pillow PyMuPDF PySide6 pywin32==306 python-pptx lxml
+依赖: pip install pyinstaller Pillow PyMuPDF PySide6 pywin32 python-pptx lxml
+V4.7.7 R3: pywin32==306 → pywin32（不锁版本，兼容 Python 3.14 + 3.11/3.12），
+    补 python-pptx / lxml 到 import_to_pip（docstring 提了但漏了）
 """
 import subprocess
 import sys
@@ -36,6 +38,11 @@ def check_and_install_deps():
     - 开发/构建期允许联网 → 默认调用 pip install 正常安装
     - 打包后 exe 运行时禁联网 → 但打包脚本本身的联网不受限
     - 不再默认弹警告/确认（这是上一版过度收紧，已修正）
+
+    V4.7.7 R3 修复（pywin32 + python-pptx + lxml）：
+    - pywin32 版本不限（pip 自动选 311/312 兼容 Python 3.14）
+    - 补 python-pptx 和 lxml 到 import_to_pip（docstring 提了但漏了）
+    - pywin32 是 win32com 客户端依赖（Outlook COM 必需），不可去掉
     """
     import_to_pip = {
         "PyInstaller": "pyinstaller",
@@ -44,6 +51,7 @@ def check_and_install_deps():
         "pymupdf": "PyMuPDF",
         "PySide6": "PySide6",
         "pptx": "python-pptx",
+        "lxml": "lxml",
         "psd_tools": "psd-tools",
         "numpy": "numpy",
     }
@@ -61,7 +69,8 @@ def check_and_install_deps():
 
     print(f"[INFO] 检测到缺失依赖: {', '.join(missing)}")
     print("[INFO] 正在自动安装...")
-    pip_pkgs = missing + ["pywin32==306"]
+    # V4.7.7 R3: pywin32 不锁版本（兼容 Python 3.14，pywin32 311/312 支持）
+    pip_pkgs = list(missing) + ["pywin32"]
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install"] + pip_pkgs,
         capture_output=True, text=True
