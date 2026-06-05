@@ -66,6 +66,7 @@ def validate_hotspots_no_overlap(
     """
     V1 重叠检测：检查所有 hotspot 的 X 范围是否相交 / 嵌套。
     严格按"禁止重叠"原则，连相邻擦边都允许（边界相接不算重叠）。
+    V4.7.7: 错误提示具体到哪个 hotspot 与哪个冲突 + 坐标 + 调整建议。
 
     Args:
         hotspots: 同一图片上的所有 hotspot
@@ -80,15 +81,32 @@ def validate_hotspots_no_overlap(
     # 1) 越界
     for i, h in enumerate(hotspots):
         if h.x1 < 0 or h.x2 > img_w or h.x1 >= h.x2:
-            return False, f"Hotspot #{i + 1}: {HotspotCutError.OUT_OF_BOUNDS or HotspotCutError.INVALID_RANGE}"
+            return False, (
+                f"Hotspot #{i + 1} 越界或宽度为 0：\n"
+                f"  当前：x1={h.x1}, x2={h.x2}（原图宽 {img_w}px）\n"
+                f"  要求：0 ≤ x1 < x2 ≤ {img_w}"
+            )
     # 2) 重叠 / 嵌套（按 x1 排序后比较相邻）
-    sorted_h = sorted(hotspots, key=lambda h: h.x1)
-    for i in range(len(sorted_h) - 1):
-        a = sorted_h[i]
-        b = sorted_h[i + 1]
+    # V4.7.7: 在原列表中查找索引，以便告知用户实际编号
+    indexed = list(enumerate(hotspots))
+    sorted_idx_h = sorted(indexed, key=lambda pair: pair[1].x1)
+    for i in range(len(sorted_idx_h) - 1):
+        orig_a, a = sorted_idx_h[i]
+        orig_b, b = sorted_idx_h[i + 1]
         # 边界相接不算重叠（a.x2 == b.x1 允许）
         if a.x2 > b.x1:
-            return False, HotspotCutError.OVERLAP
+            # V4.7.7 优化提示：明确告诉用户哪两个 + 建议
+            reason = (
+                f"Hotspot #{orig_a + 1} 与 #{orig_b + 1} 横向重叠\n\n"
+                f"  #{orig_a + 1}: x1={a.x1}px → x2={a.x2}px（宽度 {a.x2 - a.x1}px）\n"
+                f"  #{orig_b + 1}: x1={b.x1}px → x2={b.x2}px（宽度 {b.x2 - b.x1}px）\n"
+                f"  冲突：#{orig_a + 1}.x2 ({a.x2}) > #{orig_b + 1}.x1 ({b.x1})\n\n"
+                f"建议：\n"
+                f"  • 把新按钮 #{orig_b + 1} 起点调整到 {a.x2}px 或更后\n"
+                f"  • 或把已有按钮 #{orig_a + 1} 调窄（end ≤ {b.x1}px）\n"
+                f"  • 或删除其中一个按钮"
+            )
+            return False, reason
     return True, ""
 
 

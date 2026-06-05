@@ -5,8 +5,10 @@ PySide6 窗口应用，支持拖拽上传、自动切片、邮件体积检测、
 import os
 import sys
 import re
+import time
 import tempfile
 import shutil
+import traceback
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -20,7 +22,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator
 
-from image_slicer import detect_and_slice, get_image_info, auto_merge_images
+from image_slicer import detect_and_slice, get_image_info
+# V4.7.7 Fix E: 删除 auto_merge_images 死 import（原 _handle_multi_files 已删）
+# image_slicer.auto_merge_images 函数本身保留以备未来使用
 from pdf_slicer import pdf_to_images
 from ppt_slicer import pptx_to_images
 # psd_slicer 依赖 psd_tools + numpy，仅在用户上传 .psd 时懒加载，避免主程序启动报错
@@ -31,11 +35,13 @@ from html_assembler import assemble_html, generate_plain_html, materialize_displ
 from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
-from mode_dialog import ProcessModeDialog, MODE_SLICE, MODE_EXPORT, SORT_NATURAL, SORT_DRAG_ORDER
+# V4.7.7 Fix E: 移除 mode_dialog 引用，模式选择改为面板 chk_export_mode toggle。
+# ProcessModeDialog 类保留在 mode_dialog.py 中以便 v4.6.2-v4.7.6 用户回退，
+# 不再从 main.py 调用。
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.7.6"
+VERSION = "4.7.7"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -383,21 +389,44 @@ class MainWindow(QMainWindow):
         toolbar.addStretch()
         root.addLayout(toolbar)
 
-        # ══ 第二行：智能切图 + 复制HTML（右对齐） ═══
+        # ══ 第二行：导出模式 + 智能切图 + 复制HTML（右对齐） ═══
         toolbar2 = QHBoxLayout()
         toolbar2.setSpacing(10)
 
-        self.chk_smart = QCheckBox("智能切图")
-        self.chk_smart.setFont(_font("Microsoft YaHei", 12))
-        self.chk_smart.setChecked(False)  # 默认等分切图
-        self.chk_smart.setCursor(Qt.PointingHandCursor)
-        self.chk_smart.setStyleSheet(
-            f"QCheckBox {{ color: {Theme.TEXT_SECONDARY}; background: transparent; spacing: 6px; }}"
+        # V4.7.7 Fix E: 导出模式 toggle（关闭=切图 / 打开=导出图片）
+        # 替代 V4.6.2 拖入后弹 ProcessModeDialog 的体验，直接在面板切换。
+        self.chk_export_mode = QCheckBox("🖼️ 导出图片")
+        self.chk_export_mode.setFont(_font("Microsoft YaHei", 12))
+        self.chk_export_mode.setChecked(False)  # 默认=切图模式（V4.6.1 行为）
+        self.chk_export_mode.setCursor(Qt.PointingHandCursor)
+        self.chk_export_mode.setToolTip(
+            "关闭：拖入后进入切图模式（切成多片，发送 Outlook）\n"
+            "打开：拖入后进入图片导出模式（合并/转换为单张长图）"
+        )
+        _chk_indicator_style = (
+            f"QCheckBox {{ color: {Theme.TEXT_PRIMARY}; background: transparent; spacing: 6px; "
+            f"font-weight: 500; }}"
             f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 4px; "
             f"border: 1px solid {Theme.BORDER}; background: {Theme.CARD}; }}"
             f"QCheckBox::indicator:checked {{ background: {Theme.PRIMARY}; "
             f"border-color: {Theme.PRIMARY}; }}"
         )
+        self.chk_export_mode.setStyleSheet(_chk_indicator_style)
+        self.chk_export_mode.stateChanged.connect(self._on_export_mode_changed)
+        toolbar2.addWidget(self.chk_export_mode)
+
+        # V4.7.7 视觉分隔：mode 与 smart 之间用细线分开，避免视觉混淆
+        sep_lbl = QLabel("│")
+        sep_lbl.setFont(_font("Microsoft YaHei", 12))
+        sep_lbl.setStyleSheet(f"color: {Theme.BORDER}; background: transparent; padding: 0 4px;")
+        sep_lbl.setFixedWidth(12)
+        toolbar2.addWidget(sep_lbl)
+
+        self.chk_smart = QCheckBox("智能切图")
+        self.chk_smart.setFont(_font("Microsoft YaHei", 12))
+        self.chk_smart.setChecked(False)  # 默认等分切图
+        self.chk_smart.setCursor(Qt.PointingHandCursor)
+        self.chk_smart.setStyleSheet(_chk_indicator_style)
         toolbar2.addWidget(self.chk_smart)
 
         self.btn_copy_html = QPushButton("📋 复制HTML")
@@ -585,10 +614,31 @@ class MainWindow(QMainWindow):
         image.save(temp_path)
         self._handle_dropped_files([temp_path])
 
+    def _on_export_mode_changed(self, state: int):
+        """
+        V4.7.7 Fix E: 切换模式时即时状态反馈。
+        避免用户点完 toggle 不知道现在走哪个流程。
+        """
+        # state 是 Qt.CheckState 枚举的 int 值（非零=True）
+        if bool(state):
+            # 导出模式
+            self._set_status(
+                "🖼️ 导出图片模式：拖入文件后将合并/转换为单张长图保存到本地",
+                "info"
+            )
+        else:
+            # 切图模式（默认）
+            self._set_status(
+                "✂️ 切图模式：拖入文件后将切成多片，可在面板添加可点击按钮后发送 Outlook",
+                "info"
+            )
+
     def _handle_dropped_files(self, paths: List[str]):
         """
         入口：处理一次拖入/选择的一批文件。
-        V4.6.2 重构：拖入后弹「处理模式选择」弹窗（切图 / 图片导出 + 排序 + 保存路径）。
+        V4.7.7 Fix E: 不再弹 ProcessModeDialog，根据面板 chk_export_mode 状态分流。
+          - 关闭（默认）= 切图模式
+          - 打开 = 图片导出模式
         """
         # 过滤合法后缀
         valid = [p for p in paths if Path(p).suffix.lower() in Config.SUPPORTED_EXTENSIONS]
@@ -596,34 +646,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "格式不支持", "请选择图片、PDF、PPT 或 PSD/PSB 文件。")
             return
 
-        # 弹模式选择弹窗（V4.6.2 新增）
-        dlg = ProcessModeDialog(valid, self)
-        if dlg.exec() != QDialog.Accepted:
-            return  # 用户取消
+        # V4.7.7 Fix E: 默认走自然排序（移除 V4.6.2 弹窗中的排序选项）
+        def _natural_key(s):
+            return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', Path(s).stem)]
+        valid = sorted(valid, key=_natural_key)
 
-        result = dlg.get_result()
-        mode = result["mode"]
-        sort_mode = result["sort_mode"]
-        save_dir = result["save_dir"]
+        # V4.7.7 Fix E: 根据面板 toggle 状态分流
+        is_export = self.chk_export_mode.isChecked()
 
-        # 按选择的排序方式排序
-        if sort_mode == SORT_NATURAL:
-            def natural_key(s):
-                return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', Path(s).stem)]
-            valid = sorted(valid, key=natural_key)
-        # SORT_DRAG_ORDER: 保持拖入顺序，不排序
-
-        # 路由
-        if mode == MODE_SLICE:
-            # 切图模式：原 V4.6.1 路径
-            if len(valid) == 1:
-                self._start_processing(valid[0], save_dir=save_dir)
-            else:
-                # 多图：走原有的「智能拼图」弹窗
-                self._handle_multi_files(valid, save_dir=save_dir)
-        elif mode == MODE_EXPORT:
-            # 图片导出模式：V4.6.3 弹新窗选格式（JPG/PNG + 透明底 + 路径）
-            initial_export_dir = save_dir or self.last_export_dir
+        if is_export:
+            # ── 导出模式：直接弹格式选择弹窗（合并/格式/路径） ──
+            initial_export_dir = self.last_export_dir
             export_dlg = ExportFormatDialog(valid, self, initial_save_dir=initial_export_dir)
             if export_dlg.exec() != QDialog.Accepted:
                 return
@@ -631,51 +664,18 @@ class MainWindow(QMainWindow):
             self.last_export_dir = er["save_dir"]
             self._export_images(valid, save_dir=er["save_dir"],
                                 fmt=er["format"], keep_alpha=er["keep_alpha"])
-
-    def _handle_multi_files(self, paths: List[str]):
-        """多张图片 → 弹框询问是否智能拼图"""
-        btn_box = QMessageBox(self)
-        btn_box.setWindowTitle("智能拼图")
-        btn_box.setIcon(QMessageBox.Question)
-        btn_box.setText(f"检测到 {len(paths)} 张图片")
-        btn_box.setInformativeText(
-            "智能拼图将多张图片纵向拼接为一张长图，<b>保存后可继续拖入新图</b>"
-        )
-        btn_merge = btn_box.addButton("🗜️ 智能拼图", QMessageBox.AcceptRole)
-        btn_single = btn_box.addButton("📄 只取第一张", QMessageBox.NoRole)
-        btn_cancel = btn_box.addButton("取消", QMessageBox.RejectRole)
-        btn_box.setDefaultButton(btn_merge)
-        btn_box.exec()
-        if btn_box.clickedButton() == btn_cancel:
-            return
-        if btn_box.clickedButton() == btn_single:
-            # 仅处理第一张
-            self._start_processing(paths[0], save_dir=save_dir)
-            self._set_status("💡 多图模式下仅处理了第一张图片，其余已忽略", "info")
-            return
-
-        # ── 智能拼图 ──────────────────────────
-        self._set_status("正在智能拼接多张图片...", "info")
-        try:
-            merged_path = auto_merge_images(paths, direction="vertical")
-            # V4.6.2 优化：主弹窗已选的保存路径优先；否则再问
-            if not save_dir:
-                save_dir = QFileDialog.getExistingDirectory(self, "选择保存合并图片的位置", "")
-            if not save_dir:
-                QMessageBox.information(self, "提示", "已取消保存，合并后的图片仅用于本次临时切片。")
+        else:
+            # ── 切图模式：原 V4.6.1 路径（不再弹智能拼图弹窗） ──
+            if len(valid) == 1:
+                self._start_processing(valid[0])
             else:
-                # 保留原文件格式，不强制改 .jpg
-                src_ext = Path(merged_path).suffix.lower() or ".jpg"
-                fname = f"merged_{os.getpid()}{src_ext}"
-                save_path = os.path.join(save_dir, fname)
-                shutil.copy2(merged_path, save_path)
-                self._set_status(f"✅ 合并图片已保存至：{save_path}", "success")
-
-            # 合并完成，清空拖拽区
-            self.reset_app()
-            self._set_status(f"✅ 合并图片已保存，可继续拖入新图片", "success")
-        except Exception as exc:
-            QMessageBox.critical(self, "拼图失败", str(exc))
+                # V4.7.7 Fix E: 多文件走「仅处理第一张」+ 状态栏明确提示
+                self._start_processing(valid[0])
+                self._set_status(
+                    f"💡 多图模式仅处理了第一张图片（共 {len(valid)} 张）。\n"
+                    f"如需合并多图，请打开右上角「🖼️ 导出图片」开关后再拖入。",
+                    "info"
+                )
 
     def _export_images(self, paths: List[str], save_dir: Optional[str] = None,
                        fmt: str = "png", keep_alpha: bool = True):
@@ -774,9 +774,30 @@ class MainWindow(QMainWindow):
                     return
             self.last_export_dir = save_dir
 
+            # V4.7.7 防御 1: 目录存在性 + 可写性检查
+            if not os.path.isdir(save_dir):
+                QMessageBox.critical(self, "导出失败", f"目录不存在：\n{save_dir}")
+                self._set_status(f"❌ 目录不存在: {save_dir}", "error")
+                return
+            test_write = os.path.join(save_dir, ".outlook_slicer_write_test")
+            try:
+                with open(test_write, "w") as _tf:
+                    _tf.write("test")
+                os.remove(test_write)
+            except Exception as _we:
+                QMessageBox.critical(self, "导出失败",
+                    f"目录无写权限：\n{save_dir}\n\n原因：{_we}\n\n"
+                    f"请选择其他目录（如桌面、文档）。")
+                self._set_status(f"❌ 目录无写权限: {save_dir}", "error")
+                return
+
             ext = "png" if fmt == "png" else "jpg"
-            suffix = f"_{os.getpid()}" if len(paths) > 1 else ""
-            base_name = "merged" if len(paths) > 1 else Path(paths[0]).stem
+            # V4.7.7 修复：用 len(images) 不用 len(paths)
+            # paths 是原始输入文件数，images 是渲染后图片数
+            # 单文件多页（如 1 PDF 3 页）时 len(paths)=1, len(images)=3
+            # V4.7.7 R2 架构师建议：完整时间戳 + pid 避免 1 秒内重名
+            suffix = f"_{int(time.time())}_{os.getpid()}" if len(images) > 1 else ""
+            base_name = "merged" if len(images) > 1 else Path(paths[0]).stem
             fname = f"{base_name}{suffix}.{ext}"
             dst = os.path.join(save_dir, fname)
 
@@ -794,15 +815,36 @@ class MainWindow(QMainWindow):
                 # PNG：保留原 mode（RGBA 或 RGB）
                 merged.save(dst, "PNG")
 
+            # V4.7.7 防御 2: 保存后验证文件存在 + size > 0
+            if not os.path.exists(dst):
+                QMessageBox.critical(self, "导出失败", f"文件保存后未找到：\n{dst}\n请检查目录权限。")
+                self._set_status(f"❌ 文件未生成: {dst}", "error")
+                return
+            file_size = os.path.getsize(dst)
+            if file_size == 0:
+                os.remove(dst)  # 清掉 0 字节文件
+                QMessageBox.critical(self, "导出失败", f"文件保存为空 (0 字节)：\n{dst}")
+                self._set_status(f"❌ 文件 0 字节: {dst}", "error")
+                return
+
+            # 成功：明确反馈
+            file_count = 1
+            page_info = f"({len(images)} 页合并)" if len(images) > 1 else ""
             QMessageBox.information(self, "导出成功",
                 f"✅ 图片已导出至：\n{dst}\n\n"
                 f"格式：{ext.upper()}\n"
+                f"大小：{file_size:,} 字节 {page_info}\n"
                 f"透明底：{'保留' if (fmt=='png' and keep_alpha) else '白底'}")
-            self._set_status(f"✅ 图片已导出至：{dst}", "success")
+            self._set_status(f"✅ 图片已导出至：{dst} ({file_size:,} 字节)", "success")
             self.reset_app()
             self._set_status("✅ 导出完成，可继续拖入新图片", "success")
         except Exception as exc:
-            QMessageBox.critical(self, "导出失败", str(exc))
+            # V4.7.7 防御 3: 详细错误反馈
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "导出失败",
+                f"错误：{exc}\n\n"
+                f"详细堆栈（请报错时截图）：\n{tb[:1500]}")
+            self._set_status(f"❌ 导出失败: {exc}", "error")
 
     def _start_processing(self, path: str, save_dir: Optional[str] = None):
         """单图/合并后处理的统一入口"""

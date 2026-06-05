@@ -56,6 +56,20 @@ def _get_img_dimensions(img_path: str) -> tuple:
         return img.size
 
 
+def _even_pixel(n: int) -> int:
+    """
+    V4.7.7: 强制偶数像素。
+    Outlook 将 px 转换为 pt 时（如 247px → 185.25pt）会产生小数，
+    留 0.25pt 差 = 1px 白线。所有 height/width 必须是偶数。
+    最佳：4 的倍数（与字体基线对齐）。
+    """
+    if n <= 1:
+        return max(1, n)
+    if n % 2 == 0:
+        return n
+    return n - 1
+
+
 def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional[str] = None,
               alt: str = "", original_width: int = 0, is_base64: bool = False,
               forced_display_w: Optional[int] = None,
@@ -78,16 +92,17 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         actual_w, actual_h = 650, 650
 
     if forced_display_w is not None:
-        seg_display_w = max(1, int(forced_display_w))
+        seg_display_w = _even_pixel(max(1, int(forced_display_w)))
     elif original_width > 0 and actual_w > 0:
         ratio = actual_w / original_width
-        seg_display_w = round(display_w * ratio)
+        seg_display_w = _even_pixel(round(display_w * ratio))
     else:
-        seg_display_w = display_w
+        seg_display_w = _even_pixel(display_w)
     if forced_display_h is not None:
-        seg_display_h = max(1, int(forced_display_h))
+        seg_display_h = _even_pixel(max(1, int(forced_display_h)))
     else:
-        seg_display_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
+        raw_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
+        seg_display_h = _even_pixel(raw_h)
 
     if not alt:
         alt = Path(slice_path).name
@@ -122,7 +137,8 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         inner = (
             f'<a href="{safe_href}" target="_blank" '
             f'style="display: block; width: {seg_display_w}px; height: {seg_display_h}px; '
-            f'text-decoration: none; outline: none; border: 0;">'
+            f'text-decoration: none; outline: none; border: 0; '
+            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">'
             f'{img_tag}'
             f'</a>'
         )
@@ -135,7 +151,8 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         f'padding: 0; margin: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
         f'border: 0; vertical-align: top;'
-        f'">'
+        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;"'
+        f'>'
         f'{inner}'
         f'</td>\n'
     )
@@ -226,11 +243,19 @@ def _allocate_group_widths(group: List[SliceItem], display_w: int) -> Dict[str, 
             remainder += 1
         idx += 1
 
-    return {s.path: w for (s, _), w in zip(dims, widths)}
+    # V4.7.7: 偶数化所有 width，最后一个补齐差保持总和 = display_w
+    even_widths = [w if w % 2 == 0 else (w - 1 if w > 1 else w) for w in widths]
+    diff = sum(widths) - sum(even_widths)
+    if even_widths and diff != 0:
+        even_widths[-1] = max(1, even_widths[-1] + diff)
+    return {s.path: w for (s, _), w in zip(dims, even_widths)}
 
 
 def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
-    """同一原图的横向分段必须使用同一个显示高度，避免 Outlook 中上下错位。"""
+    """
+    同一原图的横向分段必须使用同一个显示高度，避免 Outlook 中上下错位。
+    V4.7.7: 输出强制偶数（Outlook px→pt 转换无小数 → 消除 1px 白线）。
+    """
     total_w = 0
     row_h = 0
     for s in group:
@@ -242,8 +267,8 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
             total_w += actual_w
             row_h = max(row_h, actual_h)
     if total_w <= 0 or row_h <= 0:
-        return display_w
-    return max(1, round(row_h * display_w / total_w))
+        return _even_pixel(display_w)
+    return _even_pixel(max(1, round(row_h * display_w / total_w)))
 
 
 def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
@@ -276,7 +301,8 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
         f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
         f'width="{display_w}" '
         f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0; '
-        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt;">\n'
+        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
+        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">\n'
         f'<tr height="{row_height}" style="height: {row_height}px; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">\n'
         f'{cells}'
@@ -313,9 +339,12 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
     batch = uuid.uuid4().hex[:8]
     counter = 0
 
+    # V4.7.7: 偶数化 display_w，保证 resize 后源图尺寸偶数
+    display_w_even = _even_pixel(display_w)
+
     for group in groups:
-        allocated_widths = _allocate_group_widths(group, display_w)
-        row_height = _compute_group_height(group, display_w)
+        allocated_widths = _allocate_group_widths(group, display_w_even)
+        row_height = _compute_group_height(group, display_w_even)
         try:
             source_parts = []
             total_w = 0
@@ -335,13 +364,14 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                 source_row.paste(part, (x, 0))
                 x += part.width
 
-            if source_row.size != (display_w, row_height):
-                source_row = source_row.resize((display_w, row_height), Image.Resampling.LANCZOS)
+            if source_row.size != (display_w_even, row_height):
+                source_row = source_row.resize((display_w_even, row_height), Image.Resampling.LANCZOS)
 
             crop_x = 0
             for s, _ in source_parts:
                 counter += 1
-                target_w = max(1, int(allocated_widths.get(s.path, display_w)))
+                # V4.7.7: target_w 强制偶数（与 HTML width 声明对齐）
+                target_w = _even_pixel(int(allocated_widths.get(s.path, display_w_even)))
                 target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
                 part = source_row.crop((crop_x, 0, crop_x + target_w, row_height))
                 part.save(target_path, "PNG")
