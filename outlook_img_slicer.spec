@@ -73,7 +73,7 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # 单文件 EXE：所有依赖打包进一个 exe
-# strip=True 移除调试符号，进一步减小体积
+# Windows 环境默认没有类 Unix strip 工具；开启会产生大量 FileNotFoundError 警告。
 exe = EXE(
     pyz,
     a.scripts,
@@ -84,7 +84,7 @@ exe = EXE(
     name="Outlook长图插入工具",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,           # 移除符号表，减小体积
+    strip=False,
     upx=UPX_LEVEL > 0,
     upx_args=["--best"] if UPX_LEVEL > 0 else [],
     console=False,

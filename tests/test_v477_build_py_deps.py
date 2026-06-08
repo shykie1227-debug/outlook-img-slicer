@@ -122,6 +122,14 @@ def test_requirements_txt_and_build_py_consistent():
     assert 'pywin32' in pip_names
 
 
+def test_pyinstaller_spec_disables_strip_on_windows():
+    """Windows 默认没有 strip 工具，开启会产生大量 FileNotFoundError 警告。"""
+    spec_src = (ROOT / "outlook_img_slicer.spec").read_text(encoding="utf-8")
+
+    assert "strip=False" in spec_src
+    assert "strip=True" not in spec_src
+
+
 # ════════════════════════════════════════════════════
 # V4.7.7 R3.1: 变更日志机制
 # ════════════════════════════════════════════════════

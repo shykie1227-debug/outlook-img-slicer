@@ -107,7 +107,7 @@ def _try_powerpoint_export(pptx_path: str, dpi: int = 150) -> List[Image.Image] 
 # 方案 2：LibreOffice soffice（Windows 跨机保真）
 # ────────────────────────────────────────────
 def _find_soffice() -> str | None:
-    """
+    r"""
     Windows 下查找 LibreOffice 可执行文件。
     常见安装路径：
       • 默认安装路径 C:\Program Files\LibreOffice\program\soffice.exe
