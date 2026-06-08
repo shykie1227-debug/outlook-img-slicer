@@ -515,13 +515,20 @@ def get_cid_map(slices: List[SliceItem]) -> Dict[int, str]:
 
 def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
-    生成纯内联 base64 的 HTML，供复制到剪贴板使用（不进 Outlook，直接贴到 Gmail / 网页邮箱）。
+    生成纯内联 base64 的 HTML，供复制到剪贴板使用（不进 Outlook，直接贴到 Gmail /网页邮箱）。
 
     V4.6.9 重构：同 assemble_html 一样按 source_index 分组横向拼接。
-    V4.7.8: 最后清理图片尺寸缓存
+    V4.7.8: 最后清理图片尺寸缓存。
+    V4.8.1: 入口先 materialize_display_slices，
+    保证实际 PNG 高度与 HTML 声明 height 严格一致，
+    避免 1px 溢出导致的 Outlook 纵向缝（根因 H3：generate_plain_html
+    独立调用时跳过 materialize，row_height 偶数化后的高度与实际 PNG 不一致）。
     """
     display_w = _normalize_display_width(display_w)
     try:
+        # V4.8.1：先 materialize 同步实际 PNG 高度与 HTML 声明 height
+        # （修复 generate_plain_html 独立调用时的 1px 溢出）
+        slices = materialize_display_slices(slices, display_w)
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
         rows = ""
