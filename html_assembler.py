@@ -515,7 +515,7 @@ def get_cid_map(slices: List[SliceItem]) -> Dict[int, str]:
 
 def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
-    生成纯内联 base64 的 HTML，供复制到剪贴板使用（不进 Outlook，直接贴到 Gmail /网页邮箱）。
+    生成纯内联 base64 的 HTML，供复制到剪贴板使用（不进 Outlook，直接贴到 Gmail / 网页邮箱）。
 
     V4.6.9 重构：同 assemble_html 一样按 source_index 分组横向拼接。
     V4.7.8: 最后清理图片尺寸缓存。
@@ -523,12 +523,25 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     保证实际 PNG 高度与 HTML 声明 height 严格一致，
     避免 1px 溢出导致的 Outlook 纵向缝（根因 H3：generate_plain_html
     独立调用时跳过 materialize，row_height 偶数化后的高度与实际 PNG 不一致）。
+    V4.8.1.1: materialize 内部静默降级会导致本修复失效，入口加 guard
+    确保 materialize 实际产生了新文件（路径以 mail_ 开头）。
     """
     display_w = _normalize_display_width(display_w)
     try:
         # V4.8.1：先 materialize 同步实际 PNG 高度与 HTML 声明 height
         # （修复 generate_plain_html 独立调用时的 1px 溢出）
+        # V4.8.1.1：materialize 内部会静默降级（except Exception）
+        # 导致 H3 修复失效 → 入口加 guard 检查 materialize 实际生效
+        orig_paths = {s.path for s in slices}
         slices = materialize_display_slices(slices, display_w)
+        new_paths = {s.path for s in slices}
+        # materialize 成功标志：至少有一个新文件（mail_*.png）出现
+        # 如果完全没产生新文件，说明 materialize 静默降级，H3 修复失效
+        if not new_paths - orig_paths:
+            raise RuntimeError(
+                "V4.8.1.1: materialize_display_slices 静默降级，"
+                "实际未生成新文件，1px 溢出风险未消除（H3 修复失效）"
+            )
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
         rows = ""

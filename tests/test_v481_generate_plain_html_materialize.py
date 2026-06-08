@@ -8,8 +8,9 @@ HTML 声明 546 vs 实际 547 → 1px 溢出 → Outlook 拉伸产生 1px 纵向
 保证 HTML 声明 height == 实际 PNG height。
 """
 import os
-import tempfile
+import re
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -47,7 +48,6 @@ def test_generate_plain_html_materializes_odd_height():
     mat = materialize_display_slices(slices, 650)
     html = generate_plain_html(mat, 650)
 
-    import re
     actual_heights = [Image.open(s.path).size[1] for s in mat]
     declared_heights = [int(h) for h in re.findall(r'<tr\s+height="(\d+)"', html)]
 
@@ -70,7 +70,6 @@ def test_generate_plain_html_keeps_materialize_consistent():
     mat = materialize_display_slices(slices, 650)
     html = generate_plain_html(mat, 650)
 
-    import re
     # 关键: <tr height> 都是偶数（_even_pixel 偶数化）
     tr_heights = [int(h) for h in re.findall(r'<tr\s+height="(\d+)"', html)]
     for h in tr_heights:
@@ -91,7 +90,6 @@ def test_generate_plain_html_with_href_produces_a_tags():
     mat = materialize_display_slices(slices, 650)
     html = generate_plain_html(mat, 650)
 
-    import re
     # 1 个 <a> 标签
     a_count = len(re.findall(r'<a\s+href=', html))
     assert a_count == 1, f"应有 1 个 <a> 标签，实际 {a_count}"
@@ -119,6 +117,39 @@ def test_generate_plain_html_base64_encodes_images():
 
     # 关键: 不应有 cid: 引用（cid 是 assemble_html 的）
     assert "cid:" not in html, "generate_plain_html 不应使用 cid: 引用"
+
+
+def test_generate_plain_html_guard_catches_silent_materialize_failure(monkeypatch):
+    """V4.8.1.1: materialize 静默降级时，guard 抛 RuntimeError 不让 H3 修复失效。
+
+    模拟 materialize 内部 except Exception: for s in group: prepared.append(s)
+    路径（返回原 SliceItem 列表，无新文件生成）。
+    """
+    from html_assembler import materialize_display_slices
+
+    td = tempfile.mkdtemp()
+    # 构造 1 张合法 PNG
+    p = os.path.join(td, "orig.png")
+    Image.new("RGB", (650, 650), (200, 200, 200)).save(p)
+    raw_slice = SliceItem(path=p, original_width=650, sort_key=1.0)
+    raw_slice.source_index = 1.0
+    raw_slice.original_height = 650
+
+    # Monkey-patch: 模拟 materialize 静默降级（返回原 slices，不生成新文件）
+    def fake_silent(slices, display_w=650):
+        return slices  # 静默降级：无新文件
+    monkeypatch.setattr(
+        "html_assembler.materialize_display_slices", fake_silent
+    )
+
+    # 调 generate_plain_html → guard 应触发 RuntimeError
+    try:
+        generate_plain_html([raw_slice], 650)
+    except RuntimeError as e:
+        assert "V4.8.1.1" in str(e) and "静默降级" in str(e), \
+            f"guard RuntimeError 文案不符合预期: {e}"
+    else:
+        raise AssertionError("guard 未触发，H3 修复存在静默失效风险")
 
 
 if __name__ == "__main__":
