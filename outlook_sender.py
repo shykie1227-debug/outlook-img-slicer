@@ -14,6 +14,37 @@ import os
 import shutil
 
 
+NEW_OUTLOOK_UNSUPPORTED_HINT = (
+    "当前检测到的 Outlook 可能是新版 Outlook for Windows（WebView2 版）。\n"
+    "这个版本不提供经典 Outlook 的 COM/MAPI 自动化接口，"
+    "因此 pywin32 无法通过 Outlook.Application 创建邮件窗口。\n\n"
+    "可用处理方式：\n"
+    "1. 安装或切回经典 Outlook for Windows，再点击“创建 Outlook 邮件”。\n"
+    "2. 若必须使用新版 Outlook，请先用“复制 HTML”或“保存切图”，再手动粘贴/上传到新版 Outlook。\n\n"
+    "说明：本工具不会自动发送邮件，只打开经典 Outlook 的编辑窗口供用户检查。"
+)
+
+
+def _is_new_outlook_automation_error(exc: Exception) -> bool:
+    """
+    新 Outlook for Windows 是 WebView2 应用，不暴露 Outlook.Application COM。
+    pywin32 在不同 Windows/Office 状态下会返回不同措辞，这里只做保守识别，
+    用于把笼统 COM 异常替换成用户能执行的提示。
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    markers = (
+        "invalid class string",
+        "class not registered",
+        "找不到",
+        "无效的类字符串",
+        "类没有注册",
+        "outlook.application",
+        "server execution failed",
+        "operation unavailable",
+    )
+    return any(marker in text for marker in markers)
+
+
 def create_email_with_images(html_content: str, subject: str = "", to: str = "",
                             image_paths=None, save_dir: str = "",
                             slices=None):
@@ -65,7 +96,13 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
 
     try:
         pythoncom.CoInitialize()
-        outlook = win32com.client.Dispatch("Outlook.Application")
+        try:
+            outlook = win32com.client.Dispatch("Outlook.Application")
+        except Exception as e:
+            if _is_new_outlook_automation_error(e):
+                raise RuntimeError(NEW_OUTLOOK_UNSUPPORTED_HINT) from e
+            raise
+
         mail = outlook.CreateItem(0)  # 0 代表 olMailItem
 
         # V4.6.7：按 sort_key 排序后的路径与 html 里的 cid 一一对应
@@ -98,6 +135,8 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
         mail.Display(False)
 
     except Exception as e:
-        raise RuntimeError(f"启动 Outlook 失败: {e}")
+        if _is_new_outlook_automation_error(e):
+            raise RuntimeError(NEW_OUTLOOK_UNSUPPORTED_HINT) from e
+        raise RuntimeError(f"启动 Outlook 失败: {e}") from e
     finally:
         pythoncom.CoUninitialize()
