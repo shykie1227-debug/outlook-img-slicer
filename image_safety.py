@@ -52,5 +52,5 @@ def estimate_email_size_mb(slice_paths) -> float:
         return 0.0
     total_bytes = sum(Path(p).stat().st_size for p in slice_paths)
     # HTML overhead: ~1KB per slice + 2KB base
-    html_overhead = len(slice_paths) + 2
-    return round((total_bytes / 1024 / 1024) + html_overhead, 1)
+    html_overhead_bytes = (len(slice_paths) + 2) * 1024
+    return round((total_bytes + html_overhead_bytes) / 1024 / 1024, 1)

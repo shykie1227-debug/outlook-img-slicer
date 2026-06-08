@@ -41,10 +41,59 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.7.7"
+VERSION = "4.8"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
+
+
+def _extract_html_fragment(html: str) -> str:
+    """Extract pasteable body content from a full HTML document."""
+    body_match = re.search(r"<body\b[^>]*>(.*)</body>", html, flags=re.IGNORECASE | re.DOTALL)
+    return body_match.group(1) if body_match else html
+
+
+def _build_windows_clipboard_html(html: str) -> bytes:
+    """
+    Build CF_HTML payload for Windows clipboard consumers.
+
+    Some WebView2-based editors, including new Outlook for Windows, ignore Qt's
+    generic text/html MIME entry but read the native "HTML Format" clipboard data.
+    Offsets are byte offsets in the final UTF-8 payload.
+    """
+    fragment = _extract_html_fragment(html)
+    body = (
+        "<html><body>"
+        "<!--StartFragment-->"
+        f"{fragment}"
+        "<!--EndFragment-->"
+        "</body></html>"
+    )
+    header_template = (
+        "Version:0.9\r\n"
+        "StartHTML:{start_html:010d}\r\n"
+        "EndHTML:{end_html:010d}\r\n"
+        "StartFragment:{start_fragment:010d}\r\n"
+        "EndFragment:{end_fragment:010d}\r\n"
+        "SourceURL:about:blank\r\n"
+    )
+    placeholder_header = header_template.format(
+        start_html=0,
+        end_html=0,
+        start_fragment=0,
+        end_fragment=0,
+    )
+    start_html = len(placeholder_header.encode("utf-8"))
+    start_fragment = start_html + body.index("<!--StartFragment-->") + len("<!--StartFragment-->")
+    end_fragment = start_html + body.index("<!--EndFragment-->")
+    end_html = start_html + len(body.encode("utf-8"))
+    header = header_template.format(
+        start_html=start_html,
+        end_html=end_html,
+        start_fragment=start_fragment,
+        end_fragment=end_fragment,
+    )
+    return (header + body).encode("utf-8")
 
 
 class Config:
@@ -544,9 +593,13 @@ class MainWindow(QMainWindow):
     # ── 工具函数 ────────────────────────────
     def _get_width(self) -> int:
         try:
-            return int(self.edit_width.text())
+            v = int(self.edit_width.text())
         except ValueError:
             return Config.DEFAULT_WIDTH
+        v = max(400, min(1920, v))
+        if v % 2 != 0:
+            v -= 1
+        return v
 
     def _set_status(self, text: str, level: str = "info"):
         colors = {"info": Theme.TEXT_SECONDARY, "success": Theme.SUCCESS,
@@ -572,6 +625,8 @@ class MainWindow(QMainWindow):
             elif v > 1920:
                 QMessageBox.warning(self, "宽度超限", "宽度最大为 1920px，已自动调整为 1920px")
                 v = 1920
+            if v % 2 != 0:
+                v -= 1
             self.slider_width.blockSignals(True)
             self.slider_width.setValue(v)
             self.slider_width.blockSignals(False)
@@ -581,6 +636,11 @@ class MainWindow(QMainWindow):
 
     def _on_slider_changed(self, value: int):
         """滑块拖动时同步到输入框"""
+        if value % 2 != 0:
+            value -= 1
+            self.slider_width.blockSignals(True)
+            self.slider_width.setValue(value)
+            self.slider_width.blockSignals(False)
         self.edit_width.setText(str(value))
 
     # ── 快捷键 ──────────────────────────────
@@ -669,12 +729,22 @@ class MainWindow(QMainWindow):
             if len(valid) == 1:
                 self._start_processing(valid[0])
             else:
-                # V4.7.7 Fix E: 多文件走「仅处理第一张」+ 状态栏明确提示
+                # V4.7.8 R4: 多图切图模式 → 状态栏提示 + 模态 QMessageBox 二次确认
+                # 修复 R2 审查遗留第 4 个 UX 风险: "降级提示不够醒目"
+                # 之前仅 _set_status 多行文本，用户可能没注意到直接关闭
                 self._start_processing(valid[0])
                 self._set_status(
-                    f"💡 多图模式仅处理了第一张图片（共 {len(valid)} 张）。\n"
+                    f"💡 多图模式仅处理了第一张图片（共 {len(valid)} 张）。"
                     f"如需合并多图，请打开右上角「🖼️ 导出图片」开关后再拖入。",
                     "info"
+                )
+                # 模态提示：必须点确认才继续，避免用户错过
+                QMessageBox.information(
+                    self,
+                    "🖼️ 多图模式提示",
+                    f"已处理第一张图片（共 {len(valid)} 张）。\n\n"
+                    f"💡 如需将多张图片合并为一张长图，请打开右上角\n"
+                    f"   「🖼️ 导出图片」开关后再拖入文件。",
                 )
 
     def _export_images(self, paths: List[str], save_dir: Optional[str] = None,
@@ -690,7 +760,6 @@ class MainWindow(QMainWindow):
         self._set_status("正在图片导出...", "info")
         try:
             from PIL import Image as PILImage
-            from PyQt5.QtWidgets import QMessageBox
             # V4.7.6: 多页文件大数量确认
             from pathlib import Path
             _exts_multi = (".pdf", ".ppt", ".pptx", ".psd", ".psb")
@@ -916,8 +985,6 @@ class MainWindow(QMainWindow):
         self.btn_save.setEnabled(bool(paths))
         self.btn_copy_html.setEnabled(bool(paths))
         self.btn_hotspot.setEnabled(bool(paths))
-        # 重新处理时清空旧热区
-        self.hotspot_map.clear()
 
         # 体积检测
         size_mb = estimate_email_size_mb(paths) if paths else 0
@@ -1081,9 +1148,11 @@ class MainWindow(QMainWindow):
             mime = QMimeData()
             # HTML 格式：Outlook/Word 粘贴时正确渲染
             mime.setHtml(html)
+            # Windows 原生 CF_HTML：新版 Outlook/WebView2 编辑器优先读取这个格式
+            mime.setData("HTML Format", _build_windows_clipboard_html(html))
             # 纯文本格式：作为 fallback
-            plain = f"已将 {len(self.slice_paths)} 张切片 HTML 复制到剪贴板"
-            mime.setText(plain)
+            # 不写状态文案，避免不支持 HTML 的目标应用把提示文字粘进正文。
+            mime.setText(html)
             QGuiApplication.clipboard().setMimeData(mime)
             self._set_status("📋 HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
         except Exception as exc:
@@ -1103,51 +1172,91 @@ class MainWindow(QMainWindow):
             return
         from PIL import Image
         for i, p in enumerate(self.slice_paths):
-            img = Image.open(p)
-            rgb = img.convert("RGB") if img.mode in ("RGBA", "P") else img
-            # 直接保存为 JPEG 并用回 PNG 扩展名，避免路径引用失效
-            new_path = p.replace(".png", ".jpg")
+            with Image.open(p) as img:
+                if img.mode in ("RGBA", "LA"):
+                    rgb = Image.new("RGB", img.size, (255, 255, 255))
+                    rgb.paste(img, mask=img.split()[-1])
+                elif img.mode == "P":
+                    rgb = img.convert("RGB")
+                else:
+                    rgb = img.convert("RGB") if img.mode != "RGB" else img.copy()
+            new_path = str(Path(p).with_suffix(".jpg"))
             rgb.save(new_path, format="JPEG", quality=COMPRESS_QUALITY, optimize=True)
             self.slice_paths[i] = new_path
+
+    def _compress_slice_items(self, slices: List[SliceItem]) -> List[SliceItem]:
+        """
+        压缩最终发送用 SliceItem，保留 href / sort_key / alt_text。
+
+        不能先压缩 self.slice_paths：热区数据按原始切片文件名保存，先把
+        slice_001.png 改成 slice_001.jpg 会导致发送路径中热点匹配丢失。
+        """
+        if not slices:
+            return []
+        from PIL import Image
+
+        compressed: List[SliceItem] = []
+        for idx, item in enumerate(slices, start=1):
+            src = Path(item.path)
+            dst = src.with_name(f"{src.stem}_q{COMPRESS_QUALITY}_{idx:03d}.jpg")
+            with Image.open(item.path) as img:
+                if img.mode in ("RGBA", "LA"):
+                    rgb = Image.new("RGB", img.size, (255, 255, 255))
+                    rgb.paste(img, mask=img.split()[-1])
+                elif img.mode == "P":
+                    rgb = img.convert("RGB")
+                else:
+                    rgb = img.convert("RGB") if img.mode != "RGB" else img.copy()
+            rgb.save(dst, format="JPEG", quality=COMPRESS_QUALITY, optimize=True)
+            compressed.append(SliceItem(
+                path=str(dst),
+                href=item.href,
+                alt_text=item.alt_text,
+                sort_key=item.sort_key,
+                original_width=item.original_width,
+            ))
+        return compressed
 
     def _send_email(self):
         if not self.slice_paths:
             return
-
-        # 体积检测 + 压缩询问
-        size_mb = estimate_email_size_mb(self.slice_paths)
-        if size_mb > MAX_EMAIL_SIZE_MB:
-            btn_box = QMessageBox(self)
-            btn_box.setWindowTitle("邮件体积较大")
-            btn_box.setIcon(QMessageBox.Warning)
-            btn_box.setText(f"预计 {size_mb}MB，超过推荐限制（{MAX_EMAIL_SIZE_MB}MB）")
-            btn_box.setInformativeText(
-                f"<b>压缩后</b> 缩小至约 {COMPRESS_QUALITY}% 品质（推荐）\n"
-                f"<b>原画质</b> 保持当前品质直接发送"
-            )
-            btn_compress = btn_box.addButton(f"🔽 压缩至 {COMPRESS_QUALITY}%", QMessageBox.AcceptRole)
-            btn_original = btn_box.addButton("🎨 原画质发送", QMessageBox.NoRole)
-            btn_cancel = btn_box.addButton("取消", QMessageBox.RejectRole)
-            btn_box.setDefaultButton(btn_compress)
-            btn_box.exec()
-            if btn_box.clickedButton() == btn_cancel:
-                self._set_status(
-                    "💡 已取消发送，可先「保存切图」手动压缩后再编辑",
-                    "warning"
-                )
-                return
-            if btn_box.clickedButton() == btn_compress:
-                self._compress_slices()
-                self._set_status(
-                    f"🔽 已压缩至约 {estimate_email_size_mb(self.slice_paths)}MB，正在打开邮件...",
-                    "success"
-                )
 
         try:
             display_w = self._get_width()
             slices = materialize_display_slices(
                 self._build_slices_with_hotspots(), display_w
             )
+
+            # 体积检测基于最终发送切片，包含 hotspot 物理切割和预渲染后的真实文件。
+            size_mb = estimate_email_size_mb([s.path for s in slices])
+            if size_mb > MAX_EMAIL_SIZE_MB:
+                btn_box = QMessageBox(self)
+                btn_box.setWindowTitle("邮件体积较大")
+                btn_box.setIcon(QMessageBox.Warning)
+                btn_box.setText(f"预计 {size_mb}MB，超过推荐限制（{MAX_EMAIL_SIZE_MB}MB）")
+                btn_box.setInformativeText(
+                    f"<b>压缩后</b> 缩小至约 {COMPRESS_QUALITY}% 品质（推荐）\n"
+                    f"<b>原画质</b> 保持当前品质直接发送"
+                )
+                btn_compress = btn_box.addButton(f"🔽 压缩至 {COMPRESS_QUALITY}%", QMessageBox.AcceptRole)
+                btn_box.addButton("🎨 原画质发送", QMessageBox.NoRole)
+                btn_cancel = btn_box.addButton("取消", QMessageBox.RejectRole)
+                btn_box.setDefaultButton(btn_compress)
+                btn_box.exec()
+                if btn_box.clickedButton() == btn_cancel:
+                    self._set_status(
+                        "💡 已取消发送，可先「保存切图」手动压缩后再编辑",
+                        "warning"
+                    )
+                    return
+                if btn_box.clickedButton() == btn_compress:
+                    slices = self._compress_slice_items(slices)
+                    compressed_size = estimate_email_size_mb([s.path for s in slices])
+                    self._set_status(
+                        f"🔽 已压缩至约 {compressed_size}MB，正在打开邮件...",
+                        "success"
+                    )
+
             html_content = assemble_html(slices, display_w)
             subject = self.input_subject.text().strip() or "长图邮件"
             # V4.6.7：传 slices 让 outlook_sender 按 sort_key 排序后取 path
