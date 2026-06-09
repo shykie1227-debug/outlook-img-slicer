@@ -459,6 +459,30 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
     return prepared
 
 
+def materialize_display_slices_strict(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
+    """
+    生成最终显示尺寸切片，并拒绝 materialize_display_slices 的静默降级结果。
+
+    Outlook 发送路径依赖实际 PNG 尺寸与 HTML width/height 完全一致。若预渲染失败后
+    返回原图，Word 引擎会重新缩放图片，容易重新出现 1px 缝隙。
+    """
+    if not slices:
+        return []
+
+    original_paths = {s.path for s in slices}
+    prepared = materialize_display_slices(slices, display_w)
+    prepared_paths = [s.path for s in prepared]
+    fallback_paths = [p for p in prepared_paths if p in original_paths]
+    missing_paths = [p for p in prepared_paths if not Path(p).exists()]
+
+    if fallback_paths or missing_paths or len(prepared) != len(slices):
+        raise RuntimeError(
+            "最终邮件切片预渲染失败，已阻止发送以避免 Outlook 中出现图片缝隙。"
+            "请重新切图后再试。"
+        )
+    return prepared
+
+
 def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
@@ -528,20 +552,8 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     """
     display_w = _normalize_display_width(display_w)
     try:
-        # V4.8.1：先 materialize 同步实际 PNG 高度与 HTML 声明 height
-        # （修复 generate_plain_html 独立调用时的 1px 溢出）
-        # V4.8.1.1：materialize 内部会静默降级（except Exception）
-        # 导致 H3 修复失效 → 入口加 guard 检查 materialize 实际生效
-        orig_paths = {s.path for s in slices}
-        slices = materialize_display_slices(slices, display_w)
-        new_paths = {s.path for s in slices}
-        # materialize 成功标志：至少有一个新文件（mail_*.png）出现
-        # 如果完全没产生新文件，说明 materialize 静默降级，H3 修复失效
-        if not new_paths - orig_paths:
-            raise RuntimeError(
-                "V4.8.1.1: materialize_display_slices 静默降级，"
-                "实际未生成新文件，1px 溢出风险未消除（H3 修复失效）"
-            )
+        # V4.8.2：复制路径也使用严格预渲染，和发送路径保持同一套防缝隙入口。
+        slices = materialize_display_slices_strict(slices, display_w)
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
         rows = ""

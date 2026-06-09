@@ -18,6 +18,7 @@ from PIL import Image
 from html_assembler import (
     generate_plain_html,
     materialize_display_slices,
+    materialize_display_slices_strict,
     SliceItem,
     _normalize_display_width,
 )
@@ -142,14 +143,37 @@ def test_generate_plain_html_guard_catches_silent_materialize_failure(monkeypatc
         "html_assembler.materialize_display_slices", fake_silent
     )
 
-    # 调 generate_plain_html → guard 应触发 RuntimeError
+    # 调 generate_plain_html → strict materialize 应触发 RuntimeError
     try:
         generate_plain_html([raw_slice], 650)
     except RuntimeError as e:
-        assert "V4.8.1.1" in str(e) and "静默降级" in str(e), \
+        assert "预渲染失败" in str(e) and "Outlook" in str(e), \
             f"guard RuntimeError 文案不符合预期: {e}"
     else:
         raise AssertionError("guard 未触发，H3 修复存在静默失效风险")
+
+
+def test_strict_materialize_rejects_partial_fallback(monkeypatch):
+    """V4.8.2: 发送路径也不能接受 materialize 部分静默降级。"""
+    td = tempfile.mkdtemp()
+    p = os.path.join(td, "orig.png")
+    Image.new("RGB", (650, 650), (200, 200, 200)).save(p)
+    raw_slice = SliceItem(path=p, original_width=650, sort_key=1.0)
+
+    def fake_partial_fallback(slices, display_w=650):
+        return slices
+
+    monkeypatch.setattr(
+        "html_assembler.materialize_display_slices", fake_partial_fallback
+    )
+
+    try:
+        materialize_display_slices_strict([raw_slice], 650)
+    except RuntimeError as e:
+        assert "预渲染失败" in str(e) and "图片缝隙" in str(e), \
+            f"strict RuntimeError 文案不符合预期: {e}"
+    else:
+        raise AssertionError("strict materialize 未拒绝静默降级结果")
 
 
 if __name__ == "__main__":

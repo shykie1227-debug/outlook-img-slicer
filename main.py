@@ -31,7 +31,7 @@ from ppt_slicer import pptx_to_images
 # from psd_slicer import psd_to_images
 from clickable_map import HotspotMap, Hotspot
 from hotspot_editor import HotspotEditorDialog
-from html_assembler import assemble_html, generate_plain_html, materialize_display_slices, SliceItem
+from html_assembler import assemble_html, generate_plain_html, materialize_display_slices_strict, SliceItem
 from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
@@ -41,7 +41,7 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.8"
+VERSION = "4.8.2"
 VERSION_BY = "xiaoming"
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -1139,7 +1139,7 @@ class MainWindow(QMainWindow):
             return
         try:
             display_w = self._get_width()
-            slices = materialize_display_slices(
+            slices = materialize_display_slices_strict(
                 self._build_slices_with_hotspots(), display_w
             )
             html = generate_plain_html(
@@ -1223,7 +1223,7 @@ class MainWindow(QMainWindow):
 
         try:
             display_w = self._get_width()
-            slices = materialize_display_slices(
+            slices = materialize_display_slices_strict(
                 self._build_slices_with_hotspots(), display_w
             )
 

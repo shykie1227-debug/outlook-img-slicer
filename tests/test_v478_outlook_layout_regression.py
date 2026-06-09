@@ -166,6 +166,7 @@ def test_send_email_uses_final_slices_for_size_and_compression():
     assert send_start >= 0
     send_body = main_src[send_start:main_src.find("\n    def reset_app", send_start)]
 
+    assert "materialize_display_slices_strict(" in send_body
     assert "estimate_email_size_mb([s.path for s in slices])" in send_body
     assert "self._compress_slice_items(slices)" in send_body
     assert "self._compress_slices()" not in send_body
