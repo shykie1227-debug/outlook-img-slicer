@@ -143,6 +143,21 @@ def test_validate_hotspots_overlap_suggestion_includes_coords():
     assert "300px" in reason or "250" in reason, f"建议应包含可执行坐标: {reason}"
 
 
+def test_validate_hotspots_stacked_y_overlap_has_architecture_hint():
+    """上下错位但 X 重叠时，应明确提示当前版本不支持该布局。"""
+    from hotspot_slicer import validate_hotspots_no_overlap
+    from clickable_map import Hotspot
+
+    h1 = Hotspot(x1=100, y1=0, x2=300, y2=80, url="https://a.com", text="A")
+    h2 = Hotspot(x1=120, y1=120, x2=320, y2=200, url="https://b.com", text="B")
+
+    ok, reason = validate_hotspots_no_overlap([h1, h2], img_w=1000)
+    assert not ok
+    assert "上下不同位置" in reason
+    assert "纵向切条" in reason
+    assert "拆成两张图" in reason
+
+
 # ════════════════════════════════════════════════════
 # Fix C: 导出防御（间接测：检查 main.py 源码包含防御代码）
 # ════════════════════════════════════════════════════

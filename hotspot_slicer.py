@@ -32,6 +32,10 @@ from clickable_map import Hotspot, HotspotMap
 # ── 错误码 ──
 class HotspotCutError:
     OVERLAP = "Hotspot X 范围重叠，请勿在已有按钮的横向位置再加新按钮"
+    STACKED_X_OVERLAP = (
+        "当前版本的可点击按钮通过纵向切条实现，"
+        "即使两个按钮上下分开，只要 X 范围重叠也无法同时导出。"
+    )
     CONTAIN = "Hotspot X 范围被包含于其他 hotspot（嵌套）"
     OUT_OF_BOUNDS = "Hotspot 坐标超出图片范围"
     INVALID_RANGE = "Hotspot 宽度为 0 或负"
@@ -95,6 +99,19 @@ def validate_hotspots_no_overlap(
         orig_b, b = sorted_idx_h[i + 1]
         # 边界相接不算重叠（a.x2 == b.x1 允许）
         if a.x2 > b.x1:
+            y_overlap = not (a.y2 <= b.y1 or b.y2 <= a.y1)
+            if not y_overlap:
+                reason = (
+                    f"Hotspot #{orig_a + 1} 与 #{orig_b + 1} 在上下不同位置，"
+                    f"但横向范围仍然重叠。\n\n"
+                    f"  #{orig_a + 1}: x={a.x1}→{a.x2}, y={a.y1}→{a.y2}\n"
+                    f"  #{orig_b + 1}: x={b.x1}→{b.x2}, y={b.y1}→{b.y2}\n\n"
+                    f"{HotspotCutError.STACKED_X_OVERLAP}\n\n"
+                    f"当前可行方案：\n"
+                    f"  • 把两个按钮左右错开，避免 X 范围重叠\n"
+                    f"  • 或拆成两张图分别添加按钮"
+                )
+                return False, reason
             # V4.7.7 优化提示：明确告诉用户哪两个 + 建议
             reason = (
                 f"Hotspot #{orig_a + 1} 与 #{orig_b + 1} 横向重叠\n\n"

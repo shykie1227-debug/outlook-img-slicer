@@ -41,7 +41,7 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.8.4"
+VERSION = "4.8.5"
 VERSION_BY = "xiaoming"
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20
@@ -480,7 +480,7 @@ class MainWindow(QMainWindow):
 
         self.chk_smart = QCheckBox("智能切图")
         self.chk_smart.setFont(_font("Microsoft YaHei", 12))
-        self.chk_smart.setChecked(False)  # 默认等分切图
+        self.chk_smart.setChecked(True)  # 默认智能切图，优先避免切断文字
         self.chk_smart.setCursor(Qt.PointingHandCursor)
         self.chk_smart.setStyleSheet(_chk_indicator_style)
         toolbar2.addWidget(self.chk_smart)

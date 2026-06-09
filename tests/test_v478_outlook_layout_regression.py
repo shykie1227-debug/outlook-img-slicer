@@ -94,6 +94,8 @@ def test_multiple_hotspots_keep_precise_even_widths(tmp_path):
     assert "mso-line-height-rule: exactly" in html
     assert "mso-table-lspace: 0pt" in html
     assert "mso-table-rspace: 0pt" in html
+    assert "mso-table-bspace: 0pt" in html
+    assert "mso-table-tspace: 0pt" in html
 
 
 def test_plain_vertical_slices_use_flat_rows_without_nested_tables(tmp_path):
@@ -116,6 +118,7 @@ def test_plain_vertical_slices_use_flat_rows_without_nested_tables(tmp_path):
     assert html.count("<tr height=") == 3
     assert "mso-margin-top-alt: 0" in html
     assert "mso-margin-bottom-alt: 0" in html
+    assert "table-layout: fixed" in html
 
 
 def test_cid_order_matches_sorted_slice_order(tmp_path):

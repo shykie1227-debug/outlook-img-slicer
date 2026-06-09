@@ -91,5 +91,18 @@ def test_render_source_to_images_no_psd_top_level_import(monkeypatch):
                 f"psd_slicer 顶层 import: {line}"
 
 
+def test_pptx_to_images_refuses_low_fidelity_python_pptx_fallback(monkeypatch):
+    from ppt_slicer import PPT_RENDERER_UNAVAILABLE_HINT, pptx_to_images
+
+    monkeypatch.setattr("ppt_slicer._try_powerpoint_export", lambda *args, **kwargs: None)
+    monkeypatch.setattr("ppt_slicer._try_soffice_render", lambda *args, **kwargs: None)
+    monkeypatch.setattr("ppt_slicer.sys.platform", "darwin")
+
+    with pytest.raises(RuntimeError, match="高保真 PPT 渲染器"):
+        pptx_to_images("dummy.pptx")
+
+    assert "python-pptx" in PPT_RENDERER_UNAVAILABLE_HINT
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

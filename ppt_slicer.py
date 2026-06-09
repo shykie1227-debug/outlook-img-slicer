@@ -20,6 +20,15 @@ from pathlib import Path
 from pptx import Presentation
 
 
+PPT_RENDERER_UNAVAILABLE_HINT = (
+    "当前环境没有可用的高保真 PPT 渲染器，已停止导出以避免文字、形状或 SmartArt 被改写。\n\n"
+    "可用处理方式：\n"
+    "1. Windows：安装 Microsoft PowerPoint，程序将优先使用 PowerPoint COM 渲染。\n"
+    "2. macOS / Linux：安装 LibreOffice，程序将使用 soffice 转 PDF 后逐页渲染。\n\n"
+    "说明：python-pptx 只能提取嵌入图片，无法保真导出文字和形状，因此不再作为静默兜底方案。"
+)
+
+
 def _emu_to_px(emu: int, dpi: int = 150) -> int:
     return int(emu / 914400 * dpi)
 
@@ -271,18 +280,13 @@ def pptx_to_images(pptx_path: str, dpi: int = 150) -> List[Image.Image]:
     if images:
         return images
 
-    # 方案 2：LibreOffice soffice（跨平台保真）
+    # Windows 上优先要求 PowerPoint COM，避免 soffice / python-pptx 造成文字改写。
+    if sys.platform == "win32":
+        raise RuntimeError(PPT_RENDERER_UNAVAILABLE_HINT)
+
+    # 非 Windows：允许 LibreOffice 作为高保真备选。
     images = _try_soffice_render(pptx_path, dpi)
     if images:
         return images
 
-    # 方案 3：python-pptx（最后兜底，内容可能缺失）
-    print(
-        "[警告] PPT 解析退到 python-pptx 方案，仅能提取嵌入图片，"
-        "文字/形状/SmartArt 内容会丢失。\n"
-        "  修复建议：\n"
-        "    • Windows: 安装 Microsoft PowerPoint（程序自动走 COM 渲染）\n"
-        "    • macOS/Linux: 安装 LibreOffice（https://www.libreoffice.org/）\n"
-        "  安装后重启程序即可获得完整保真渲染。"
-    )
-    return _try_pptx_extract(pptx_path, dpi)
+    raise RuntimeError(PPT_RENDERER_UNAVAILABLE_HINT)
