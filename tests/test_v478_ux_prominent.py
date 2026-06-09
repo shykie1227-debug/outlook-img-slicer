@@ -14,12 +14,22 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_version_bumped_to_v48():
-    """VERSION 常量应升级到 4.8"""
+def test_version_bumped_to_v484():
+    """VERSION 常量应升级到 4.8.4"""
     main_src = (ROOT / "main.py").read_text()
     m = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', main_src)
     assert m, "找不到 VERSION 常量"
-    assert m.group(1) == "4.8", f"VERSION 应为 4.8，实际: {m.group(1)}"
+    assert m.group(1) == "4.8.4", f"VERSION 应为 4.8.4，实际: {m.group(1)}"
+
+
+def test_outlook_safe_slice_height_is_1200():
+    """Outlook 发送切片高度应低于 Word 图片/表格高度边界。"""
+    main_src = (ROOT / "main.py").read_text()
+    m = re.search(r'OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE\s*=\s*(\d+)', main_src)
+    assert m, "找不到 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE 常量"
+    assert int(m.group(1)) == 1200
+    assert "MAX_HEIGHT_PER_SLICE = OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE" in main_src
+    assert "max_height=1728" not in main_src
 
 
 def test_multi_file_path_has_qmessagebox():

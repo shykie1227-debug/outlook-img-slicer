@@ -27,6 +27,7 @@ from html_assembler import (
     assemble_html,
     generate_plain_html,
     materialize_display_slices,
+    materialize_display_slices_strict,
 )
 
 
@@ -93,6 +94,28 @@ def test_multiple_hotspots_keep_precise_even_widths(tmp_path):
     assert "mso-line-height-rule: exactly" in html
     assert "mso-table-lspace: 0pt" in html
     assert "mso-table-rspace: 0pt" in html
+
+
+def test_plain_vertical_slices_use_flat_rows_without_nested_tables(tmp_path):
+    p1 = tmp_path / "slice_001.png"
+    p2 = tmp_path / "slice_002.png"
+    p3 = tmp_path / "slice_003.png"
+    make_image(p1, 650, 547)
+    make_image(p2, 650, 552)
+    make_image(p3, 650, 549)
+    slices = [
+        SliceItem(path=str(p1), sort_key=1.0, original_width=650),
+        SliceItem(path=str(p2), sort_key=2.0, original_width=650),
+        SliceItem(path=str(p3), sort_key=3.0, original_width=650),
+    ]
+
+    prepared = materialize_display_slices_strict(slices, 650)
+    html = assemble_html(prepared, 650)
+
+    assert html.count("<table") == 1
+    assert html.count("<tr height=") == 3
+    assert "mso-margin-top-alt: 0" in html
+    assert "mso-margin-bottom-alt: 0" in html
 
 
 def test_cid_order_matches_sorted_slice_order(tmp_path):

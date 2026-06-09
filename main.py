@@ -41,8 +41,9 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.8.2"
+VERSION = "4.8.4"
 VERSION_BY = "xiaoming"
+OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
 
@@ -99,7 +100,7 @@ def _build_windows_clipboard_html(html: str) -> bytes:
 class Config:
     APP_TITLE = f"Outlook 长图助手 V{VERSION}"
     DEFAULT_WIDTH = 960
-    MAX_HEIGHT_PER_SLICE = 1728
+    MAX_HEIGHT_PER_SLICE = OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE
     MAX_SLICE_COUNT = 20
     WINDOW_WIDTH = 760
     WINDOW_HEIGHT = 720
@@ -317,7 +318,10 @@ class ProcessWorker(QThread):
         self.progress.emit(p_after)
         final = []
         for p in slice_paths:
-            final.extend(detect_and_slice(p, max_height=1728, smart=self.smart, target_width=self.width))
+            final.extend(detect_and_slice(
+                p, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
+                smart=self.smart, target_width=self.width
+            ))
         return final
 
     def run(self):
@@ -333,7 +337,10 @@ class ProcessWorker(QThread):
                 from psd_slicer import psd_to_images
                 slice_paths = self._convert_and_slice(psd_to_images, "psd_page", 45, 75)
             else:
-                slice_paths = detect_and_slice(self.file_path, max_height=1728, smart=self.smart, target_width=self.width)
+                slice_paths = detect_and_slice(
+                    self.file_path, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
+                    smart=self.smart, target_width=self.width
+                )
             self.progress.emit(100)
             self.finished.emit(slice_paths)
         except Exception as exc:
@@ -1139,11 +1146,8 @@ class MainWindow(QMainWindow):
             return
         try:
             display_w = self._get_width()
-            slices = materialize_display_slices_strict(
-                self._build_slices_with_hotspots(), display_w
-            )
             html = generate_plain_html(
-                slices, display_w
+                self._build_slices_with_hotspots(), display_w
             )
             mime = QMimeData()
             # HTML 格式：Outlook/Word 粘贴时正确渲染

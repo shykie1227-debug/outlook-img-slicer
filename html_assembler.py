@@ -350,6 +350,31 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
     display_w = _normalize_display_width(display_w)
     allocated_widths = _allocate_group_widths(group, display_w)
     row_height = _compute_group_height(group, display_w)
+
+    # V4.8.3: 普通纵向切片不要再套一层内层 table。
+    # Outlook/Word 对嵌套表格的行高重算很激进，单图行使用扁平结构更稳定。
+    if len(group) == 1:
+        s = group[0]
+        if is_base64:
+            cid_or_src = ""
+        else:
+            cid_counter += 1
+            cid_or_src = f"cid:slice_{cid_counter:03d}"
+        cell = _build_cell(
+            s.path, cid_or_src, display_w, s.href, s.alt_text,
+            s.original_width, is_base64=is_base64,
+            forced_display_w=allocated_widths.get(s.path),
+            forced_display_h=row_height,
+        )
+        row = (
+            f'<tr height="{row_height}" style="height: {row_height}px; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+            f'{cell}'
+            f'</tr>\n'
+        )
+        return row, cid_counter
+
     cells = ""
     for s in group:
         if is_base64:
@@ -378,7 +403,9 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
         f'</table>'
     )
     row = (
-        f'<tr>\n'
+        f'<tr height="{row_height}" style="height: {row_height}px; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
         f'<td align="center" valign="top" width="{display_w}" height="{row_height}" style="'
         f'width: {display_w}px; height: {row_height}px; padding: 0; margin: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '

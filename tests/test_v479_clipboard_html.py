@@ -50,3 +50,13 @@ def test_copy_html_does_not_put_status_message_in_plain_text_fallback():
     assert 'mime.setData("HTML Format", _build_windows_clipboard_html(html))' in copy_body
     assert "mime.setText(html)" in copy_body
     assert "已将 {len(self.slice_paths)} 张切片 HTML 复制到剪贴板" not in copy_body
+
+
+def test_copy_html_does_not_materialize_twice():
+    main_src = (ROOT / "main.py").read_text(encoding="utf-8")
+    copy_start = main_src.find("def _copy_html")
+    assert copy_start >= 0
+    copy_body = main_src[copy_start:main_src.find("\n    def _compress_slices", copy_start)]
+
+    assert "generate_plain_html(" in copy_body
+    assert "materialize_display_slices_strict(" not in copy_body

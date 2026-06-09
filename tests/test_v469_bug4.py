@@ -45,7 +45,7 @@ class TestV469Bug4HorizontalLayout:
                             sort_key=k, original_width=1000) for path, k in sk]
 
         html = generate_plain_html(slices, 650)
-        trs = re.findall(r'<tr>.*?</tr>', html, re.S)
+        trs = re.findall(r'<tr\b[^>]*>.*?</tr>', html, re.S)
         assert len(trs) == 1, f'应 1 个 <tr>，实际 {len(trs)}'
         td_count = len(re.findall(r'<img[^>]*', trs[0]))
         assert td_count == 3, f'应 3 个 <td>，实际 {td_count}'
@@ -62,7 +62,7 @@ class TestV469Bug4HorizontalLayout:
                             sort_key=k, original_width=1000) for path, k in sk]
 
         html = generate_plain_html(slices, 650)
-        trs = re.findall(r'<tr>.*?</tr>', html, re.S)
+        trs = re.findall(r'<tr\b[^>]*>.*?</tr>', html, re.S)
         assert len(trs) == 1
         td_count = len(re.findall(r'<img[^>]*', trs[0]))
         assert td_count == 1, f'应 1 个 <td>，实际 {td_count}'
@@ -82,7 +82,7 @@ class TestV469Bug4HorizontalLayout:
                             sort_key=k, original_width=1000) for path, k in sk]
 
         html = generate_plain_html(slices, 650)
-        trs = re.findall(r'<tr>.*?</tr>', html, re.S)
+        trs = re.findall(r'<tr\b[^>]*>.*?</tr>', html, re.S)
         assert len(trs) == 1
         td_count = len(re.findall(r'<img[^>]*', trs[0]))
         assert td_count == 5, f'应 5 个 <td>，实际 {td_count}'
@@ -105,7 +105,7 @@ class TestV469Bug4HorizontalLayout:
                             sort_key=k, original_width=1000) for path, k in sk]
 
         html = generate_plain_html(slices, 650)
-        trs = re.findall(r'<tr>.*?</tr>', html, re.S)
+        trs = re.findall(r'<tr\b[^>]*>.*?</tr>', html, re.S)
         assert len(trs) == 2, f'应 2 个 <tr>（每原图 1 行），实际 {len(trs)}'
         for tr in trs:
             td_count = len(re.findall(r'<img[^>]*', tr))
