@@ -1,5 +1,15 @@
 """
-HTML 组装器模块（V4.7.8 优化版）
+HTML 组装器模块（V4.8.5 缝隙修复 + V4.7.8 优化版）
+
+V4.8.5 缝隙修复（当前版本）：
+  - 取消对单组 PNG 高度的"display_w/total_w → _even_pixel"缩放。
+  - 之前 materialize 会把单组 source_row 从 (display_w, actual_h) resize 到
+    (display_w, _even_pixel(actual_h * display_w / total_w))，对 833px 这种
+    奇数高度会变成 832px，导致声明 height=832 与原始源图差 1px。
+  - 3 张普通切片各缩 1px 累计产生肉眼可见的"每片切图衔接处有缝"。
+  - 修复：声明 height 严格等于 materialize 输出的 PNG 物理高度，
+    materialize 又严格等于源 PNG 物理高度 → Word 引擎 1:1 渲染 → 零缩放 → 零缝。
+  - 多组（多 hotspot 横向拼接）仍用统一 row_height，因为各段必须共享同一高度。
 
 V4.7.8 优化点：
   - 优化图片尺寸缓存，减少重复读取
@@ -96,6 +106,20 @@ def _even_pixel(n: int) -> int:
     return n - 1
 
 
+def _even_pixel_up(n: int) -> int:
+    """
+    V4.8.5: 向上偶数化（向下兼容到下一个偶数）。
+    用于单组场景：实际 PNG 是 833px → 返回 834px。
+    materialize 会用"白底画布 + 顶部 paste"补 1px 白底，
+    HTML 声明 834、实际 PNG 834，两者一致 → Word 1:1 渲染 → 0 缝。
+    """
+    if n <= 1:
+        return max(1, n)
+    if n % 2 == 0:
+        return n
+    return n + 1
+
+
 def _normalize_display_width(display_w: int) -> int:
     """
     统一邮件显示宽度。
@@ -166,8 +190,11 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
         seg_display_w = _even_pixel(round(display_w * ratio))
     else:
         seg_display_w = _even_pixel(display_w)
+    # V4.8.5: forced_display_h 已经由 _compute_group_height 算好（单组=actual_h，
+    # 多组=统一 row_height 偶数化），这里直接用，不再二次偶数化。
+    # 之前对 forced_display_h 再 _even_pixel 会让单组场景 833→832 漂移。
     if forced_display_h is not None:
-        seg_display_h = _even_pixel(max(1, int(forced_display_h)))
+        seg_display_h = max(1, int(forced_display_h))
     else:
         raw_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
         seg_display_h = _even_pixel(raw_h)
@@ -320,9 +347,30 @@ def _allocate_group_widths(group: List[SliceItem], display_w: int) -> Dict[str, 
 def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
     """
     同一原图的横向分段必须使用同一个显示高度，避免 Outlook 中上下错位。
+
     V4.7.7: 输出强制偶数（Outlook px→pt 转换无小数 → 消除 1px 白线）。
+    V4.8.5: 单组（len(group)==1）改为向上偶数化 actual_h。
+      关键约束：返回的 row_height 必须等于 materialize 输出的 PNG 物理高度，
+      这样 Outlook/Word 引擎可以 1:1 渲染，不会触发重新缩放 → 0 1px 缝。
+      之前用 row_height = _even_pixel(row_h * display_w / total_w)
+      对 actual_h=833, total_w=display_w=650 这种 case 会算出 832，
+      materialize 内部 LANCZOS resize 会丢 1px 且产生插值伪影。
+      修复后：单组走 _even_pixel_up(actual_h) = 向上偶数化（833→834），
+      materialize 用"顶部 paste + 底部白边"实现，视觉无损。
+      多组仍走统一 row_height 计算（多段必须共享 row_h）。
     """
     display_w = _normalize_display_width(display_w)
+
+    # V4.8.5: 单组走"向上偶数化"路径
+    if len(group) == 1:
+        try:
+            _, actual_h = _get_img_dimensions(group[0].path)
+        except Exception:
+            return _even_pixel(display_w)
+        if actual_h > 0:
+            return _even_pixel_up(actual_h)
+        return _even_pixel(display_w)
+
     total_w = 0
     row_h = 0
     for s in group:
@@ -464,8 +512,13 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                 source_row.paste(part, (x, 0))
                 x += part.width
 
-            if source_row.size != (display_w_even, row_height):
-                source_row = source_row.resize((display_w_even, row_height), Image.Resampling.LANCZOS)
+            # V4.8.5: 当 source_row 高度 != row_height 时，用"白底画布 + 顶部 paste"
+            # 替代 LANCZOS resize，避免给图片引入 1px 插值差和模糊伪影。
+            # 多数长图本来就是白底，底部补 1px 白边视觉无损。
+            if source_row.size[1] != row_height:
+                padded = Image.new("RGB", (source_row.size[0], row_height), (255, 255, 255))
+                padded.paste(source_row, (0, 0))
+                source_row = padded
 
             crop_x = 0
             for s, _ in source_parts:

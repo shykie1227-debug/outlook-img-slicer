@@ -14,12 +14,12 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_version_bumped_to_v485():
-    """VERSION 常量应升级到 4.8.5"""
+def test_version_bumped_to_v486():
+    """VERSION 常量应升级到 4.8.6"""
     main_src = (ROOT / "main.py").read_text()
     m = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', main_src)
     assert m, "找不到 VERSION 常量"
-    assert m.group(1) == "4.8.5", f"VERSION 应为 4.8.5，实际: {m.group(1)}"
+    assert m.group(1) == "4.8.6", f"VERSION 应为 4.8.6，实际: {m.group(1)}"
 
 
 def test_outlook_safe_slice_height_is_1200():
