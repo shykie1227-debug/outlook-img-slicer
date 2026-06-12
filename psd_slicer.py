@@ -91,14 +91,3 @@ def psd_to_images(psd_path: str, dpi: int = 150) -> List[Image.Image]:
         raise
     except Exception as e:
         raise RuntimeError(f"PSD 渲染失败: {e}")
-
-
-def get_psd_info(psd_path: str) -> dict:
-    """获取 PSD 基本元数据（用于调试/日志）。"""
-    psd = _load_psd(psd_path)
-    return {
-        "width": psd.width,
-        "height": psd.height,
-        "layers": len(list(psd)),
-        "color_mode": str(psd.color_mode),
-    }

@@ -86,7 +86,10 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
         for path in sorted_paths:
             fname = os.path.basename(path)
             dst = os.path.join(save_dir, fname)
-            shutil.copy2(path, dst)
+            try:
+                shutil.copy2(path, dst)
+            except OSError as e:
+                raise RuntimeError(f"保存切片失败: {dst} ({e})") from e
 
     try:
         import win32com.client
@@ -94,6 +97,7 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
     except ImportError:
         raise RuntimeError("缺少 pywin32 库，请运行 'pip install pywin32' 安装。")
 
+    mail = None  # V4.8.7: 失败时显式 Close() 释放 COM 资源
     try:
         pythoncom.CoInitialize()
         try:
@@ -109,7 +113,14 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
         # 不再调 get_cid_map，直接 enumerate 生成 cid
         for i, path in enumerate(sorted_paths):
             cid = f"slice_{i + 1:03d}"
-            att = mail.Attachments.Add(path)
+            try:
+                att = mail.Attachments.Add(path)
+            except Exception as e:
+                # V4.8.7: 单个附件失败不要让整封邮件创建崩，但要让用户知道
+                raise RuntimeError(
+                    f"添加附件失败（{os.path.basename(path)}）：\n{e}\n"
+                    f"可能原因：文件被外部删除、Outlook 邮箱配额满、文件名含特殊字符。"
+                ) from e
             att.PropertyAccessor.SetProperty(
                 "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
             )
@@ -124,7 +135,12 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
 
         # 先注册 CID 附件，再写 HTMLBody，降低 Outlook/Word 重写正文时
         # 丢失 cid 图片引用或 <a><img></a> 链接关系的概率。
-        mail.HTMLBody = html_content
+        try:
+            mail.HTMLBody = html_content
+        except Exception as e:
+            # V4.8.7: HTML 写入失败（一般因为 html 格式问题或 mail 损坏）
+            raise RuntimeError(f"写入邮件正文失败: {e}") from e
+
         if subject:
             mail.Subject = subject
         if to:
@@ -135,6 +151,12 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
         mail.Display(False)
 
     except Exception as e:
+        # V4.8.7: 出错时关掉 mail，释放 COM 引用（避免 Outlook 进程残留）
+        if mail is not None:
+            try:
+                mail.Close(0)  # olDiscard
+            except Exception:
+                pass
         if _is_new_outlook_automation_error(e):
             raise RuntimeError(NEW_OUTLOOK_UNSUPPORTED_HINT) from e
         raise RuntimeError(f"启动 Outlook 失败: {e}") from e

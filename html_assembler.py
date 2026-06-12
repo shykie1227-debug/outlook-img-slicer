@@ -37,11 +37,48 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
 from html import escape
+import os
 import uuid
 from PIL import Image
 
 # V4.7.8: 图片尺寸缓存，避免重复读取同一文件
 _img_dimensions_cache: Dict[str, Tuple[int, int]] = {}
+
+# V4.8.7: materialize 临时文件追踪 — 调用方负责删除
+# 每次 materialize_display_slices_strict 调用追加新文件，调用方用 cleanup_temp_slices 删
+_materialized_temp_files: List[str] = []
+
+
+def _track_temp_files(paths: List[str]) -> List[str]:
+    """登记本次 materialize 产生的临时文件，返回同一列表便于链式调用。"""
+    _materialized_temp_files.extend(paths)
+    return paths
+
+
+def cleanup_temp_slices(paths: List[str]) -> int:
+    """
+    删除 materialize 产生的临时 PNG 切片，best-effort。
+
+    Args:
+        paths: 要删除的文件路径列表
+
+    Returns:
+        成功删除的数量
+    """
+    deleted = 0
+    for p in paths:
+        try:
+            if p and os.path.exists(p):
+                os.remove(p)
+                deleted += 1
+        except OSError:
+            pass
+    return deleted
+
+
+def cleanup_all_tracked_temp_slices() -> int:
+    """进程退出兜底：删掉本进程所有 materialize 临时文件。"""
+    return cleanup_temp_slices(list(_materialized_temp_files))
 
 
 @dataclass
@@ -418,7 +455,8 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
         row = (
             f'<tr height="{row_height}" style="height: {row_height}px; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
+            f'valign="top" align="left">\n'
             f'{cell}'
             f'</tr>\n'
         )
@@ -441,15 +479,16 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
     inner_table = (
         f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
         f'width="{display_w}" '
-        f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0; '
+        f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
         f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
         f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
+        f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
         f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
         f'table-layout: fixed;">\n'
         f'<tr height="{row_height}" style="height: {row_height}px; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" valign="top" align="left">\n'
         f'{cells}'
         f'</tr>\n'
         f'</table>'
@@ -457,7 +496,7 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
     row = (
         f'<tr height="{row_height}" style="height: {row_height}px; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" valign="top" align="left">\n'
         f'<td align="center" valign="top" width="{display_w}" height="{row_height}" style="'
         f'width: {display_w}px; height: {row_height}px; padding: 0; margin: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
@@ -549,6 +588,8 @@ def materialize_display_slices_strict(slices: List[SliceItem], display_w: int = 
 
     Outlook 发送路径依赖实际 PNG 尺寸与 HTML width/height 完全一致。若预渲染失败后
     返回原图，Word 引擎会重新缩放图片，容易重新出现 1px 缝隙。
+
+    V4.8.7：登记所有新建临时文件，调用方可用 cleanup_temp_slices 删除。
     """
     if not slices:
         return []
@@ -564,6 +605,11 @@ def materialize_display_slices_strict(slices: List[SliceItem], display_w: int = 
             "最终邮件切片预渲染失败，已阻止发送以避免 Outlook 中出现图片缝隙。"
             "请重新切图后再试。"
         )
+
+    # V4.8.7: 跟踪新建的临时文件，便于调用方清理
+    new_files = [p for p in prepared_paths if p not in original_paths]
+    _track_temp_files(new_files)
+
     return prepared
 
 
@@ -603,10 +649,12 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
             f'width="{display_w}" '
-            f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0; '
+            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; table-layout: fixed;">\n'
+            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
+            f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
+            f'table-layout: fixed;">\n'
             f'{rows}'
             f'</table>\n'
             f'</body>\n'
@@ -661,10 +709,12 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
             f'width="{display_w}" '
-            f'style="width: {display_w}px; border-collapse: collapse; border-spacing: 0; '
+            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; table-layout: fixed;">\n'
+            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
+            f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
+            f'table-layout: fixed;">\n'
             f'{rows}'
             f'</table>\n'
             f'</body>\n'

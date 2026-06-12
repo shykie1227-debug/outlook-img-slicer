@@ -4,9 +4,26 @@ PDF 解析模块
 优化说明：增加了 DPI 参数控制，平衡清晰度与处理速度。
 """
 from typing import List
-import fitz  # PyMuPDF
 from PIL import Image
 import io
+
+# 懒加载 fitz（PyMuPDF），不要求模块顶层就装好
+_fitz = None
+
+
+def _ensure_fitz():
+    global _fitz
+    if _fitz is not None:
+        return _fitz
+    try:
+        import fitz
+        _fitz = fitz
+        return _fitz
+    except ImportError:
+        raise ImportError(
+            "PDF 支持需要 PyMuPDF，请运行以下命令安装：\n"
+            "  pip install PyMuPDF\n"
+        )
 
 
 def pdf_to_images(pdf_path: str, dpi: int = 150) -> List[Image.Image]:
@@ -21,31 +38,32 @@ def pdf_to_images(pdf_path: str, dpi: int = 150) -> List[Image.Image]:
     Returns:
         PIL Image 对象列表
     """
+    fitz = _ensure_fitz()
     images = []
     doc = None
     try:
         doc = fitz.open(pdf_path)
         for page_num in range(len(doc)):
             page = doc.load_page(page_num)
-            
+
             # 计算缩放比例 (72 是 PDF 的标准 DPI)
             zoom = dpi / 72.0
             mat = fitz.Matrix(zoom, zoom)
-            
+
             # 渲染页面为像素图
             pix = page.get_pixmap(matrix=mat)
-            
+
             # 转换为 PNG 字节流
             img_data = pix.tobytes("png")
-            
+
             # 转换为 PIL Image
             img = Image.open(io.BytesIO(img_data))
             images.append(img)
-            
+
     except Exception as e:
         raise RuntimeError(f"PDF 解析失败: {e}")
     finally:
         if doc:
             doc.close()
-            
+
     return images

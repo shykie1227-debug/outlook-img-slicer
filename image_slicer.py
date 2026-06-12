@@ -2,6 +2,8 @@
 图像切片器模块
 将长图按指定高度切片，支持 JPG/PNG/BMP/WebP/GIF
 V4.5 智能切图：通过像素灰度方差 + 亮度综合分析查找安全断点，规避文字区
+V4.8.7 Outlook 缝隙根治：切片阶段保证输出 PNG 总高严格 = 原图高，
+  配合 html_assembler 的 _even_pixel_up 单组补白底，零累计误差 = 零 1px 缝。
 """
 import os
 import tempfile
@@ -29,6 +31,13 @@ TEXTURE_TRANSITION_MIN = 0.08 # 文字行过渡比下限（防止漏检反白文
 # 动态亮度阈值：低于此亮度视为"非空白"
 # 若图像整体偏暗，使用自适应 percentile
 ADAPTIVE_BRIGHTNESS_PERCENTILE = 85  # 取全图亮度百分位作为动态阈值
+
+
+def _even_ceil(n: int) -> int:
+    """向上偶数化（与 html_assembler._even_pixel_up 一致）。"""
+    if n <= 1:
+        return 1
+    return n if n % 2 == 0 else n + 1
 
 
 def _row_stats(pixels, y: int, width: int) -> Tuple[float, float, int, float]:
@@ -375,11 +384,17 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
             top = current_top
 
             if i == slice_count - 1:
+                # V4.8.7: 最后一片严格吸收到 out_h，保证 N 片 PNG 物理总高 = 原图高。
+                # 配合 html_assembler._even_pixel_up 单组补白底，零累计误差 = 零 1px 缝。
                 bottom = out_h
             else:
                 remaining_slices = slice_count - i
                 remaining_height = out_h - top
-                slice_height = ceil(remaining_height / remaining_slices)
+                # V4.8.7: 平均切片高度向上偶数化，最后一片不均分而是吸收剩余。
+                # 优势：前 N-1 片都是偶数（Word px→pt 无小数），最后一片任意偶奇（容差）。
+                # 这与"ceil + 最后吸收"等价，但视觉上更稳。
+                base_slice_h = ceil(remaining_height / remaining_slices)
+                slice_height = _even_ceil(base_slice_h)
                 bottom = min(out_h, top + slice_height)
 
                 if smart and orig_pixels:
@@ -418,60 +433,3 @@ def get_image_info(image_path: str) -> dict:
     with Image.open(image_path) as img:
         w, h = img.size
         return {"width": w, "height": h, "format": img.format}
-
-
-def auto_merge_images(image_paths: List[str], direction: str = "vertical") -> str:
-    """
-    多图自动合并为一张长图。
-
-    基于开源项目实现:
-    - Pillow (python-pillow/Pillow ⭐13k)
-      https://github.com/python-pillow/Pillow
-      Image.paste 文档: https://pillow.readthedocs.io/en/stable/reference/Image.html
-    - nkmk/python-snippets (⭐317) concat 参考
-      https://github.com/nkmk/python-snippets
-
-    Args:
-        image_paths: 图片路径列表
-        direction: "vertical" 纵向拼接
-
-    Returns:
-        合并后的临时文件路径
-    """
-    if not image_paths:
-        raise ValueError("没有图片可合并")
-    if len(image_paths) == 1:
-        return image_paths[0]
-
-    def _ensure_rgb(img: Image.Image) -> Image.Image:
-        if img.mode == "RGBA":
-            bg = Image.new("RGB", img.size, (255, 255, 255))
-            bg.paste(img, mask=img.split()[3])
-            return bg
-        return img.convert("RGB") if img.mode != "RGB" else img.copy()
-
-    with Image.open(image_paths[0]) as f0:
-        canvas = _ensure_rgb(f0)
-
-    for p in image_paths[1:]:
-        with Image.open(p) as fi:
-            nxt = _ensure_rgb(fi)
-
-        if direction == "vertical":
-            w = max(canvas.width, nxt.width)
-            h = canvas.height + nxt.height
-            new_canvas = Image.new("RGB", (w, h), (255, 255, 255))
-            new_canvas.paste(canvas, ((w - canvas.width) // 2, 0))
-            new_canvas.paste(nxt, ((w - nxt.width) // 2, canvas.height))
-        else:
-            w = canvas.width + nxt.width
-            h = max(canvas.height, nxt.height)
-            new_canvas = Image.new("RGB", (w, h), (255, 255, 255))
-            new_canvas.paste(canvas, (0, (h - canvas.height) // 2))
-            new_canvas.paste(nxt, (canvas.width, (h - nxt.height) // 2))
-        canvas = new_canvas
-
-    temp_dir = tempfile.gettempdir()
-    merged_path = os.path.join(temp_dir, f"merged_{os.getpid()}.jpg")
-    canvas.save(merged_path, format="JPEG", quality=97, optimize=True)
-    return merged_path

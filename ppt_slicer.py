@@ -5,7 +5,7 @@ PPT/PPTX 解析模块
 方案优先级：
   1. PowerPoint COM（Windows + Office）—— 最高保真，渲染所见即所得
   2. LibreOffice soffice（跨平台）—— 形状/文字均可，保持次高保真
-  3. python-pptx（纯 Python 备选）—— 仅提取嵌入图片，内容缺失，仅作最后兜底
+  （python-pptx 兜底已移除：只能提取嵌入图片，文字/形状丢失，Windows 上用户强制走 COM）
 """
 from typing import List
 from PIL import Image
@@ -17,15 +17,27 @@ import tempfile
 import sys
 from pathlib import Path
 
-from pptx import Presentation
+# python-pptx 仅在 soffice 和 COM 都不存在时作为极端兜底，懒加载
+_presentation = None
+
+
+def _ensure_pptx():
+    global _presentation
+    if _presentation is not None:
+        return _presentation
+    try:
+        from pptx import Presentation
+        _presentation = Presentation
+        return _presentation
+    except ImportError:
+        return None
 
 
 PPT_RENDERER_UNAVAILABLE_HINT = (
     "当前环境没有可用的高保真 PPT 渲染器，已停止导出以避免文字、形状或 SmartArt 被改写。\n\n"
     "可用处理方式：\n"
     "1. Windows：安装 Microsoft PowerPoint，程序将优先使用 PowerPoint COM 渲染。\n"
-    "2. macOS / Linux：安装 LibreOffice，程序将使用 soffice 转 PDF 后逐页渲染。\n\n"
-    "说明：python-pptx 只能提取嵌入图片，无法保真导出文字和形状，因此不再作为静默兜底方案。"
+    "2. macOS / Linux：安装 LibreOffice，程序将使用 soffice 转 PDF 后逐页渲染。"
 )
 
 
@@ -36,9 +48,9 @@ def _emu_to_px(emu: int, dpi: int = 150) -> int:
 # ────────────────────────────────────────────
 # 方案 1：PowerPoint COM 导出（最优解）
 # ────────────────────────────────────────────
-def _try_powerpoint_export(pptx_path: str, dpi: int = 150) -> List[Image.Image] | None:
+def _try_powerpoint_export(pptx_path: str, dpi: int = 150):
     """
-    通过 PowerPoint COM 将每页导出为 PNG/RTF，
+    通过 PowerPoint COM 将每页导出为 PNG，
     再用 Pillow 读取。保真度最高，100% 再现幻灯片所有内容。
     """
     if sys.platform != "win32":
@@ -57,32 +69,17 @@ def _try_powerpoint_export(pptx_path: str, dpi: int = 150) -> List[Image.Image] 
         ppt_app.Visible = 1  # 必须可见，否则部分主题渲染异常
 
         try:
-            # 打开文件（ReadOnly=msc: -1=msoTrue）
             presentation = ppt_app.Presentations.Open(
                 os.path.abspath(pptx_path),
                 ReadOnly=True,
                 WithWindow=False,
-                # msoTrue = -1, msoFalse = 0
             )
-
-            # 导出分辨率：PowerPoint 内部用 Points，1pt = 1/72 inch
-            # dpi=150 → scale = 150/72 ≈ 2.08
-            # dpi=200 → scale ≈ 2.78
-            scale = dpi / 72.0
-            pp_shape_size = 2      # ppShapeSizeDesiredScreen = 2
-            pp_clip = 2            # ppClipFrame = 2
 
             temp_png_dir = tempfile.mkdtemp(prefix="pptx_png_")
             for i, slide in enumerate(presentation.Slides):
                 slide_index = i + 1
                 out_path = os.path.join(temp_png_dir, f"slide_{slide_index:03d}.png")
-                # Export 返回 bool（非路径），文件已直接写到 out_path
-                slide.Export(
-                    out_path,
-                    FilterName="PNG",
-                    ScaleWidth=0,   # 0 = 保持原尺寸（按 ScaleHeight 等比）
-                    ScaleHeight=0,
-                )
+                slide.Export(out_path, FilterName="PNG", ScaleWidth=0, ScaleHeight=0)
 
             presentation.Close()
         finally:
@@ -97,13 +94,12 @@ def _try_powerpoint_export(pptx_path: str, dpi: int = 150) -> List[Image.Image] 
         images = []
         for f in png_files:
             img = Image.open(f).convert("RGB")
-            # soffice/powerpoint 默认 96dpi，统一到目标 dpi
             if dpi != 96:
                 new_w = int(img.width * dpi / 96)
                 new_h = int(img.height * dpi / 96)
                 img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             images.append(img)
-            f.unlink()  # 删除临时 PNG
+            f.unlink()
         shutil.rmtree(temp_png_dir, ignore_errors=True)
         return images
 
@@ -136,43 +132,26 @@ def _find_soffice() -> str | None:
 
 
 def _soffice_export(pptx_path: str, outdir: str, target_format: str) -> bool:
-    """
-    调用 soffice 导出整个文件为目标格式（pdf/png/jpg）。
-    返回 True 表示转换成功。
-    """
     soffice = _find_soffice()
     if soffice is None:
         return False
     try:
-        # 使用独立 user profile 避免多实例冲突；指定安全目录
         profile_dir = tempfile.mkdtemp(prefix="soffice_profile_")
         cmd = [
-            soffice,
-            "--headless",
-            "--nologo", "--nofirststartwizard", "--norestore",
+            soffice, "--headless", "--nologo", "--nofirststartwizard", "--norestore",
             f"-env:UserInstallation=file://{profile_dir}",
             "--convert-to", target_format,
             "--outdir", outdir,
             os.path.abspath(pptx_path),
         ]
-        result = subprocess.run(
-            cmd, capture_output=True, timeout=180, text=True
-        )
+        result = subprocess.run(cmd, capture_output=True, timeout=180, text=True)
         shutil.rmtree(profile_dir, ignore_errors=True)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return False
 
 
-def _try_soffice_render(pptx_path: str, dpi: int = 150) -> List[Image.Image] | None:
-    """
-    LibreOffice 渲染 PPT 全保真方案（文字 + 形状 + 嵌入图 + SmartArt）。
-
-    关键设计：先导出为 PDF（多页一次性输出，无命名错乱问题），
-    再通过 PyMuPDF/pdf2image 把每页转成 PNG。
-    这样保证文字、形状、SmartArt、艺术字都按幻灯片原本的版式渲染成位图，
-    后续可以走和普通图片一样的切片流程。
-    """
+def _try_soffice_render(pptx_path: str, dpi: int = 150):
     if _find_soffice() is None:
         return None
 
@@ -185,25 +164,21 @@ def _try_soffice_render(pptx_path: str, dpi: int = 150) -> List[Image.Image] | N
         if not pdf_files:
             return None
 
-        # 优先 PyMuPDF（纯 Python，无需 poppler），回退 pdf2image
         images: List[Image.Image] = []
         try:
-            import fitz  # PyMuPDF
+            import fitz
             for pdf_file in pdf_files:
                 doc = fitz.open(str(pdf_file))
                 try:
-                    # dpi=150 → zoom=150/72≈2.083
                     zoom = dpi / 72.0
                     mat = fitz.Matrix(zoom, zoom)
                     for page in doc:
                         pix = page.get_pixmap(matrix=mat, alpha=False)
-                        # 直接构造 PIL Image 避免中间文件 IO
                         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                         images.append(img)
                 finally:
                     doc.close()
         except ImportError:
-            # 回退到 pdf2image（需要系统安装 poppler）
             try:
                 from pdf2image import convert_from_path
                 for pdf_file in pdf_files:
@@ -221,72 +196,16 @@ def _try_soffice_render(pptx_path: str, dpi: int = 150) -> List[Image.Image] | N
 
 
 # ────────────────────────────────────────────
-# 方案 3：python-pptx 提取（仅作最后兜底）
-# ⚠️ 注意：此方案仅能提取「嵌入图片」，文字/形状/SmartArt 均会丢失。
-#         仅在既无 Office 又无 LibreOffice 时使用。
-# ────────────────────────────────────────────
-def _try_pptx_extract(pptx_path: str, dpi: int = 150) -> List[Image.Image]:
-    """
-    python-pptx 提取嵌入图片并拼回幻灯片画布。
-    ⚠️ 内容缺失警告：文字、形状、SmartArt、艺术字 均不会出现在输出中。
-    """
-    prs = Presentation(pptx_path)
-    px_w = _emu_to_px(prs.slide_width, dpi)
-    px_h = _emu_to_px(prs.slide_height, dpi)
-
-    images: List[Image.Image] = []
-    for slide in prs.slides:
-        canvas = Image.new("RGB", (px_w, px_h), (255, 255, 255))
-        for shape in slide.shapes:
-            if not hasattr(shape, "image"):
-                continue
-            try:
-                blob = shape.image.blob
-                img = Image.open(io.BytesIO(blob)).convert("RGB")
-                left = _emu_to_px(shape.left, dpi)
-                top = _emu_to_px(shape.top, dpi)
-                width = _emu_to_px(shape.width, dpi)
-                height = _emu_to_px(shape.height, dpi)
-                if width > 0 and height > 0:
-                    img = img.resize((width, height), Image.Resampling.LANCZOS)
-                    canvas.paste(img, (left, top))
-            except Exception:
-                pass
-        images.append(canvas)
-    return images
-
-
-# ────────────────────────────────────────────
 # 主入口
 # ────────────────────────────────────────────
 def pptx_to_images(pptx_path: str, dpi: int = 150) -> List[Image.Image]:
-    """
-    将 PPT/PPTX 每页渲染为 PIL Image（保真渲染：文字 + 形状 + 图）。
-    优先 PowerPoint COM（Windows + Office）→ LibreOffice soffice → python-pptx（兜底）。
-
-    注意：方案 1/2 都会把整页渲染成位图（包括文字、形状、SmartArt），
-    不会出现「图是图、字是字」的问题。
-    只有退到方案 3（python-pptx）时才会出现内容丢失，此时会发出明确警告。
-
-    Args:
-        pptx_path: PPT/PPTX 文件路径
-        dpi: 渲染分辨率，默认 150（数值越高越清晰，也越慢）
-
-    Returns:
-        PIL Image 对象列表，每项对应一页幻灯片
-    """
-    # 方案 1：PowerPoint COM（最优）
+    """将 PPT/PPTX 每页渲染为 PIL Image。"""
     images = _try_powerpoint_export(pptx_path, dpi)
     if images:
         return images
-
-    # Windows 上优先要求 PowerPoint COM，避免 soffice / python-pptx 造成文字改写。
     if sys.platform == "win32":
         raise RuntimeError(PPT_RENDERER_UNAVAILABLE_HINT)
-
-    # 非 Windows：允许 LibreOffice 作为高保真备选。
     images = _try_soffice_render(pptx_path, dpi)
     if images:
         return images
-
     raise RuntimeError(PPT_RENDERER_UNAVAILABLE_HINT)

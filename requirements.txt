@@ -6,4 +6,3 @@ psd-tools>=1.10
 numpy>=1.24          # psd-tools 间接依赖
 PyMuPDF>=1.23        # PDF / PPT 转换后 PDF 拆分
 PyInstaller>=6.0.0
-UPX>=3.96  # 可选：exe 压缩（Windows 下打包可选）

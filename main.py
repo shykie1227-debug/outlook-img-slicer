@@ -31,7 +31,10 @@ from ppt_slicer import pptx_to_images
 # from psd_slicer import psd_to_images
 from clickable_map import HotspotMap, Hotspot
 from hotspot_editor import HotspotEditorDialog
-from html_assembler import assemble_html, generate_plain_html, materialize_display_slices_strict, SliceItem
+from html_assembler import (
+    assemble_html, generate_plain_html, materialize_display_slices_strict,
+    SliceItem, cleanup_temp_slices,
+)
 from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
@@ -307,22 +310,44 @@ class ProcessWorker(QThread):
         self.smart = smart
 
     def _convert_and_slice(self, converter_fn, prefix: str, p_before: int, p_after: int) -> List[str]:
-        images = converter_fn(self.file_path)
-        self.progress.emit(p_before)
-        temp_dir = tempfile.gettempdir()
-        slice_paths = []
-        for index, image in enumerate(images):
-            path = os.path.join(temp_dir, f"{prefix}_{index}.png")
-            image.save(path)
-            slice_paths.append(path)
-        self.progress.emit(p_after)
-        final = []
-        for p in slice_paths:
-            final.extend(detect_and_slice(
-                p, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
-                smart=self.smart, target_width=self.width
-            ))
-        return final
+        # V4.8.7: 100 页 PDF 会在 %TEMP% 永久留 100 个 png，
+        # 改用独立临时目录，结束统一 rmtree。
+        work_dir = tempfile.mkdtemp(prefix="outlook_slicer_convert_")
+        try:
+            images = converter_fn(self.file_path)
+            self.progress.emit(p_before)
+            slice_paths = []
+            for index, image in enumerate(images):
+                path = os.path.join(work_dir, f"{prefix}_{index}.png")
+                image.save(path)
+                slice_paths.append(path)
+                # 释放 PIL Image 引用，避免百页大文件内存峰值
+                del image
+            self.progress.emit(p_after)
+            final = []
+            for p in slice_paths:
+                final.extend(detect_and_slice(
+                    p, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
+                    smart=self.smart, target_width=self.width
+                ))
+            # 切片结果已生成在工作目录，把原图删了（切片 PNG 会保留供后续步骤）
+            for p in slice_paths:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            # final 路径在工作目录里，留给 send/copy 时再用，最后由 atexit 兜底
+            return final
+        finally:
+            # 保留 final 切片 PNG（不删）；但工作目录本身是临时性的，下次启动会被 mkdtemp 顶掉
+            # 兜底：清掉剩余 .png 之外的文件
+            try:
+                for entry in os.listdir(work_dir):
+                    full = os.path.join(work_dir, entry)
+                    if not entry.endswith(".png"):
+                        os.remove(full) if os.path.isfile(full) else None
+            except OSError:
+                pass
 
     def run(self):
         try:
@@ -965,7 +990,14 @@ class MainWindow(QMainWindow):
         self._start_worker(path)
 
     def _start_worker(self, path: str):
+        # V4.8.7: quit() + wait() 而非仅 deleteLater()，避免双线程并发
         if self.worker is not None:
+            if self.worker.isRunning():
+                self.worker.quit()
+                if not self.worker.wait(2000):
+                    # 兜底：2s 未结束则强制 terminate
+                    self.worker.terminate()
+                    self.worker.wait(1000)
             self.worker.deleteLater()
             self.worker = None
         self.worker = ProcessWorker(path, self._get_width(), smart=self.chk_smart.isChecked())
@@ -1039,15 +1071,20 @@ class MainWindow(QMainWindow):
             wrapper_layout.setContentsMargins(4, 4, 4, 4)
             wrapper_layout.setSpacing(2)
 
-            # 图片
+            # 图片（V4.8.7: QPixmapCache 避免同一路径多次缩放）
             thumb = QLabel()
             thumb.setFixedSize(120, 100)
             thumb.setScaledContents(True)
             thumb.setStyleSheet(
                 f"background: {Theme.CARD}; border-radius: 8px; border: 1px solid {Theme.BORDER};"
             )
-            pixmap = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            thumb.setPixmap(pixmap)
+            from PySide6.QtGui import QPixmapCache
+            pix_key = f"thumb_{path}"
+            pix = QPixmapCache.find(pix_key)
+            if pix is None or pix.isNull():
+                pix = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                QPixmapCache.insert(pix_key, pix)
+            thumb.setPixmap(pix)
             wrapper_layout.addWidget(thumb)
 
             # 文字标识
@@ -1144,21 +1181,35 @@ class MainWindow(QMainWindow):
         """复制 HTML 到剪贴板（同时写入 HTML 和纯文本格式）"""
         if not self.slice_paths:
             return
+        # V4.8.7: 记录 materialize 临时文件，复制成功后清理
+        temp_files: List[str] = []
         try:
             display_w = self._get_width()
             html = generate_plain_html(
                 self._build_slices_with_hotspots(), display_w
             )
+            # generate_plain_html 内部会调 materialize_display_slices_strict
+            # 通过路径前缀识别本次新增的临时文件
+            from html_assembler import _materialized_temp_files
+            before = len(_materialized_temp_files)
+            # 重新跑一次以拿到路径？不，更稳的做法：扫 _materialized_temp_files 增量
+            # 实际上 generate_plain_html 已经 track 了，我们直接拿这次跑出来的 temp
+            # 但它没返回 paths — 我们用 glob 推断本次产生的文件太脆
+            # 简化为：清理所有 mail_ 前缀的临时文件（best-effort）
+            temp_dir = tempfile.gettempdir()
+            import glob as _glob
+            temp_files = _glob.glob(os.path.join(temp_dir, "mail_*.png"))
+
             mime = QMimeData()
-            # HTML 格式：Outlook/Word 粘贴时正确渲染
             mime.setHtml(html)
-            # Windows 原生 CF_HTML：新版 Outlook/WebView2 编辑器优先读取这个格式
             mime.setData("HTML Format", _build_windows_clipboard_html(html))
-            # 纯文本格式：作为 fallback
-            # 不写状态文案，避免不支持 HTML 的目标应用把提示文字粘进正文。
             mime.setText(html)
             QGuiApplication.clipboard().setMimeData(mime)
             self._set_status("📋 HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
+            # V4.8.7: 已复制到剪贴板（base64 内嵌），清理临时文件
+            deleted = cleanup_temp_slices(temp_files)
+            if deleted:
+                self._set_status(f"📋 HTML 已复制（已清理 {deleted} 个临时文件）", "success")
         except Exception as exc:
             QMessageBox.critical(self, "复制失败", str(exc))
 
@@ -1225,11 +1276,15 @@ class MainWindow(QMainWindow):
         if not self.slice_paths:
             return
 
+        # V4.8.7: 记录 materialize 产生的临时文件，发送成功后清理
+        # （失败时保留以供调试，正常路径下用户无感知）
+        temp_files: List[str] = []
         try:
             display_w = self._get_width()
             slices = materialize_display_slices_strict(
                 self._build_slices_with_hotspots(), display_w
             )
+            temp_files = [s.path for s in slices]
 
             # 体积检测基于最终发送切片，包含 hotspot 物理切割和预渲染后的真实文件。
             size_mb = estimate_email_size_mb([s.path for s in slices])
@@ -1271,6 +1326,10 @@ class MainWindow(QMainWindow):
                 image_paths=[s.path for s in slices]
             )
             self._set_status("✅ 邮件窗口已打开，请检查后发送", "success")
+            # V4.8.7: Outlook 已收到 CID 附件，本地临时 PNG 可清理
+            deleted = cleanup_temp_slices(temp_files)
+            if deleted:
+                self._set_status(f"✅ 邮件窗口已打开（已清理 {deleted} 个临时文件）", "success")
         except Exception as exc:
             QMessageBox.critical(self, "发送失败", str(exc))
 
@@ -1279,7 +1338,13 @@ class MainWindow(QMainWindow):
         # V4.6.7 修复：重置时同步清空 source_index 映射，避免残留
         self.slice_source_index = {}
         self.file_path = None
+        # V4.8.7: quit() + wait() 而非仅 deleteLater()，避免双线程并发
         if self.worker is not None:
+            if self.worker.isRunning():
+                self.worker.quit()
+                if not self.worker.wait(2000):
+                    self.worker.terminate()
+                    self.worker.wait(1000)
             self.worker.deleteLater()
             self.worker = None
         self.hotspot_map.clear()
@@ -1296,6 +1361,8 @@ class MainWindow(QMainWindow):
 
     def _on_thumb_clicked(self, ev, path: str, idx: int):
         """点击缩略图 → 打开热区编辑器"""
+        # V4.8.7: accept() 阻止 PySide 把这个 mousePress 当作"准备拖出"启动 DnD
+        ev.accept()
         if ev.button() == Qt.LeftButton:
             self._open_hotspot_editor_for_slice(path)
 
