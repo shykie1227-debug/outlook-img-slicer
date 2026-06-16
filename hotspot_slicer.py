@@ -9,10 +9,10 @@ Hotspot 物理切割模块（V4.6.6 V1）
     → 每条竖条要么是"普通切片"、要么是"链接切片"（包 <a href>）
 
 V1 限制（架构硬约束）：
-  ✗ 仅纵向切割（X 轴），不切横向（Y 轴）
-  ✗ 不支持重叠 hotspot（X 范围相交 → 拒绝）
-  ✗ 不支持嵌套 hotspot（X 范围包含 → 拒绝）
-  ✗ 不支持一个竖条挂多个 URL
+  ✓ V4.8.11 起支持 X/Y 网格切割（上下错开的按钮允许 X 范围重叠）
+  ✗ 不支持真实矩形区域重叠 hotspot（面积相交 → 拒绝）
+  ✗ 不支持嵌套 hotspot（一个按钮完全包含另一个按钮）
+  ✗ 不支持一个网格 cell 挂多个 URL
   ✗ 不支持 <map>/<area> 兜底
   ✗ 不支持透明覆盖层
 
@@ -20,7 +20,7 @@ V1 优势：
   ✓ Outlook Desktop 100% 可点击（仅用 <a><img></a>）
   ✓ 图上看不到任何标注（hotspot 边界不渲染）
   ✓ 多 hotspot 支持（任意位置）
-  ✓ 切割线模型可扩展到 V2（横向 + 网格）
+  ✓ V2 横向 + 纵向网格切割
 """
 from dataclasses import dataclass
 from typing import List, Tuple
@@ -37,10 +37,6 @@ HOTSPOT_EDGE_SNAP_TOLERANCE_PX = 3
 # ── 错误码 ──
 class HotspotCutError:
     OVERLAP = "Hotspot X 范围重叠，请勿在已有按钮的横向位置再加新按钮"
-    STACKED_X_OVERLAP = (
-        "当前版本的可点击按钮通过纵向切条实现，"
-        "即使两个按钮上下分开，只要 X 范围重叠也无法同时导出。"
-    )
     CONTAIN = "Hotspot X 范围被包含于其他 hotspot（嵌套）"
     OUT_OF_BOUNDS = "Hotspot 坐标超出图片范围"
     INVALID_RANGE = "Hotspot 宽度为 0 或负"
@@ -70,24 +66,20 @@ class CutStripe:
 
 def validate_hotspots_no_overlap(
     hotspots: List[Hotspot],
-    img_w: int
+    img_w: int,
+    img_h: int = None,
 ) -> Tuple[bool, str]:
     """
-    V1 重叠检测：检查所有 hotspot 的 X 范围是否相交 / 嵌套。
-    严格按"禁止重叠"原则，连相邻擦边都允许（边界相接不算重叠）。
-    V4.7.7: 错误提示具体到哪个 hotspot 与哪个冲突 + 坐标 + 调整建议。
+    V4.8.11 / V2 重叠检测：只禁止真实矩形区域重叠。
 
-    Args:
-        hotspots: 同一图片上的所有 hotspot
-        img_w: 原图宽度（用于越界检查）
-
-    Returns:
-        (True, "")  通过
-        (False, reason)  第一个出错的原因
+    旧 V1 只按 X 轴纵向切条，因此“上下不同位置但 X 范围重叠”也会报错。
+    这是用户连续多版本失败的根因。V2 改为 X/Y 网格切割后，上下错开的按钮
+    可以共享同一段 X 范围；只有矩形实际相交才需要阻止。
     """
     if not hotspots:
         return True, ""
-    # 1) 越界
+
+    # 1) 越界/无效范围
     for i, h in enumerate(hotspots):
         if h.x1 < 0 or h.x2 > img_w or h.x1 >= h.x2:
             return False, (
@@ -95,48 +87,39 @@ def validate_hotspots_no_overlap(
                 f"  当前：x1={h.x1}, x2={h.x2}（原图宽 {img_w}px）\n"
                 f"  要求：0 ≤ x1 < x2 ≤ {img_w}"
             )
-    # 2) 重叠 / 嵌套（按 x1 排序后比较相邻）
-    # V4.7.7: 在原列表中查找索引，以便告知用户实际编号
-    indexed = list(enumerate(hotspots))
-    sorted_idx_h = sorted(indexed, key=lambda pair: pair[1].x1)
-    for i in range(len(sorted_idx_h) - 1):
-        orig_a, a = sorted_idx_h[i]
-        orig_b, b = sorted_idx_h[i + 1]
-        # 边界相接不算重叠（a.x2 == b.x1 允许）。
-        # V4.8.10: 同一排/纵向重叠的相邻按钮若仅 1~3px 轻微压线，自动吸附边界，
-        # 不阻塞用户发送；真实大面积重叠仍报错。
-        if a.x2 > b.x1:
-            overlap_px = a.x2 - b.x1
-            y_overlap = not (a.y2 <= b.y1 or b.y2 <= a.y1)
-            if y_overlap and overlap_px <= HOTSPOT_EDGE_SNAP_TOLERANCE_PX:
-                a.x2 = b.x1
-                continue
-            if not y_overlap:
-                reason = (
-                    f"Hotspot #{orig_a + 1} 与 #{orig_b + 1} 在上下不同位置，"
-                    f"但横向范围仍然重叠。\n\n"
-                    f"  #{orig_a + 1}: x={a.x1}→{a.x2}, y={a.y1}→{a.y2}\n"
-                    f"  #{orig_b + 1}: x={b.x1}→{b.x2}, y={b.y1}→{b.y2}\n\n"
-                    f"{HotspotCutError.STACKED_X_OVERLAP}\n\n"
-                    f"当前可行方案：\n"
-                    f"  • 把两个按钮左右错开，避免 X 范围重叠\n"
-                    f"  • 或拆成两张图分别添加按钮"
-                )
-                return False, reason
-            # V4.7.7 优化提示：明确告诉用户哪两个 + 建议
-            reason = (
-                f"Hotspot #{orig_a + 1} 与 #{orig_b + 1} 横向重叠\n\n"
-                f"  #{orig_a + 1}: x1={a.x1}px → x2={a.x2}px（宽度 {a.x2 - a.x1}px）\n"
-                f"  #{orig_b + 1}: x1={b.x1}px → x2={b.x2}px（宽度 {b.x2 - b.x1}px）\n"
-                f"  冲突：#{orig_a + 1}.x2 ({a.x2}) > #{orig_b + 1}.x1 ({b.x1})\n\n"
-                f"建议：\n"
-                f"  • 把新按钮 #{orig_b + 1} 起点调整到 {a.x2}px 或更后\n"
-                f"  • 或把已有按钮 #{orig_a + 1} 调窄（end ≤ {b.x1}px）\n"
-                f"  • 或删除其中一个按钮"
+        if img_h is not None and (h.y1 < 0 or h.y2 > img_h or h.y1 >= h.y2):
+            return False, (
+                f"Hotspot #{i + 1} Y 坐标越界或高度为 0：\n"
+                f"  当前：y1={h.y1}, y2={h.y2}（原图高 {img_h}px）\n"
+                f"  要求：0 ≤ y1 < y2 ≤ {img_h}"
             )
-            return False, reason
-    return True, ""
 
+    # 2) 只检查真实矩形相交。上下错开但 X 范围重叠是合法的。
+    for i in range(len(hotspots)):
+        a = hotspots[i]
+        for j in range(i + 1, len(hotspots)):
+            b = hotspots[j]
+            x_overlap = min(a.x2, b.x2) - max(a.x1, b.x1)
+            y_overlap = min(a.y2, b.y2) - max(a.y1, b.y1)
+            if x_overlap <= 0 or y_overlap <= 0:
+                continue
+
+            # 一排按钮轻微压线：自动吸附水平边界。
+            if x_overlap <= HOTSPOT_EDGE_SNAP_TOLERANCE_PX:
+                if a.x1 <= b.x1:
+                    a.x2 = b.x1
+                else:
+                    b.x2 = a.x1
+                continue
+
+            return False, (
+                f"Hotspot #{i + 1} 与 #{j + 1} 实际区域重叠\n\n"
+                f"  #{i + 1}: x={a.x1}→{a.x2}, y={a.y1}→{a.y2}\n"
+                f"  #{j + 1}: x={b.x1}→{b.x2}, y={b.y1}→{b.y2}\n"
+                f"  重叠区域约：{x_overlap}px × {y_overlap}px\n\n"
+                f"建议：把其中一个按钮稍微移开，或缩小按钮区域。"
+            )
+    return True, ""
 
 def compute_cut_lines(img_w: int, hotspots: List[Hotspot]) -> List[int]:
     """
@@ -182,45 +165,52 @@ def slice_image_with_hotspots(
     source_index: float = 0.0
 ) -> List[CutStripe]:
     """
-    V1 主入口：按 hotspot 的 X 范围纵向切割原图。
+    V4.8.11 / V2 主入口：按 hotspot 的 X/Y 边界网格切割原图。
 
-    Args:
-        img: 原图（PIL Image, RGB）
-        hotspots: 用户标注的所有 hotspot
-        source_index: 原切片的 sort_key 基底（决定派生竖条的 sort_key）
-
-    Returns:
-        List[CutStripe]: 按 X 从左到右排列的竖条列表
+    V1 只按 X 纵向切条，会导致上下错开的按钮只要 X 范围重叠就报错。
+    V2 同时切 X/Y，任何不相交矩形按钮都能共存。
     """
     img_w, img_h = img.size
 
-    # 1) 校验
-    ok, reason = validate_hotspots_no_overlap(hotspots, img_w)
+    # 1) 校验：只禁止真实矩形重叠，不再禁止“上下不同但 X 重叠”
+    ok, reason = validate_hotspots_no_overlap(hotspots, img_w, img_h)
     if not ok:
         raise ValueError(reason)
 
-    # 2) 计算切割线
-    cut_lines = compute_cut_lines(img_w, hotspots)
+    # 2) 计算 X/Y 网格线
+    x_lines = {0, img_w}
+    y_lines = {0, img_h}
+    for h in hotspots:
+        x_lines.add(h.x1)
+        x_lines.add(h.x2)
+        y_lines.add(h.y1)
+        y_lines.add(h.y2)
+    x_lines = sorted(x_lines)
+    y_lines = sorted(y_lines)
 
-    # 3) 分配 hotspot 到对应竖条
-    assignments = build_stripe_assignments(cut_lines, hotspots)
-
-    # 4) 物理切割（V4.6.7 sort_key 架构：source_index + N*0.001）
+    # 3) 物理切割。sort_key 用 row-major 编码，让 HTML 按 Y 行分组、X 列拼接。
     stripes: List[CutStripe] = []
-    for i in range(len(cut_lines) - 1):
-        x1, x2 = cut_lines[i], cut_lines[i + 1]
-        stripe_img = img.crop((x1, 0, x2, img_h))
-        href, text = assignments.get(i, (None, ""))
-        stripes.append(CutStripe(
-            image=stripe_img,
-            x1=x1, x2=x2,
-            y1=0, y2=img_h,
-            href=href,
-            hotspot_text=text,
-            sort_key=source_index + (i + 1) * 0.001,
-        ))
+    for row in range(len(y_lines) - 1):
+        y1, y2 = y_lines[row], y_lines[row + 1]
+        for col in range(len(x_lines) - 1):
+            x1, x2 = x_lines[col], x_lines[col + 1]
+            if x1 == x2 or y1 == y2:
+                continue
+            cell_img = img.crop((x1, y1, x2, y2))
+            href, text = None, ""
+            for h in hotspots:
+                if x1 >= h.x1 and x2 <= h.x2 and y1 >= h.y1 and y2 <= h.y2:
+                    href, text = h.url, h.text
+                    break
+            stripes.append(CutStripe(
+                image=cell_img,
+                x1=x1, x2=x2,
+                y1=y1, y2=y2,
+                href=href,
+                hotspot_text=text,
+                sort_key=source_index + (row + 1) * 0.001 + (col + 1) * 0.000001,
+            ))
     return stripes
-
 
 def slice_paths_by_hotspots(
     image_paths: List[str],

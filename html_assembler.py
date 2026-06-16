@@ -361,22 +361,31 @@ def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[s
 
 def _group_by_source(slices: List[SliceItem]) -> List[List[SliceItem]]:
     """
-    按 sort_key 整数部分（即 source_index）分组，同一原图的所有段（含 hotspot 派生竖条）为一组。
-    组内按 sort_key 小数部分升序，组间按 source_index 升序。
+    按视觉行分组。
 
-    V4.6.9 重构：使用纯 sort_key 推导，不依赖 sort_key 外部存储。
+    V4.6.9: 旧版按 sort_key 整数部分（source_index）分组，同一原图所有 hotspot
+    竖条拼成一行。
+
+    V4.8.11: hotspot V2 改为 X/Y 网格切割，sort_key 编码为：
+      source_index + row*0.001 + col*0.000001
+    因此同一原图必须按 row 分成多行，每行内部再按 col 横向拼接。
+    否则所有网格 cell 会被错误拼成一个超宽横排。
     """
     sorted_slices = sorted(slices, key=lambda s: s.sort_key)
     groups: List[List[SliceItem]] = []
     current_group: List[SliceItem] = []
-    current_source: int = None
+    current_key = None
     for s in sorted_slices:
-        src_idx = int(s.sort_key)  # 1.001 → 1
-        if current_source is None or src_idx != current_source:
+        src_idx = int(s.sort_key)
+        frac = max(0.0, s.sort_key - src_idx)
+        # row 编码在千分位；普通原图 frac=0，作为 row=0。
+        row_idx = int(frac * 1000 + 1e-6)
+        key = (src_idx, row_idx)
+        if current_key is None or key != current_key:
             if current_group:
                 groups.append(current_group)
             current_group = [s]
-            current_source = src_idx
+            current_key = key
         else:
             current_group.append(s)
     if current_group:
