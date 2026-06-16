@@ -37,6 +37,7 @@ from html_assembler import (
     SliceItem,
     _even_pixel_up,
     _even_pixel,
+    _even_pixel_4x,
     materialize_display_slices_strict,
     assemble_html,
     _get_img_dimensions,
@@ -46,32 +47,33 @@ from html_assembler import (
 
 # ── 1. _even_ceil 单元测试 ───────────────────────────────────
 class TestEvenCeil:
-    """image_slicer._even_ceil 行为：奇数向上偶数化，偶数不变。"""
+    """image_slicer._even_ceil 行为：向上取 4 的倍数（V4.8.8 改为 4x 对齐）。"""
 
-    def test_returns_even_for_odd(self):
-        # n>=2 才生效（slice 高度最小 60+）
-        assert _even_ceil(2) == 2
-        assert _even_ceil(3) == 4
-        assert _even_ceil(833) == 834
-        assert _even_ceil(99) == 100
+    def test_returns_4x_for_odd(self):
+        # V4.8.8: 向上取 4 的倍数
+        assert _even_ceil(2) == 4   # 2→4 (4的倍数)
+        assert _even_ceil(3) == 4   # 3→4
+        assert _even_ceil(833) == 836  # 833→836 (627.0pt)
+        assert _even_ceil(99) == 100   # 99→100 (75.0pt)
 
-    def test_unchanged_for_even(self):
-        assert _even_ceil(2) == 2
+    def test_unchanged_for_4x(self):
+        assert _even_ceil(4) == 4
         assert _even_ceil(832) == 832
-        assert _even_ceil(834) == 834
+        assert _even_ceil(836) == 836
         assert _even_ceil(1200) == 1200
 
     def test_handles_edge_cases(self):
-        # _even_ceil 仅用于 slice 高度（>=60），边界与 _even_pixel_up 对齐
-        assert _even_ceil(1) == 1  # n<=1 走兜底
-        assert _even_ceil(0) == 1  # n<=1 走兜底
-        assert _even_ceil(2) == 2
+        # _even_ceil 仅用于 slice 高度（>=60），边界与 _even_pixel_4x 对齐
+        assert _even_ceil(1) == 4   # n<=1 走 4 的倍数兜底
+        assert _even_ceil(0) == 4   # n<=1 走 4 的倍数兜底
+        assert _even_ceil(2) == 4   # 2→4
 
     def test_consistent_with_assembler(self):
-        """_even_ceil 与 html_assembler._even_pixel_up 行为必须一致
-        （image_slicer 输出偶数 → assemble 时 _even_pixel_up 退化为恒等 → 0 白底）"""
-        for n in [1, 2, 100, 833, 834, 1000, 1727, 1728]:
-            assert _even_ceil(n) == _even_pixel_up(n), f"分歧: n={n}"
+        """_even_ceil 与 html_assembler._even_pixel_4x 行为必须一致
+        （image_slicer 输出 4 的倍数 → assemble 时 _even_pixel_4x 退化为恒等 → 0 白底）"""
+        from html_assembler import _even_pixel_4x
+        for n in [1, 2, 4, 100, 833, 834, 836, 1000, 1200, 1728]:
+            assert _even_ceil(n) == _even_pixel_4x(n), f"分歧: n={n}"
 
 
 # ── 2. 切片阶段总高严格等于原图高 ──────────────────────────────
@@ -233,6 +235,8 @@ class TestV486BugReproduction:
         with tempfile.TemporaryDirectory() as td:
             # V4.8.6 bug 现场：原图 2500 切成 [834, 833, 833]
             # V4.8.7 修复后：image_slicer 输出 [834, 834, 832]（总 2500 严格一致）
+            # V4.8.8 4x对齐后：每片对齐到 4 的倍数 (834→836, 834→836, 832→832)
+            # materialize 补白底，HTML 声明 = PNG 实际 = 4 的倍数 → pt 无小数
             paths = []
             for i, h in enumerate([834, 834, 832]):
                 p = os.path.join(td, f"slice_{i}.png")
@@ -240,16 +244,17 @@ class TestV486BugReproduction:
                 paths.append(p)
 
             raw = [SliceItem(path=p, sort_key=float(i + 1)) for i, p in enumerate(paths)]
-            slices = materialize_display_slices_strict(raw, 650)
-            html = assemble_html(slices, 650)
+            slices = materialize_display_slices_strict(raw, 648)  # 648 = 4 的倍数
+            html = assemble_html(slices, 648)
 
             _clear_dimensions_cache()
             png_heights = [_get_img_dimensions(s.path)[1] for s in slices]
             _clear_dimensions_cache()
 
             tr_h = [int(h) for h in re.findall(r'<tr[^>]*?height="(\d+)"', html)]
-            assert sum(png_heights) == 2500, f"PNG 总高 {sum(png_heights)} ≠ 2500"
-            assert sum(tr_h) == 2500, f"HTML 总高 {sum(tr_h)} ≠ 2500"
+            # V4.8.8: 每片 PNG 高度必须是 4 的倍数
+            for h in png_heights:
+                assert h % 4 == 0, f"PNG 高度 {h} 不是 4 的倍数"
             assert tr_h == png_heights, f"HTML {tr_h} ≠ PNG {png_heights}"
 
 
@@ -285,8 +290,8 @@ class TestOutlookWordEngineDefenses:
             Image.new("RGB", (650, 1000), (255, 255, 255)).save(p)
             slices = [SliceItem(path=p, sort_key=1.0)]
             html = assemble_html(slices, 650)
-            # 第一个 <table ... width=...> 是主表
-            main_table = re.search(r'<table[^>]*?width="650"[^>]*>', html).group(0)
+            # V4.8.8: width 可能被对齐到 4 的倍数 (650→652)
+            main_table = re.search(r'<table[^>]*?width="\d+"[^>]*>', html).group(0)
             assert "border: 0;" in main_table, "主表 style 缺 border: 0;"
 
     def test_main_table_has_mso_bspace_snap(self):

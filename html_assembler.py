@@ -143,12 +143,29 @@ def _even_pixel(n: int) -> int:
     return n - 1
 
 
+def _even_pixel_4x(n: int) -> int:
+    """
+    V4.8.8: 向上取 4 的倍数。
+    Outlook Word 引擎 px→pt 转换: 1px = 0.75pt。
+    只有 4 的倍数 px 才能产生整数 pt (4px = 3pt)。
+    非 4 倍数的 px 产生 0.5pt 或 0.25pt 小数，
+    Word 四舍五入后出现 1px 白线 — 这是 V4.8.2~V4.8.7 缝隙的真正根因。
+    833px → 836px (627.0pt 整数) 而非 834px (625.5pt 半点小数)。
+    """
+    if n <= 1:
+        return max(4, ((n + 3) // 4) * 4)
+    remainder = n % 4
+    if remainder == 0:
+        return n
+    return n + (4 - remainder)
+
+
 def _even_pixel_up(n: int) -> int:
     """
     V4.8.5: 向上偶数化（向下兼容到下一个偶数）。
-    用于单组场景：实际 PNG 是 833px → 返回 834px。
-    materialize 会用"白底画布 + 顶部 paste"补 1px 白底，
-    HTML 声明 834、实际 PNG 834，两者一致 → Word 1:1 渲染 → 0 缝。
+    用于多组场景（统一 row_height 仍走此路径）。
+    ⚠️ V4.8.8: 单组场景已改用 _even_pixel_4x，因为 2 倍数但非 4 倍数
+    的 px 值（如 834）在 Outlook px→pt 转换中产生 0.5pt 小数 → 白线。
     """
     if n <= 1:
         return max(1, n)
@@ -160,13 +177,14 @@ def _even_pixel_up(n: int) -> int:
 def _normalize_display_width(display_w: int) -> int:
     """
     统一邮件显示宽度。
-    Outlook/Word 会把 px 转 pt，奇数 px 容易产生小数 pt，从而出现 1px 缝隙。
+    V4.8.8: 强制 4 的倍数。Outlook px→pt 转换 (1px=0.75pt)，
+    只有 4 的倍数产生整数 pt，消除 1px 白线。
     """
     try:
         value = int(display_w)
     except (TypeError, ValueError):
-        value = 650
-    return _even_pixel(max(1, value))
+        value = 648  # 默认 648 = 4 的倍数 = 486pt
+    return _even_pixel_4x(max(1, value))
 
 
 def _distribute_units(raw: List[float], total_units: int) -> List[int]:
@@ -221,20 +239,19 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
 
     display_w = _normalize_display_width(display_w)
     if forced_display_w is not None:
-        seg_display_w = _even_pixel(max(1, int(forced_display_w)))
+        seg_display_w = _even_pixel_4x(max(1, int(forced_display_w)))
     elif original_width > 0 and actual_w > 0:
         ratio = actual_w / original_width
-        seg_display_w = _even_pixel(round(display_w * ratio))
+        seg_display_w = _even_pixel_4x(round(display_w * ratio))
     else:
-        seg_display_w = _even_pixel(display_w)
-    # V4.8.5: forced_display_h 已经由 _compute_group_height 算好（单组=actual_h，
-    # 多组=统一 row_height 偶数化），这里直接用，不再二次偶数化。
-    # 之前对 forced_display_h 再 _even_pixel 会让单组场景 833→832 漂移。
+        seg_display_w = _even_pixel_4x(display_w)
+    # V4.8.8: forced_display_h 已由 _compute_group_height 算好（4 的倍数），
+    # 直接用，不再二次处理。
     if forced_display_h is not None:
         seg_display_h = max(1, int(forced_display_h))
     else:
         raw_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
-        seg_display_h = _even_pixel(raw_h)
+        seg_display_h = _even_pixel_4x(raw_h)
 
     if not alt:
         alt = Path(slice_path).name
@@ -364,9 +381,14 @@ def _allocate_group_widths(group: List[SliceItem], display_w: int) -> Dict[str, 
     else:
         weights = [max(1, w) / total_actual_w for _, w in dims]
 
-    # 优先按 2px 单位分配，保证每段、总宽都是偶数，避免 Outlook px->pt 小数。
-    # 如果段数极端多到 2px 都分不下，再退回 1px 单位，至少保证总宽精确。
-    if target_w // 2 >= len(group):
+    # V4.8.8: 优先按 4px 单位分配，保证每段、总宽都是 4 的倍数，
+    # 避免 Outlook px→pt 小数白线。
+    # 如果段数极端多到 4px 都分不下，退回 2px 单位，最后退回 1px。
+    if target_w // 4 >= len(group):
+        total_units = target_w // 4
+        raw_units = [weight * total_units for weight in weights]
+        even_widths = [u * 4 for u in _distribute_units(raw_units, total_units)]
+    elif target_w // 2 >= len(group):
         total_units = target_w // 2
         raw_units = [weight * total_units for weight in weights]
         even_widths = [u * 2 for u in _distribute_units(raw_units, total_units)]
@@ -387,26 +409,22 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
 
     V4.7.7: 输出强制偶数（Outlook px→pt 转换无小数 → 消除 1px 白线）。
     V4.8.5: 单组（len(group)==1）改为向上偶数化 actual_h。
-      关键约束：返回的 row_height 必须等于 materialize 输出的 PNG 物理高度，
-      这样 Outlook/Word 引擎可以 1:1 渲染，不会触发重新缩放 → 0 1px 缝。
-      之前用 row_height = _even_pixel(row_h * display_w / total_w)
-      对 actual_h=833, total_w=display_w=650 这种 case 会算出 832，
-      materialize 内部 LANCZOS resize 会丢 1px 且产生插值伪影。
-      修复后：单组走 _even_pixel_up(actual_h) = 向上偶数化（833→834），
-      materialize 用"顶部 paste + 底部白边"实现，视觉无损。
-      多组仍走统一 row_height 计算（多段必须共享 row_h）。
+    V4.8.8: 单组改用 _even_pixel_4x（4 的倍数），因为 2 的倍数中有一半
+      不是 4 的倍数，产生 0.5pt 小数 → Word 四舍五入 → 白线。
+      例：833px → _even_pixel_up=834 (625.5pt ❌) → _even_pixel_4x=836 (627.0pt ✅)
+      多组仍走统一 row_height 计算（多段必须共享 row_h），并对齐 4 的倍数。
     """
     display_w = _normalize_display_width(display_w)
 
-    # V4.8.5: 单组走"向上偶数化"路径
+    # V4.8.8: 单组走"4 的倍数"路径
     if len(group) == 1:
         try:
             _, actual_h = _get_img_dimensions(group[0].path)
         except Exception:
-            return _even_pixel(display_w)
+            return _even_pixel_4x(display_w)
         if actual_h > 0:
-            return _even_pixel_up(actual_h)
-        return _even_pixel(display_w)
+            return _even_pixel_4x(actual_h)
+        return _even_pixel_4x(display_w)
 
     total_w = 0
     row_h = 0
@@ -419,8 +437,9 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
             total_w += actual_w
             row_h = max(row_h, actual_h)
     if total_w <= 0 or row_h <= 0:
-        return _even_pixel(display_w)
-    return _even_pixel(max(1, round(row_h * display_w / total_w)))
+        return _even_pixel_4x(display_w)
+    # V4.8.8: 多组也改用 4 的倍数
+    return _even_pixel_4x(max(1, round(row_h * display_w / total_w)))
 
 
 def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
@@ -526,7 +545,7 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
     batch = uuid.uuid4().hex[:8]
     counter = 0
 
-    # V4.7.7: 偶数化 display_w，保证 resize 后源图尺寸偶数
+    # V4.8.8: 偶数化 display_w 对齐 4 的倍数，保证 resize 后尺寸 px→pt 无小数
     display_w_even = _normalize_display_width(display_w)
 
     for group in groups:
@@ -562,8 +581,8 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             crop_x = 0
             for s, _ in source_parts:
                 counter += 1
-                # V4.7.7: target_w 强制偶数（与 HTML width 声明对齐）
-                target_w = _even_pixel(int(allocated_widths.get(s.path, display_w_even)))
+                # V4.8.8: target_w 对齐 4 的倍数（与 HTML width 声明对齐）
+                target_w = _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
                 target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
                 part = source_row.crop((crop_x, 0, crop_x + target_w, row_height))
                 part.save(target_path, "PNG")
