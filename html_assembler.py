@@ -570,13 +570,20 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                 source_row.paste(part, (x, 0))
                 x += part.width
 
-            # V4.8.5: 当 source_row 高度 != row_height 时，用"白底画布 + 顶部 paste"
-            # 替代 LANCZOS resize，避免给图片引入 1px 插值差和模糊伪影。
-            # 多数长图本来就是白底，底部补 1px 白边视觉无损。
+            # V4.8.9: 当 source_row 高度需要补齐到 4px 倍数时，不能补白边。
+            # 用户目标是 Outlook 里看起来像一整张长图；白底 padding 会在非白背景/渐变/图片内容
+            # 的切片底部形成肉眼可见割裂。正确做法是延展最后一行像素，既不缩放原图，
+            # 又让补齐区域视觉上延续原图边缘。
             if source_row.size[1] != row_height:
-                padded = Image.new("RGB", (source_row.size[0], row_height), (255, 255, 255))
-                padded.paste(source_row, (0, 0))
-                source_row = padded
+                if row_height < source_row.size[1]:
+                    source_row = source_row.crop((0, 0, source_row.size[0], row_height))
+                else:
+                    padded = Image.new("RGB", (source_row.size[0], row_height))
+                    padded.paste(source_row, (0, 0))
+                    edge = source_row.crop((0, source_row.size[1] - 1, source_row.size[0], source_row.size[1]))
+                    for y in range(source_row.size[1], row_height):
+                        padded.paste(edge, (0, y))
+                    source_row = padded
 
             crop_x = 0
             for s, _ in source_parts:

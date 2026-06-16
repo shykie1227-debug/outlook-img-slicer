@@ -281,19 +281,18 @@ def test_extremely_thin_single_slice_still_works(tmp_path):
 # ── 7. 视觉无损验证：补白边不能改原图区域像素 ─────────────────────
 
 
-def test_white_pad_preserves_original_pixels(tmp_path):
-    """V4.8.6→V4.8.8：补白边不改原图区域像素。V4.8.8 改为 4x 对齐。"""
-    # 原图：上半部分红色，下半部分蓝色
+def test_edge_extend_padding_preserves_visual_continuity(tmp_path):
+    """V4.8.9：补齐到 4px 倍数时不能补白边，必须延展最后一行像素。
+
+    用户真实目标：Outlook 邮件里看起来是一整张长图，不能在每片底部看到白色割裂线。
+    """
     from PIL import Image
     p = tmp_path / "src.png"
     src = Image.new("RGB", (648, 833))  # 648 = 4 的倍数
     for y in range(833):
-        if y < 416:
-            for x in range(648):
-                src.putpixel((x, y), (255, 0, 0))  # 红色
-        else:
-            for x in range(648):
-                src.putpixel((x, y), (0, 0, 255))  # 蓝色
+        color = (255, 0, 0) if y < 416 else (0, 0, 255)
+        for x in range(648):
+            src.putpixel((x, y), color)
     src.save(p)
     slices = [SliceItem(path=str(p), sort_key=1.0, original_width=648)]
 
@@ -301,16 +300,15 @@ def test_white_pad_preserves_original_pixels(tmp_path):
     out_path = prepared[0].path
     with Image.open(out_path) as out:
         w, h = out.size
-        # V4.8.8: 833 → 836 (4 的倍数), 648 → 648 (已是 4 的倍数)
         assert h == 836, f"Expected 836, got {h}"
         assert w == 648, f"Expected 648, got {w}"
         assert out.getpixel((100, 0)) == (255, 0, 0)  # 红色未改
         assert out.getpixel((100, 415)) == (255, 0, 0)  # 红色未改
         assert out.getpixel((100, 416)) == (0, 0, 255)  # 蓝色未改
         assert out.getpixel((100, 832)) == (0, 0, 255)  # 蓝色未改
-        # 底部 y=833~835 是补的白边
-        assert out.getpixel((100, 833)) == (255, 255, 255)
-        assert out.getpixel((100, 835)) == (255, 255, 255)
+        # 底部 y=833~835 必须复制/延展最后一行蓝色，不能出现白边
+        assert out.getpixel((100, 833)) == (0, 0, 255)
+        assert out.getpixel((100, 835)) == (0, 0, 255)
 
 
 if __name__ == "__main__":
