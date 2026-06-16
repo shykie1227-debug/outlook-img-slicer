@@ -29,6 +29,11 @@ from PIL import Image
 from clickable_map import Hotspot, HotspotMap
 
 
+# V4.8.10: 用户手动拖选一排按钮时，1~3px 压线属于正常操作误差。
+# 自动吸附边界，避免“多个按钮一排”误报横向重叠。
+HOTSPOT_EDGE_SNAP_TOLERANCE_PX = 3
+
+
 # ── 错误码 ──
 class HotspotCutError:
     OVERLAP = "Hotspot X 范围重叠，请勿在已有按钮的横向位置再加新按钮"
@@ -97,9 +102,15 @@ def validate_hotspots_no_overlap(
     for i in range(len(sorted_idx_h) - 1):
         orig_a, a = sorted_idx_h[i]
         orig_b, b = sorted_idx_h[i + 1]
-        # 边界相接不算重叠（a.x2 == b.x1 允许）
+        # 边界相接不算重叠（a.x2 == b.x1 允许）。
+        # V4.8.10: 同一排/纵向重叠的相邻按钮若仅 1~3px 轻微压线，自动吸附边界，
+        # 不阻塞用户发送；真实大面积重叠仍报错。
         if a.x2 > b.x1:
+            overlap_px = a.x2 - b.x1
             y_overlap = not (a.y2 <= b.y1 or b.y2 <= a.y1)
+            if y_overlap and overlap_px <= HOTSPOT_EDGE_SNAP_TOLERANCE_PX:
+                a.x2 = b.x1
+                continue
             if not y_overlap:
                 reason = (
                     f"Hotspot #{orig_a + 1} 与 #{orig_b + 1} 在上下不同位置，"

@@ -44,7 +44,7 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.8.9"
+VERSION = "4.8.10"
 VERSION_BY = "xiaoming"
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20

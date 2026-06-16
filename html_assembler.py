@@ -160,6 +160,42 @@ def _even_pixel_4x(n: int) -> int:
     return n + (4 - remainder)
 
 
+def _edge_extend_image(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """
+    V4.8.10: 把图片补齐/裁剪到目标尺寸，补齐区域使用边缘像素延展。
+
+    Outlook 发送路径要求 PNG 物理尺寸与 HTML 声明尺寸完全一致。
+    旧做法在高度补齐时补白；热点多列路径在宽度向 4px 倍数取整后还会从
+    源图越界 crop，Pillow 默认补黑，导致按钮切条后出现竖向黑/白空隙。
+    这里统一用边缘像素延展：不缩放原图、不引入白边/黑边，视觉上延续原图。
+    """
+    target_w = max(1, int(target_w))
+    target_h = max(1, int(target_h))
+    src = img.convert("RGB") if img.mode != "RGB" else img
+
+    crop_w = min(src.size[0], target_w)
+    crop_h = min(src.size[1], target_h)
+    base = src.crop((0, 0, crop_w, crop_h))
+
+    if base.size == (target_w, target_h):
+        return base.copy()
+
+    out = Image.new("RGB", (target_w, target_h))
+    out.paste(base, (0, 0))
+
+    if crop_w < target_w:
+        right_edge = base.crop((crop_w - 1, 0, crop_w, crop_h))
+        for x in range(crop_w, target_w):
+            out.paste(right_edge, (x, 0))
+
+    if crop_h < target_h:
+        bottom_edge = out.crop((0, crop_h - 1, target_w, crop_h))
+        for y in range(crop_h, target_h):
+            out.paste(bottom_edge, (0, y))
+
+    return out
+
+
 def _even_pixel_up(n: int) -> int:
     """
     V4.8.5: 向上偶数化（向下兼容到下一个偶数）。
@@ -564,26 +600,21 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             if total_w <= 0 or max_h <= 0:
                 raise ValueError("invalid image size")
 
-            source_row = Image.new("RGB", (total_w, max_h), (255, 255, 255))
+            source_row = Image.new("RGB", (total_w, max_h))
             x = 0
             for _, part in source_parts:
                 source_row.paste(part, (x, 0))
                 x += part.width
 
-            # V4.8.9: 当 source_row 高度需要补齐到 4px 倍数时，不能补白边。
+            # V4.8.10: 当 source_row 宽/高需要补齐到 4px 倍数时，不能补白边/黑边。
             # 用户目标是 Outlook 里看起来像一整张长图；白底 padding 会在非白背景/渐变/图片内容
-            # 的切片底部形成肉眼可见割裂。正确做法是延展最后一行像素，既不缩放原图，
-            # 又让补齐区域视觉上延续原图边缘。
-            if source_row.size[1] != row_height:
-                if row_height < source_row.size[1]:
-                    source_row = source_row.crop((0, 0, source_row.size[0], row_height))
-                else:
-                    padded = Image.new("RGB", (source_row.size[0], row_height))
-                    padded.paste(source_row, (0, 0))
-                    edge = source_row.crop((0, source_row.size[1] - 1, source_row.size[0], source_row.size[1]))
-                    for y in range(source_row.size[1], row_height):
-                        padded.paste(edge, (0, y))
-                    source_row = padded
+            # 的切片底部形成肉眼可见割裂；热点多列路径宽度 650→652 时，越界 crop 会补黑。
+            # 正确做法是延展边缘像素，既不缩放原图，又让补齐区域视觉上延续原图边缘。
+            target_total_w = sum(
+                _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
+                for s, _ in source_parts
+            )
+            source_row = _edge_extend_image(source_row, target_total_w, row_height)
 
             crop_x = 0
             for s, _ in source_parts:
