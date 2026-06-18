@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(4, 8, 6, 20260610),
-    prodvers=(4, 8, 6, 20260610),
+    filevers=(4, 9, 1, 20260618),
+    prodvers=(4, 9, 1, 20260618),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,11 +17,11 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'Outlook长图助手'),
             StringStruct(u'FileDescription', u'Outlook 长图无损插入工具 V4'),
-            StringStruct(u'FileVersion', u'4.8.6.20260610'),
+            StringStruct(u'FileVersion', u'4.9.1.20260618'),
             StringStruct(u'InternalName', u'Outlook长图插入工具'),
             StringStruct(u'OriginalFilename', u'Outlook长图插入工具.exe'),
             StringStruct(u'ProductName', u'Outlook 长图无损插入工具'),
-            StringStruct(u'ProductVersion', u'4.8.6.20260610 xiaoming'),
+            StringStruct(u'ProductVersion', u'4.9.1.20260618 xiaoming'),
           ]
         )
       ]

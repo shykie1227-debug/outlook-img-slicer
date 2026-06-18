@@ -44,8 +44,11 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.9.0"
+VERSION = "4.9.1"
 VERSION_BY = "xiaoming"
+# V4.9.1: Outlook 实测仍有切图拼接缝时，先屏蔽热点/可点击按钮功能。
+# 该功能会触发额外物理切割与链接包裹，是当前拼接缝排查的主要变量。
+HOTSPOT_FEATURE_ENABLED = False
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -525,9 +528,11 @@ class MainWindow(QMainWindow):
         self.btn_hotspot.setEnabled(False)
         self.btn_hotspot.setStyleSheet(_btn_ghost())
         self.btn_hotspot.setFixedSize(_btn_size("🎯 添加可点击按钮", 12, extra_w=20, height=34))
-        self.btn_hotspot.setToolTip("为切片添加可点击热区，在邮件中点圈位置跳转 URL")
+        self.btn_hotspot.setToolTip("该功能已临时隐藏：优先修复 Outlook 切图拼接缝问题")
         self.btn_hotspot.clicked.connect(self._open_hotspot_editor)
-        toolbar2.addWidget(self.btn_hotspot)
+        self.btn_hotspot.setVisible(HOTSPOT_FEATURE_ENABLED)
+        if HOTSPOT_FEATURE_ENABLED:
+            toolbar2.addWidget(self.btn_hotspot)
 
         toolbar2.addStretch()
         root.addLayout(toolbar2)
@@ -1023,7 +1028,7 @@ class MainWindow(QMainWindow):
         self.btn_send.setEnabled(bool(paths))
         self.btn_save.setEnabled(bool(paths))
         self.btn_copy_html.setEnabled(bool(paths))
-        self.btn_hotspot.setEnabled(bool(paths))
+        self.btn_hotspot.setEnabled(bool(paths) and HOTSPOT_FEATURE_ENABLED)
 
         # 体积检测
         size_mb = estimate_email_size_mb(paths) if paths else 0
@@ -1058,15 +1063,20 @@ class MainWindow(QMainWindow):
             # 每个缩略图用 QWidget 包裹：上面图，下面文字标识
             wrapper = QWidget()
             wrapper.setFixedSize(128, 130)
-            wrapper.setCursor(Qt.PointingHandCursor)
-            wrapper.setToolTip(
-                f"切片 {i + 1}: {Path(path).name}\n"
-                f"💡 点击可添加/编辑可点击按钮（热区）"
-            )
-            wrapper.setStyleSheet(
-                "QWidget { background: transparent; }"
-                "QWidget:hover { background: #EFF6FF; border-radius: 8px; }"
-            )
+            if HOTSPOT_FEATURE_ENABLED:
+                wrapper.setCursor(Qt.PointingHandCursor)
+                wrapper.setToolTip(
+                    f"切片 {i + 1}: {Path(path).name}\n"
+                    f"💡 点击可添加/编辑可点击按钮（热区）"
+                )
+                wrapper.setStyleSheet(
+                    "QWidget { background: transparent; }"
+                    "QWidget:hover { background: #EFF6FF; border-radius: 8px; }"
+                )
+            else:
+                wrapper.setCursor(Qt.ArrowCursor)
+                wrapper.setToolTip(f"切片 {i + 1}: {Path(path).name}")
+                wrapper.setStyleSheet("QWidget { background: transparent; }")
             wrapper_layout = QVBoxLayout(wrapper)
             wrapper_layout.setContentsMargins(4, 4, 4, 4)
             wrapper_layout.setSpacing(2)
@@ -1088,18 +1098,23 @@ class MainWindow(QMainWindow):
             wrapper_layout.addWidget(thumb)
 
             # 文字标识
-            label = QLabel(f"#{i+1} ✏️ 编辑热区")
+            label = QLabel(f"#{i+1}" if not HOTSPOT_FEATURE_ENABLED else f"#{i+1} ✏️ 编辑热区")
             label.setFont(QFont("Microsoft YaHei", 9))
             label.setAlignment(Qt.AlignCenter)
-            label.setStyleSheet("color: #0078D4; background: transparent; padding: 2px;")
+            label.setStyleSheet(
+                "color: #6B7280; background: transparent; padding: 2px;"
+                if not HOTSPOT_FEATURE_ENABLED
+                else "color: #0078D4; background: transparent; padding: 2px;"
+            )
             wrapper_layout.addWidget(label)
 
-            # 点击事件
-            wrapper.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
+            # 点击事件：V4.9.1 临时屏蔽可点击按钮/热区功能
+            if HOTSPOT_FEATURE_ENABLED:
+                wrapper.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
             self.thumb_grid.addWidget(wrapper, row, col)
         self.preview_area.show()
         # V4.6.4：状态条提示缩略图可点
-        if paths:
+        if paths and HOTSPOT_FEATURE_ENABLED:
             self._set_status(
                 f"🖼️ 已生成 {len(paths)} 张切片 — 点击下方任一缩略图可添加可点击热区",
                 "info",
@@ -1132,6 +1147,18 @@ class MainWindow(QMainWindow):
         """
         if not self.slice_paths:
             return []
+        if not HOTSPOT_FEATURE_ENABLED:
+            # V4.9.1: 临时屏蔽可点击按钮功能后，发送/复制必须完全忽略历史 hotspot_map。
+            # 直接走原始切片，减少 Outlook 拼接缝排查变量。
+            return [
+                SliceItem(
+                    path=p,
+                    href=None,
+                    alt_text="",
+                    sort_key=self.slice_source_index.get(os.path.basename(p), float(i + 1)),
+                )
+                for i, p in enumerate(self.slice_paths)
+            ]
         from pathlib import Path
         # hotspot_map 按切片名分组
         hotspots_by_slice: Dict[str, List[Hotspot]] = {}
@@ -1363,11 +1390,16 @@ class MainWindow(QMainWindow):
         """点击缩略图 → 打开热区编辑器"""
         # V4.8.7: accept() 阻止 PySide 把这个 mousePress 当作"准备拖出"启动 DnD
         ev.accept()
+        if not HOTSPOT_FEATURE_ENABLED:
+            return
         if ev.button() == Qt.LeftButton:
             self._open_hotspot_editor_for_slice(path)
 
     def _open_hotspot_editor(self):
         """「添加可点击按钮」按钮 → 弹出切片选择 + 打开编辑器"""
+        if not HOTSPOT_FEATURE_ENABLED:
+            self._set_status("🎯 可点击按钮功能已临时隐藏：优先修复 Outlook 切图拼接缝问题", "warning")
+            return
         if not self.slice_paths:
             return
         if len(self.slice_paths) == 1:
