@@ -1,30 +1,33 @@
 """
-HTML 组装器模块（V4.8.5 缝隙修复 + V4.7.8 优化版）
+HTML 组装器模块（V4.9.0 缝隙根除 + 预渲染重构）
 
-V4.8.5 缝隙修复（当前版本）：
+V4.9.0 变更（当前版本）：
+  - 缝隙根因修：Outlook Word 引擎在多个 <tr> 之间始终插入约 1px 间距。
+    改为单 <tr> + 单 <td> 布局，所有图片在同一个 <td> 内通过 <div> 垂直堆叠，
+    根除多行之间的 1px 间距。
+  - 预渲染重构：用整体缩放替代 _edge_extend_image 边缘扩展。将拼合行缩放到目标
+    总尺寸后再切回每段，避免因越界 crop 补黑/补白导致的按钮边界视觉错乱。
+  - 移除 _edge_extend_image（V4.8.10 引入）—— 边缘扩展会把相邻竖条的内容混入
+    本段，引起按钮错乱。
+
+V4.8.5 缝隙修复：
   - 取消对单组 PNG 高度的"display_w/total_w → _even_pixel"缩放。
   - 之前 materialize 会把单组 source_row 从 (display_w, actual_h) resize 到
     (display_w, _even_pixel(actual_h * display_w / total_w))，对 833px 这种
     奇数高度会变成 832px，导致声明 height=832 与原始源图差 1px。
   - 3 张普通切片各缩 1px 累计产生肉眼可见的"每片切图衔接处有缝"。
-  - 修复：声明 height 严格等于 materialize 输出的 PNG 物理高度，
-    materialize 又严格等于源 PNG 物理高度 → Word 引擎 1:1 渲染 → 零缩放 → 零缝。
-  - 多组（多 hotspot 横向拼接）仍用统一 row_height，因为各段必须共享同一高度。
 
 V4.7.8 优化点：
   - 优化图片尺寸缓存，减少重复读取
   - 进一步加强 Outlook 缝隙消除（mso-padding-alt, mso-border-alt）
   - 优化多按钮横向拼接宽度分配，避免错位
   - 加强偶数像素约束，防止 px->pt 转换产生小数
-  - 统一邮件输出显示宽度为偶数，避免外层表格与内层切片总宽不一致
 
 V1 架构变更：
   - 不再使用 Hotspot Map（图上标注 + 物理切割已在 hotspot_slicer.py 完成）
   - 不再输出 <map> + <area>（Outlook Desktop 不解析，删）
-  - 不再输出图外 CTA 文字链接行（"邮件中无任何额外元素"，删）
-  - 接受 List[SliceItem]，每项包含 (path, href)：
-      * href is None: 普通切片 → <img>
-      * href is str:  链接切片 → <a href><img></a>
+  - 不再输出图外 CTA 文字链接行
+  - 接受 List[SliceItem]，每项包含 (path, href)
 
 Outlook 兼容性（第一目标 = Outlook Desktop / Word 引擎）：
   ✓ 仅用 <table> + inline-style
@@ -32,6 +35,7 @@ Outlook 兼容性（第一目标 = Outlook Desktop / Word 引擎）：
   ✓ width + height HTML 属性（不用 CSS）
   ✓ border="0" + style="display:block;" 消除图片间 1px 间隙
   ✓ cellpadding="0" cellspacing="0" border="0" 消除 cell 间隙
+  ✓ 单 <tr> + 单 <td> 布局，根除行间 1px 间距
 """
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
@@ -160,40 +164,17 @@ def _even_pixel_4x(n: int) -> int:
     return n + (4 - remainder)
 
 
-def _edge_extend_image(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+def _normalize_display_width(display_w: int) -> int:
     """
-    V4.8.10: 把图片补齐/裁剪到目标尺寸，补齐区域使用边缘像素延展。
-
-    Outlook 发送路径要求 PNG 物理尺寸与 HTML 声明尺寸完全一致。
-    旧做法在高度补齐时补白；热点多列路径在宽度向 4px 倍数取整后还会从
-    源图越界 crop，Pillow 默认补黑，导致按钮切条后出现竖向黑/白空隙。
-    这里统一用边缘像素延展：不缩放原图、不引入白边/黑边，视觉上延续原图。
+    统一邮件显示宽度。
+    V4.8.8: 强制 4 的倍数。Outlook px→pt 转换 (1px=0.75pt)，
+    只有 4 的倍数产生整数 pt，消除 1px 白线。
     """
-    target_w = max(1, int(target_w))
-    target_h = max(1, int(target_h))
-    src = img.convert("RGB") if img.mode != "RGB" else img
-
-    crop_w = min(src.size[0], target_w)
-    crop_h = min(src.size[1], target_h)
-    base = src.crop((0, 0, crop_w, crop_h))
-
-    if base.size == (target_w, target_h):
-        return base.copy()
-
-    out = Image.new("RGB", (target_w, target_h))
-    out.paste(base, (0, 0))
-
-    if crop_w < target_w:
-        right_edge = base.crop((crop_w - 1, 0, crop_w, crop_h))
-        for x in range(crop_w, target_w):
-            out.paste(right_edge, (x, 0))
-
-    if crop_h < target_h:
-        bottom_edge = out.crop((0, crop_h - 1, target_w, crop_h))
-        for y in range(crop_h, target_h):
-            out.paste(bottom_edge, (0, y))
-
-    return out
+    try:
+        value = int(display_w)
+    except (TypeError, ValueError):
+        value = 648  # 默认 648 = 4 的倍数 = 486pt
+    return _even_pixel_4x(max(1, value))
 
 
 def _even_pixel_up(n: int) -> int:
@@ -208,19 +189,6 @@ def _even_pixel_up(n: int) -> int:
     if n % 2 == 0:
         return n
     return n + 1
-
-
-def _normalize_display_width(display_w: int) -> int:
-    """
-    统一邮件显示宽度。
-    V4.8.8: 强制 4 的倍数。Outlook px→pt 转换 (1px=0.75pt)，
-    只有 4 的倍数产生整数 pt，消除 1px 白线。
-    """
-    try:
-        value = int(display_w)
-    except (TypeError, ValueError):
-        value = 648  # 默认 648 = 4 的倍数 = 486pt
-    return _even_pixel_4x(max(1, value))
 
 
 def _distribute_units(raw: List[float], total_units: int) -> List[int]:
@@ -261,7 +229,7 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
 
     拆 _build_image_row 的原因：
       之前每段占一整 <tr> → 纵向堆叠 → V1 物理切割产物重叠成
-      “碎片化”视觉。现在改为同 source_index 的多段拼成一行 <tr>，
+      "碎片化"视觉。现在改为同 source_index 的多段拼成一行 <tr>，
       每段 1 个 <td> 横向并排，恢反原图。
 
     Args:
@@ -490,19 +458,13 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
 def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
                      is_base64: bool = False) -> Tuple[str, int]:
     """
-    为一张原始切片生成完整外层行。
-
-    关键：外层 table 永远只有 1 列；每张原图自己的横向分段放进独立内层 table。
-    Outlook/Word 会把同一张 table 的列当作全局列网格，如果直接在外层混用
-    “多列 hotspot 行”和“单列普通行”，普通行会被前面多列宽度污染，表现为
-    左右错位、显示不全或局部重叠。
+    为一张原始切片生成内联 HTML 片段（不产生独立 <tr>，仅返回内容块）。
+    所有组的内容最终放在同一个 <td> 内垂直堆叠，避免多个 <tr> 之间的 1px 缝隙。
     """
     display_w = _normalize_display_width(display_w)
     allocated_widths = _allocate_group_widths(group, display_w)
     row_height = _compute_group_height(group, display_w)
 
-    # V4.8.3: 普通纵向切片不要再套一层内层 table。
-    # Outlook/Word 对嵌套表格的行高重算很激进，单图行使用扁平结构更稳定。
     if len(group) == 1:
         s = group[0]
         if is_base64:
@@ -516,16 +478,33 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
             forced_display_w=allocated_widths.get(s.path),
             forced_display_h=row_height,
         )
-        row = (
+        # 用 <div> 包裹让 cell 垂直堆叠，不产生行间距
+        block = (
+            f'<div style="margin: 0; padding: 0; border: 0; '
+            f'font-size: 0; line-height: 0; '
+            f'mso-line-height-rule: exactly; '
+            f'vertical-align: top; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
+            f'width="{display_w}" '
+            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
+            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
+            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+            f'table-layout: fixed;">\n'
             f'<tr height="{row_height}" style="height: {row_height}px; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
             f'valign="top" align="left">\n'
             f'{cell}'
             f'</tr>\n'
+            f'</table>\n'
+            f'</div>\n'
         )
-        return row, cid_counter
+        return block, cid_counter
 
+    # 多段（hotspot 横向拼接）：内层 table 单行
     cells = ""
     for s in group:
         if is_base64:
@@ -557,29 +536,27 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
         f'</tr>\n'
         f'</table>'
     )
-    row = (
-        f'<tr height="{row_height}" style="height: {row_height}px; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" valign="top" align="left">\n'
-        f'<td align="center" valign="top" width="{display_w}" height="{row_height}" style="'
-        f'width: {display_w}px; height: {row_height}px; padding: 0; margin: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'border: 0; border-collapse: collapse; border-spacing: 0; vertical-align: top; '
-        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">'
-        f'{inner_table}'
-        f'</td>\n'
-        f'</tr>\n'
+    block = (
+        f'<div style="margin: 0; padding: 0; border: 0; '
+        f'font-size: 0; line-height: 0; '
+        f'mso-line-height-rule: exactly; '
+        f'vertical-align: top; '
+        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+        f'{inner_table}\n'
+        f'</div>\n'
     )
-    return row, cid_counter
+    return block, cid_counter
 
 
 def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
     """
-    生成一组“最终显示尺寸”的临时切片。
+    生成一组"最终显示尺寸"的临时切片。
 
-    Outlook/Word 对多个相邻图片段分别缩放时，边缘插值容易产生 1px 竖缝或重叠。
-    这里提前把每段 resize 到 HTML 中声明的最终宽高，让 Outlook 只按 1:1 显示，
-    不再参与缩放计算。
+    对每组（group）的整体策略：
+    - 多条（hotspot 竖条）：拼合成一行 → 缩放到目标总尺寸 → 再按宽度切回
+    - 单条（普通切片）：只补齐高度到 4px 倍数，不缩放，使用底部像素延展
+      （不补白/补黑，避免在非白色背景的切图底部产生割裂感）。
+    不单独缩放每段（避免段间缩放比例不一致导致过渡错位）。
     """
     if not slices:
         return []
@@ -590,7 +567,6 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
     batch = uuid.uuid4().hex[:8]
     counter = 0
 
-    # V4.8.8: 偶数化 display_w 对齐 4 的倍数，保证 resize 后尺寸 px→pt 无小数
     display_w_even = _normalize_display_width(display_w)
 
     for group in groups:
@@ -609,29 +585,54 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             if total_w <= 0 or max_h <= 0:
                 raise ValueError("invalid image size")
 
+            # 单条路径：只高度补齐，不缩放宽度
+            if len(group) == 1 and row_height >= max_h:
+                for s, part in source_parts:
+                    counter += 1
+                    target_w = _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
+                    target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
+                    # 宽度一致但高度不足 → 底部延展最后一行像素
+                    if part.width == target_w and max_h < row_height:
+                        out = Image.new("RGB", (target_w, row_height))
+                        out.paste(part, (0, 0))
+                        last_row = part.crop((0, max_h - 1, target_w, max_h))
+                        for yy in range(max_h, row_height):
+                            out.paste(last_row, (0, yy))
+                    # 宽度不一致 → resize
+                    elif part.width != target_w or max_h != row_height:
+                        out = part.resize((target_w, row_height), Image.LANCZOS)
+                    else:
+                        # 宽高完全一致 → 直接保存副本（必须建新文件满足 strict 检查）
+                        out = part.copy()
+                    out.save(target_path, "PNG")
+                    prepared.append(SliceItem(
+                        path=str(target_path),
+                        href=s.href,
+                        alt_text=s.alt_text,
+                        sort_key=s.sort_key,
+                        original_width=display_w_even,
+                    ))
+                continue
+
+            # 多竖条路径（hotspot）：拼合 → 整体缩放 → 切回
             source_row = Image.new("RGB", (total_w, max_h))
             x = 0
             for _, part in source_parts:
                 source_row.paste(part, (x, 0))
                 x += part.width
 
-            # V4.8.10: 当 source_row 宽/高需要补齐到 4px 倍数时，不能补白边/黑边。
-            # 用户目标是 Outlook 里看起来像一整张长图；白底 padding 会在非白背景/渐变/图片内容
-            # 的切片底部形成肉眼可见割裂；热点多列路径宽度 650→652 时，越界 crop 会补黑。
-            # 正确做法是延展边缘像素，既不缩放原图，又让补齐区域视觉上延续原图边缘。
             target_total_w = sum(
                 _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
                 for s, _ in source_parts
             )
-            source_row = _edge_extend_image(source_row, target_total_w, row_height)
+            source_row_resized = source_row.resize((target_total_w, row_height), Image.LANCZOS)
 
             crop_x = 0
             for s, _ in source_parts:
                 counter += 1
-                # V4.8.8: target_w 对齐 4 的倍数（与 HTML width 声明对齐）
                 target_w = _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
                 target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
-                part = source_row.crop((crop_x, 0, crop_x + target_w, row_height))
+                part = source_row_resized.crop((crop_x, 0, crop_x + target_w, row_height))
                 part.save(target_path, "PNG")
                 crop_x += target_w
                 prepared.append(SliceItem(
@@ -694,12 +695,14 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
     try:
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
-        rows = ""
+        content_blocks = ""
         cid_counter = 0
         for group in groups:
-            row, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=False)
-            rows += row
+            block, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=False)
+            content_blocks += block
 
+        # 所有图片塞在同一个 <tr><td> 内通过 <div> 垂直堆叠，
+        # 根除多行之间的 1px 间距
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
@@ -721,7 +724,19 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
             f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
             f'table-layout: fixed;">\n'
-            f'{rows}'
+            f'<tr valign="top" align="left" style="'
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+            f'<td align="left" valign="top" width="{display_w}" style="'
+            f'width: {display_w}px; padding: 0; margin: 0; border: 0; '
+            f'border-collapse: collapse; border-spacing: 0; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'vertical-align: top; '
+            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+            f'mso-text-raise: 0;">\n'
+            f'{content_blocks}'
+            f'</td>\n'
+            f'</tr>\n'
             f'</table>\n'
             f'</body>\n'
             f'</html>'
@@ -756,11 +771,11 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
         slices = materialize_display_slices_strict(slices, display_w)
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
-        rows = ""
+        content_blocks = ""
         cid_counter = 0
         for group in groups:
-            row, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=True)
-            rows += row
+            block, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=True)
+            content_blocks += block
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
@@ -781,7 +796,19 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
             f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
             f'table-layout: fixed;">\n'
-            f'{rows}'
+            f'<tr valign="top" align="left" style="'
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
+            f'<td align="left" valign="top" width="{display_w}" style="'
+            f'width: {display_w}px; padding: 0; margin: 0; border: 0; '
+            f'border-collapse: collapse; border-spacing: 0; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'vertical-align: top; '
+            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+            f'mso-text-raise: 0;">\n'
+            f'{content_blocks}'
+            f'</td>\n'
+            f'</tr>\n'
             f'</table>\n'
             f'</body>\n'
             f'</html>'
