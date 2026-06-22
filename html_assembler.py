@@ -327,6 +327,74 @@ def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[s
     )
 
 
+def _is_plain_vertical_stack(groups: List[List[SliceItem]]) -> bool:
+    """
+    普通长图链路：每个视觉组只有一张、无 href 的切片。
+
+    V3.0 用户实测无缝的结构是：一个 <td> 里直接连续 <img>。
+    V4.6+ 为 hotspot 重组引入每片外层 <div><table><tr><td>，普通链路也被套进去，
+    这是 Outlook Word 引擎在切片之间插入缝隙的最高嫌疑结构差异。
+    """
+    if not groups:
+        return False
+    for group in groups:
+        if len(group) != 1:
+            return False
+        if group[0].href:
+            return False
+    return True
+
+
+def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
+                                is_base64: bool = False) -> Tuple[str, int]:
+    """
+    V3-style 普通纵向堆叠：一个 td 内连续 block img。
+    不产生每片 div/table/tr/td 边界；避免 Outlook Word 在块/表格边界制造白缝。
+
+    V4.9.3 变更：
+      - 使用图片实际宽度而非归一化 display_w，消除 650→652 拉伸
+      - img style 补充 line-height: 0; font-size: 0; 防 Outlook 行间距
+      - 移除 min-height: 1px（V3.0 原始版本无此属性）
+    """
+    img_tags = ""
+    cid_counter = 0
+    for group in groups:
+        s = group[0]
+        # V4.9.3: 使用图片实际宽度，不强制归一化到 4 的倍数。
+        # V3.0 无缝版本就是用原始宽度，Outlook 会自动缩放到 HTML width 属性。
+        try:
+            actual_w, _ = _get_img_dimensions(s.path)
+            img_w = actual_w if actual_w > 0 else display_w
+        except Exception:
+            img_w = display_w
+
+        if is_base64:
+            import base64
+            with open(s.path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            ext = Path(s.path).suffix.lower().lstrip(".")
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+            src = f"data:{mime};base64,{b64}"
+        else:
+            cid_counter += 1
+            src = f"cid:slice_{cid_counter:03d}"
+        safe_src = escape(src, quote=True)
+        safe_alt = escape(s.alt_text or Path(s.path).name, quote=True)
+        img_tags += (
+            f'<img src="{safe_src}" '
+            f'width="{img_w}" '
+            f'alt="{safe_alt}" '
+            f'border="0" hspace="0" vspace="0" '
+            f'style="display: block; width: {img_w}px; '
+            f'border: 0; outline: none; text-decoration: none; '
+            f'margin: 0; padding: 0; '
+            f'line-height: 0; font-size: 0; '
+            f'vertical-align: top; -ms-interpolation-mode: bicubic; '
+            f'visibility: visible !important;" />'
+        )
+    return img_tags, cid_counter
+
+
 def _group_by_source(slices: List[SliceItem]) -> List[List[SliceItem]]:
     """
     按视觉行分组。
@@ -690,19 +758,31 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
       2. 多张原图（智能切图切了 N 段 Y）→ N 行 × K 列
 
     V4.7.8: 最后清理图片尺寸缓存
+    V4.9.3: 普通链路使用图片实际宽度，不归一化到 4 的倍数
     """
-    display_w = _normalize_display_width(display_w)
     try:
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
-        content_blocks = ""
-        cid_counter = 0
-        for group in groups:
-            block, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=False)
-            content_blocks += block
+        if _is_plain_vertical_stack(groups):
+            # V4.9.3: 普通链路使用图片实际宽度，不归一化到 4 的倍数。
+            # V3.0 无缝版本直接用原始宽度，避免 650→652 拉伸导致缝隙。
+            try:
+                actual_w, _ = _get_img_dimensions(groups[0][0].path)
+                effective_w = actual_w if actual_w > 0 else _normalize_display_width(display_w)
+            except Exception:
+                effective_w = _normalize_display_width(display_w)
+            content_blocks, cid_counter = _build_v3_plain_image_stack(
+                groups, effective_w, is_base64=False
+            )
+        else:
+            effective_w = _normalize_display_width(display_w)
+            content_blocks = ""
+            cid_counter = 0
+            for group in groups:
+                block, cid_counter = _build_group_row(group, effective_w, cid_counter, is_base64=False)
+                content_blocks += block
 
-        # 所有图片塞在同一个 <tr><td> 内通过 <div> 垂直堆叠，
-        # 根除多行之间的 1px 间距
+        # 普通链路：V3 连续 img；hotspot/多段链路：分组表格。
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
@@ -717,8 +797,8 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'Margin: 0;">\n'
             f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
-            f'width="{display_w}" '
-            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
+            f'width="{effective_w}" '
+            f'style="width: {effective_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
             f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
@@ -727,8 +807,8 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'<tr valign="top" align="left" style="'
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
-            f'<td align="left" valign="top" width="{display_w}" style="'
-            f'width: {display_w}px; padding: 0; margin: 0; border: 0; '
+            f'<td align="left" valign="top" width="{effective_w}" style="'
+            f'width: {effective_w}px; padding: 0; margin: 0; border: 0; '
             f'border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'vertical-align: top; '
@@ -764,18 +844,33 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     独立调用时跳过 materialize，row_height 偶数化后的高度与实际 PNG 不一致）。
     V4.8.1.1: materialize 内部静默降级会导致本修复失效，入口加 guard
     确保 materialize 实际产生了新文件（路径以 mail_ 开头）。
+    V4.9.3: 普通链路跳过 materialize，使用图片实际宽度，与 assemble_html 保持一致。
     """
-    display_w = _normalize_display_width(display_w)
     try:
-        # V4.8.2：复制路径也使用严格预渲染，和发送路径保持同一套防缝隙入口。
-        slices = materialize_display_slices_strict(slices, display_w)
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
-        content_blocks = ""
-        cid_counter = 0
-        for group in groups:
-            block, cid_counter = _build_group_row(group, display_w, cid_counter, is_base64=True)
-            content_blocks += block
+        if _is_plain_vertical_stack(groups):
+            # V4.9.3: 普通链路跳过 materialize，使用图片实际宽度。
+            # V3.0 无缝版本不经过 materialize，直接用原始切片。
+            try:
+                actual_w, _ = _get_img_dimensions(groups[0][0].path)
+                effective_w = actual_w if actual_w > 0 else _normalize_display_width(display_w)
+            except Exception:
+                effective_w = _normalize_display_width(display_w)
+            content_blocks, cid_counter = _build_v3_plain_image_stack(
+                groups, effective_w, is_base64=True
+            )
+        else:
+            # hotspot/复杂链路：保留 materialize 预渲染
+            effective_w = _normalize_display_width(display_w)
+            slices = materialize_display_slices_strict(slices, effective_w)
+            sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+            groups = _group_by_source(sorted_slices)
+            content_blocks = ""
+            cid_counter = 0
+            for group in groups:
+                block, cid_counter = _build_group_row(group, effective_w, cid_counter, is_base64=True)
+                content_blocks += block
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
@@ -789,8 +884,8 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'Margin: 0;">\n'
             f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
-            f'width="{display_w}" '
-            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
+            f'width="{effective_w}" '
+            f'style="width: {effective_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
             f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
@@ -799,8 +894,8 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'<tr valign="top" align="left" style="'
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
-            f'<td align="left" valign="top" width="{display_w}" style="'
-            f'width: {display_w}px; padding: 0; margin: 0; border: 0; '
+            f'<td align="left" valign="top" width="{effective_w}" style="'
+            f'width: {effective_w}px; padding: 0; margin: 0; border: 0; '
             f'border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'vertical-align: top; '

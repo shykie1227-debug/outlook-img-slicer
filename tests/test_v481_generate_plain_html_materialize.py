@@ -50,14 +50,13 @@ def test_generate_plain_html_materializes_odd_height():
     html = generate_plain_html(mat, 650)
 
     actual_heights = [Image.open(s.path).size[1] for s in mat]
-    declared_heights = [int(h) for h in re.findall(r'<tr\s+height="(\d+)"', html)]
-
-    assert actual_heights == declared_heights, \
-        f"高度不一致: actual={actual_heights} declared={declared_heights}"
-
-    # 关键: 没有 +1px 溢出
-    for actual, declared in zip(actual_heights, declared_heights):
-        assert actual == declared, f"溢出: {actual} vs {declared}"
+    # V4.9.2: plain copy path uses V3 direct image stack, no per-slice <tr height>.
+    assert actual_heights
+    assert html.count("<img") == len(mat)
+    assert html.count("<table") == 1
+    assert html.count("<tr") == 1
+    assert html.count("<td") == 1
+    assert 'height="' not in html
 
 
 def test_generate_plain_html_keeps_materialize_consistent():
@@ -71,10 +70,10 @@ def test_generate_plain_html_keeps_materialize_consistent():
     mat = materialize_display_slices(slices, 650)
     html = generate_plain_html(mat, 650)
 
-    # 关键: <tr height> 都是偶数（_even_pixel 偶数化）
-    tr_heights = [int(h) for h in re.findall(r'<tr\s+height="(\d+)"', html)]
-    for h in tr_heights:
-        assert h % 2 == 0, f"<tr height> {h} 不是偶数"
+    # V4.9.2: plain no-link path has no per-slice <tr height>; structure is V3 direct <img> stack.
+    assert html.count("<img") == len(mat)
+    assert html.count("<table") == 1
+    assert 'height="' not in html
 
     # 关键: 没有 <a> 标签时（无链接），HTML 结构应包含 <img> 但不包含 <a>
     assert "<a " not in html, "无链接时不应生成 <a> 标签"
@@ -121,18 +120,19 @@ def test_generate_plain_html_base64_encodes_images():
 
 
 def test_generate_plain_html_guard_catches_silent_materialize_failure(monkeypatch):
-    """V4.8.1.1: materialize 静默降级时，guard 抛 RuntimeError 不让 H3 修复失效。
+    """V4.8.1.1 / V4.9.3: materialize 静默降级时，guard 抛 RuntimeError。
 
+    V4.9.3: 普通链路（无 href）不再调 materialize，所以用带 href 的切片测试。
     模拟 materialize 内部 except Exception: for s in group: prepared.append(s)
     路径（返回原 SliceItem 列表，无新文件生成）。
     """
     from html_assembler import materialize_display_slices
 
     td = tempfile.mkdtemp()
-    # 构造 1 张合法 PNG
+    # 构造 1 张带 href 的合法 PNG（走复杂链路，仍调 materialize）
     p = os.path.join(td, "orig.png")
     Image.new("RGB", (650, 650), (200, 200, 200)).save(p)
-    raw_slice = SliceItem(path=p, original_width=650, sort_key=1.0)
+    raw_slice = SliceItem(path=p, original_width=650, sort_key=1.0, href="https://example.com")
     raw_slice.source_index = 1.0
     raw_slice.original_height = 650
 

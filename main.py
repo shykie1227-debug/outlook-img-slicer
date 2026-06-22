@@ -34,6 +34,7 @@ from hotspot_editor import HotspotEditorDialog
 from html_assembler import (
     assemble_html, generate_plain_html, materialize_display_slices_strict,
     SliceItem, cleanup_temp_slices,
+    _group_by_source, _is_plain_vertical_stack,
 )
 from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import create_email_with_images
@@ -44,7 +45,7 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.9.1"
+VERSION = "4.9.3"
 VERSION_BY = "xiaoming"
 # V4.9.1: Outlook 实测仍有切图拼接缝时，先屏蔽热点/可点击按钮功能。
 # 该功能会触发额外物理切割与链接包裹，是当前拼接缝排查的主要变量。
@@ -1308,10 +1309,22 @@ class MainWindow(QMainWindow):
         temp_files: List[str] = []
         try:
             display_w = self._get_width()
-            slices = materialize_display_slices_strict(
-                self._build_slices_with_hotspots(), display_w
-            )
-            temp_files = [s.path for s in slices]
+            raw_slices = self._build_slices_with_hotspots()
+
+            # V4.9.3: 普通链路（无 hotspot、无 href）跳过 materialize，
+            # 直接使用原始切片，完全对齐 V3.0 无缝行为。
+            # materialize 会将宽度 650→652（4 的倍数归一化）并向上取整高度，
+            # 这两个操作改变了 PNG 物理尺寸，是 V4.9.2 仍有缝隙的根因。
+            groups = _group_by_source(sorted(raw_slices, key=lambda s: s.sort_key))
+            is_plain = _is_plain_vertical_stack(groups)
+
+            if is_plain:
+                # 普通链路：不 materialize，直接用原始切片
+                slices = raw_slices
+            else:
+                # hotspot/复杂链路：保留 materialize 预渲染
+                slices = materialize_display_slices_strict(raw_slices, display_w)
+                temp_files = [s.path for s in slices]
 
             # 体积检测基于最终发送切片，包含 hotspot 物理切割和预渲染后的真实文件。
             size_mb = estimate_email_size_mb([s.path for s in slices])

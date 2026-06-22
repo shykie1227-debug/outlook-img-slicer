@@ -194,26 +194,22 @@ class TestEndToEndConsistency:
             paths = detect_and_slice(img_path, max_height=1200)
             raw = [SliceItem(path=p, sort_key=float(i + 1)) for i, p in enumerate(paths)]
 
-            slices = materialize_display_slices_strict(raw, 650)
-            html = assemble_html(slices, 650)
+            # V4.9.3: 普通链路不调 materialize，直接传原始切片
+            html = assemble_html(raw, 650)
 
-            # PNG 物理高度
+            # PNG 物理高度（原始切片，未 materialize）
             _clear_dimensions_cache()
-            png_heights = [_get_img_dimensions(s.path)[1] for s in slices]
+            png_heights = [_get_img_dimensions(s.path)[1] for s in raw]
             _clear_dimensions_cache()
 
-            # HTML 声明高度
-            tr_h = [int(h) for h in re.findall(r'<tr[^>]*?height="(\d+)"', html)]
-            td_h = [int(h) for h in re.findall(r'<td[^>]*?height="(\d+)"', html)]
-            img_h = [int(h) for h in re.findall(r'<img[^>]*?height="(\d+)"', html)]
-
-            # 1. 三者必须严格相等（每片都对得上）
-            assert tr_h == png_heights, f"<tr> {tr_h} ≠ PNG {png_heights}"
-            assert td_h == png_heights, f"<td> {td_h} ≠ PNG {png_heights}"
-            assert img_h == png_heights, f"<img> {img_h} ≠ PNG {png_heights}"
-
-            # 2. HTML 声明总高 = PNG 总高 = 原图高
-            assert sum(tr_h) == sum(png_heights) == 2500
+            # V4.9.3: 普通链路使用 V3 连续 <img> 结构，不再声明每片高度。
+            assert html.count("<img") == len(png_heights)
+            assert html.count("<table") == 1
+            assert html.count("<tr") == 1
+            assert html.count("<td") == 1
+            assert 'height="' not in html
+            # V4.9.3: 无 materialize，原始切片总高严格 = 原图高
+            assert sum(png_heights) == 2500
 
     def test_no_zero_px_slices(self):
         """切片高度不能为 0（极端边界条件）"""
@@ -251,11 +247,12 @@ class TestV486BugReproduction:
             png_heights = [_get_img_dimensions(s.path)[1] for s in slices]
             _clear_dimensions_cache()
 
-            tr_h = [int(h) for h in re.findall(r'<tr[^>]*?height="(\d+)"', html)]
-            # V4.8.8: 每片 PNG 高度必须是 4 的倍数
+            # V4.8.8: 每片 PNG 高度必须是 4 的倍数；V4.9.2 plain HTML 不再写 <tr height>。
             for h in png_heights:
                 assert h % 4 == 0, f"PNG 高度 {h} 不是 4 的倍数"
-            assert tr_h == png_heights, f"HTML {tr_h} ≠ PNG {png_heights}"
+            assert html.count("<img") == len(png_heights)
+            assert html.count("<table") == 1
+            assert 'height="' not in html
 
 
 # ── 6. V4.8.6 旧测试仍兼容 ──────────────────────────────────────

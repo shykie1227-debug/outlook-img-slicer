@@ -96,20 +96,14 @@ def test_single_slice_declared_height_matches_actual_png_height(tmp_path):
 
     # materialize 后 PNG 物理高度
     actual_heights = [Image.open(s.path).size[1] for s in prepared]
-    # HTML 声明的 tr height
-    tr_heights = _tr_heights(html)
-    # HTML 声明的 img height
-    img_heights = _img_heights(html)
-
     assert len(actual_heights) == 3
-    assert actual_heights == tr_heights, (
-        f"V4.8.6 缝隙源：materialize 实际 PNG 高度 {actual_heights} "
-        f"与 HTML <tr height> {tr_heights} 不一致"
-    )
-    assert actual_heights == img_heights, (
-        f"V4.8.6 缝隙源：materialize 实际 PNG 高度 {actual_heights} "
-        f"与 HTML <img height> {img_heights} 不一致"
-    )
+    # V4.9.2: 普通纵向链路回退到 V3 连续 <img> 结构。
+    # 该路径不再使用每片 <tr height>/<img height>，避免 Outlook Word 在表格/高度边界造缝。
+    assert html.count("<img") == 3
+    assert html.count("<table") == 1
+    assert html.count("<tr") == 1
+    assert html.count("<td") == 1
+    assert 'height="' not in html
 
 
 def test_single_slice_with_odd_height_uses_white_pad_not_lanczos(tmp_path):
@@ -167,14 +161,12 @@ def test_send_pipeline_total_height_no_drift(tmp_path):
 
     # materialize 后总高
     actual_total = sum(Image.open(s.path).size[1] for s in prepared)
-    # HTML 声明总高
-    tr_total = sum(_tr_heights(html))
-    img_total = sum(_img_heights(html))
-
-    assert actual_total == tr_total == img_total, (
-        f"V4.8.6 缝隙源：materialize 实际总高 {actual_total} "
-        f"≠ tr 总高 {tr_total} ≠ img 总高 {img_total}"
-    )
+    # V4.9.2: plain path is V3-style direct image stack. Total height is carried by actual PNGs,
+    # not duplicated into per-slice <tr>/<img height> attributes.
+    assert actual_total == sum(Image.open(s.path).size[1] for s in prepared)
+    assert html.count("<img") == 3
+    assert html.count("<table") == 1
+    assert 'height="' not in html
 
 
 # ── 4. 多组（多 hotspot 横向拼接）回归：不受影响 ──────────────────────
@@ -274,8 +266,10 @@ def test_extremely_thin_single_slice_still_works(tmp_path):
     slices = [SliceItem(path=str(p), sort_key=1.0, original_width=650)]
     prepared = materialize_display_slices_strict(slices, 648)  # 648 = 4 的倍数
     html = assemble_html(prepared, 648)
-    # V4.8.8: _even_pixel_4x(1) = 4
-    assert _tr_heights(html) == [4]
+    # V4.9.2: plain path has no explicit per-slice height attributes.
+    assert html.count("<img") == 1
+    assert html.count("<table") == 1
+    assert 'height="' not in html
 
 
 # ── 7. 视觉无损验证：补白边不能改原图区域像素 ─────────────────────
