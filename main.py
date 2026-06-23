@@ -45,11 +45,11 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.9.3"
+VERSION = "4.9.4"
 VERSION_BY = "xiaoming"
-# V4.9.1: Outlook 实测仍有切图拼接缝时，先屏蔽热点/可点击按钮功能。
-# 该功能会触发额外物理切割与链接包裹，是当前拼接缝排查的主要变量。
-HOTSPOT_FEATURE_ENABLED = False
+# V4.9.4: 可点击按钮功能恢复。普通无按钮链路仍走 V3 direct image stack；
+# 有按钮链路走物理网格切割 + 单连续表格，尽量降低 Outlook 拼接缝风险。
+HOTSPOT_FEATURE_ENABLED = True
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
@@ -529,7 +529,7 @@ class MainWindow(QMainWindow):
         self.btn_hotspot.setEnabled(False)
         self.btn_hotspot.setStyleSheet(_btn_ghost())
         self.btn_hotspot.setFixedSize(_btn_size("🎯 添加可点击按钮", 12, extra_w=20, height=34))
-        self.btn_hotspot.setToolTip("该功能已临时隐藏：优先修复 Outlook 切图拼接缝问题")
+        self.btn_hotspot.setToolTip("在切片上框选按钮区域并添加链接")
         self.btn_hotspot.clicked.connect(self._open_hotspot_editor)
         self.btn_hotspot.setVisible(HOTSPOT_FEATURE_ENABLED)
         if HOTSPOT_FEATURE_ENABLED:
@@ -1148,18 +1148,6 @@ class MainWindow(QMainWindow):
         """
         if not self.slice_paths:
             return []
-        if not HOTSPOT_FEATURE_ENABLED:
-            # V4.9.1: 临时屏蔽可点击按钮功能后，发送/复制必须完全忽略历史 hotspot_map。
-            # 直接走原始切片，减少 Outlook 拼接缝排查变量。
-            return [
-                SliceItem(
-                    path=p,
-                    href=None,
-                    alt_text="",
-                    sort_key=self.slice_source_index.get(os.path.basename(p), float(i + 1)),
-                )
-                for i, p in enumerate(self.slice_paths)
-            ]
         from pathlib import Path
         # hotspot_map 按切片名分组
         hotspots_by_slice: Dict[str, List[Hotspot]] = {}

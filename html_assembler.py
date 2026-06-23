@@ -616,6 +616,60 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
     return block, cid_counter
 
 
+def _build_complex_table_stack(groups: List[List[SliceItem]], display_w: int,
+                               is_base64: bool = False) -> Tuple[str, int]:
+    """
+    Build hotspot/multi-segment rows as one continuous presentation table.
+
+    Hotspots require horizontal cells so Outlook can make only the selected
+    image pieces clickable. Keeping every visual row inside one table removes
+    the old per-row div/table wrappers that were the main seam suspect.
+    """
+    display_w = _normalize_display_width(display_w)
+    rows = ""
+    cid_counter = 0
+
+    for group in groups:
+        allocated_widths = _allocate_group_widths(group, display_w)
+        row_height = _compute_group_height(group, display_w)
+        cells = ""
+        for s in group:
+            if is_base64:
+                cid_or_src = ""
+            else:
+                cid_counter += 1
+                cid_or_src = f"cid:slice_{cid_counter:03d}"
+            cells += _build_cell(
+                s.path, cid_or_src, display_w, s.href, s.alt_text,
+                s.original_width, is_base64=is_base64,
+                forced_display_w=allocated_widths.get(s.path),
+                forced_display_h=row_height,
+            )
+        rows += (
+            f'<tr height="{row_height}" style="height: {row_height}px; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
+            f'valign="top" align="left">\n'
+            f'{cells}'
+            f'</tr>\n'
+        )
+
+    table = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
+        f'width="{display_w}" '
+        f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
+        f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
+        f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
+        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+        f'table-layout: fixed;">\n'
+        f'{rows}'
+        f'</table>\n'
+    )
+    return table, cid_counter
+
+
 def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
     """
     生成一组"最终显示尺寸"的临时切片。
@@ -776,11 +830,9 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             )
         else:
             effective_w = _normalize_display_width(display_w)
-            content_blocks = ""
-            cid_counter = 0
-            for group in groups:
-                block, cid_counter = _build_group_row(group, effective_w, cid_counter, is_base64=False)
-                content_blocks += block
+            content_blocks, cid_counter = _build_complex_table_stack(
+                groups, effective_w, is_base64=False
+            )
 
         # 普通链路：V3 连续 img；hotspot/多段链路：分组表格。
         return (
@@ -866,11 +918,9 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             slices = materialize_display_slices_strict(slices, effective_w)
             sorted_slices = sorted(slices, key=lambda s: s.sort_key)
             groups = _group_by_source(sorted_slices)
-            content_blocks = ""
-            cid_counter = 0
-            for group in groups:
-                block, cid_counter = _build_group_row(group, effective_w, cid_counter, is_base64=True)
-                content_blocks += block
+            content_blocks, cid_counter = _build_complex_table_stack(
+                groups, effective_w, is_base64=True
+            )
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'

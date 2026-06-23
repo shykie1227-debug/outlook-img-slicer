@@ -59,6 +59,9 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
     assert "https://bottom.example" in html
     # V2 必须输出多行，而不是把 15 个 cell 横向塞进单行。
     assert len(re.findall(r"<tr height=", html)) >= 5
+    # V4.9.4: hotspot rows share one inner table instead of one div/table wrapper per row.
+    assert html.count("<div") == 0
+    assert html.count("<table") == 2
 
     # 所有预渲染 PNG 边缘不得出现默认黑/白异常色。
     for item in prepared:

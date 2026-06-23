@@ -1,8 +1,8 @@
-"""V4.9.1 temporary hotspot/clickable-button disablement tests.
+"""V4.9.4 hotspot/clickable-button re-enable tests.
 
-User request: Outlook still shows slice seams after cutting; hide the
-"添加可点击按钮" feature first so normal send/copy paths do not enter hotspot
-physical slicing while the seam root cause is investigated.
+User request: bring back clickable buttons while keeping the no-seam Outlook
+path. Hotspots should be available in the UI and should enter the physical
+slicing path only when the user actually added button areas.
 """
 
 import os
@@ -24,11 +24,11 @@ def qapp():
     return app
 
 
-def test_hotspot_feature_flag_is_disabled():
-    assert HOTSPOT_FEATURE_ENABLED is False
+def test_hotspot_feature_flag_is_enabled():
+    assert HOTSPOT_FEATURE_ENABLED is True
 
 
-def test_hidden_hotspot_button_and_plain_slice_path_ignore_existing_hotspots(qapp, tmp_path):
+def test_hotspot_button_visible_and_existing_hotspots_are_applied(qapp, tmp_path):
     src = tmp_path / "slice_001.png"
     Image.new("RGB", (650, 80), "white").save(src)
 
@@ -36,22 +36,20 @@ def test_hidden_hotspot_button_and_plain_slice_path_ignore_existing_hotspots(qap
     try:
         win.slice_paths = [str(src)]
         win.slice_source_index = {os.path.basename(src): 1.0}
-        # Simulate stale data from older sessions/paths. V4.9.1 must ignore it.
         win.hotspot_map.add(os.path.basename(src), Hotspot(10, 10, 120, 50, "https://example.com"))
 
-        assert not win.btn_hotspot.isVisible()
+        assert not win.btn_hotspot.isHidden()
 
         items = win._build_slices_with_hotspots()
 
-        assert len(items) == 1
-        assert items[0].path == str(src)
-        assert items[0].href is None
-        assert items[0].sort_key == 1.0
+        assert len(items) > 1
+        assert any(item.href == "https://example.com" for item in items)
+        assert all(item.sort_key >= 1.0 for item in items)
     finally:
         win.close()
 
 
-def test_thumbnail_has_no_hotspot_click_handler_when_disabled(qapp, tmp_path):
+def test_thumbnail_has_hotspot_click_handler_when_enabled(qapp, tmp_path):
     src = tmp_path / "slice_001.png"
     Image.new("RGB", (650, 80), "white").save(src)
 
@@ -60,8 +58,7 @@ def test_thumbnail_has_no_hotspot_click_handler_when_disabled(qapp, tmp_path):
         win._show_thumbnails([str(src)])
 
         wrapper = win.thumb_grid.itemAt(0).widget()
-        assert wrapper.toolTip() == f"切片 1: {src.name}"
-        # No per-instance mousePressEvent override should be installed when disabled.
-        assert "mousePressEvent" not in wrapper.__dict__
+        assert "点击可添加/编辑可点击按钮" in wrapper.toolTip()
+        assert "mousePressEvent" in wrapper.__dict__
     finally:
         win.close()
