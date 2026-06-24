@@ -13,6 +13,8 @@ import sys
 import os
 import shutil
 import json
+import stat
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
@@ -205,18 +207,50 @@ def check_and_install_deps():
     print("[INFO] 依赖安装完成！")
 
 
-def build_spec(spec_file: str):
+def safe_rmtree(path: Path) -> bool:
+    """
+    Best-effort remove for Windows/Parallels shared folders.
+
+    On \\psf / C:\\Mac shared paths, PyInstaller may leave framework symlinks or
+    files that Windows refuses to unlink. A failed cleanup should not block a
+    new build; callers can switch to timestamped output directories.
+    """
+    if not path.exists():
+        return True
+
+    def _onerror(func, failing_path, exc_info):
+        try:
+            os.chmod(failing_path, stat.S_IWRITE)
+            func(failing_path)
+        except Exception:
+            raise
+
+    try:
+        shutil.rmtree(path, onerror=_onerror)
+        return True
+    except Exception as e:
+        print(f"[警告] 无法完全删除旧目录：{path}")
+        print(f"       原因：{type(e).__name__}: {e}")
+        print("       将改用新的本次构建目录继续，避免被旧 dist 卡住。")
+        return False
+
+
+def build_spec(spec_file: str, dist_dir: Path = None, build_dir: Path = None):
     """用 PyInstaller 分析 spec 文件并构建"""
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
         "--clean",
-        str(spec_file),
     ]
+    if dist_dir is not None:
+        cmd += ["--distpath", str(dist_dir)]
+    if build_dir is not None:
+        cmd += ["--workpath", str(build_dir)]
+    cmd.append(str(spec_file))
     run(cmd, cwd=PROJECT_ROOT)
 
 
-def create_onedir_fallback():
+def create_onedir_fallback(dist_dir: Path = None, build_dir: Path = None):
     """如果 --onefile 打包失败，切换到 --onedir"""
     print("\n[FALLBACK] 切换到 --onedir 模式...")
     cmd = [
@@ -227,6 +261,10 @@ def create_onedir_fallback():
         "--icon=icon.ico",
         "main.py",
     ]
+    if dist_dir is not None:
+        cmd[4:4] = ["--distpath", str(dist_dir)]
+    if build_dir is not None:
+        cmd[4:4] = ["--workpath", str(build_dir)]
     run(cmd, cwd=PROJECT_ROOT)
 
 
@@ -243,10 +281,20 @@ def main():
     # 清理旧构建
     build_dir = PROJECT_ROOT / "build"
     dist_dir = PROJECT_ROOT / "dist"
+    cleanup_ok = True
     for d in [build_dir, dist_dir]:
         if d.exists():
             print(f"\n清理旧构建: {d}")
-            shutil.rmtree(d)
+            cleanup_ok = safe_rmtree(d) and cleanup_ok
+
+    if not cleanup_ok:
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        if build_dir.exists():
+            build_dir = PROJECT_ROOT / f"build_{stamp}"
+        if dist_dir.exists():
+            dist_dir = PROJECT_ROOT / f"dist_{stamp}"
+        print(f"\n[INFO] 本次构建目录: {build_dir}")
+        print(f"[INFO] 本次产物目录: {dist_dir}")
 
     spec_file = PROJECT_ROOT / "outlook_img_slicer.spec"
     if not spec_file.exists():
@@ -255,7 +303,7 @@ def main():
         sys.exit(1)
 
     print("\n开始构建（--onefile 模式）...")
-    build_spec(spec_file)
+    build_spec(spec_file, dist_dir=dist_dir, build_dir=build_dir)
 
     # 检查产物
     exe_path = dist_dir / "Outlook长图插入工具.exe"
@@ -269,7 +317,7 @@ def main():
         print(f"\n✅ ONEDIR EXE 生成成功: {onedir_exe.parent}")
     else:
         print("\n⚠️ 未找到 EXE，尝试 --onedir 模式...")
-        create_onedir_fallback()
+        create_onedir_fallback(dist_dir=dist_dir, build_dir=build_dir)
 
     print("\n打包完成！")
     print(f"产物目录: {dist_dir}")

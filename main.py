@@ -45,10 +45,10 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
 
 
-VERSION = "4.9.4"
+VERSION = "4.9.5"
 VERSION_BY = "xiaoming"
-# V4.9.4: 可点击按钮功能恢复。普通无按钮链路仍走 V3 direct image stack；
-# 有按钮链路走物理网格切割 + 单连续表格，尽量降低 Outlook 拼接缝风险。
+# V4.9.5: 可点击按钮功能恢复后，热区行不再共享同一套表格列；
+# 普通无按钮链路仍走 V3 direct image stack，降低 Outlook 拼接缝风险。
 HOTSPOT_FEATURE_ENABLED = True
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20
@@ -1109,7 +1109,7 @@ class MainWindow(QMainWindow):
             )
             wrapper_layout.addWidget(label)
 
-            # 点击事件：V4.9.1 临时屏蔽可点击按钮/热区功能
+            # 点击缩略图即可为该切片添加/编辑可点击按钮。
             if HOTSPOT_FEATURE_ENABLED:
                 wrapper.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
             self.thumb_grid.addWidget(wrapper, row, col)

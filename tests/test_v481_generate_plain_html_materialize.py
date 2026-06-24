@@ -94,11 +94,13 @@ def test_generate_plain_html_with_href_produces_a_tags():
     a_count = len(re.findall(r'<a\s+href=', html))
     assert a_count == 1, f"应有 1 个 <a> 标签，实际 {a_count}"
 
-    # <a> 应有 display: block
+    # <a> 横向拼接时必须 inline-block；内部 <img> 仍是 block 防 baseline 缝。
     a_style_match = re.search(r'<a\s+href[^>]*style="([^"]+)"', html)
     assert a_style_match, "<a> 标签缺失 style"
-    assert "display: block" in a_style_match.group(1), \
-        "<a> style 缺少 display: block（防 Outlook baseline 缝）"
+    assert "display: inline-block" in a_style_match.group(1), \
+        "<a> style 缺少 display: inline-block（防 Outlook 横向错位）"
+    assert re.search(r'<a\s+href[^>]*>.*?<img[^>]*style="[^"]*display: block', html), \
+        "<a> 内部 <img> 缺少 display: block（防 Outlook baseline 缝）"
 
 
 def test_generate_plain_html_base64_encodes_images():

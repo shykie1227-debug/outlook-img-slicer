@@ -616,58 +616,115 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
     return block, cid_counter
 
 
-def _build_complex_table_stack(groups: List[List[SliceItem]], display_w: int,
-                               is_base64: bool = False) -> Tuple[str, int]:
+def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] = None,
+                          alt: str = "", is_base64: bool = False) -> str:
     """
-    Build hotspot/multi-segment rows as one continuous presentation table.
+    Build one pre-rendered visual segment for a hotspot row.
 
-    Hotspots require horizontal cells so Outlook can make only the selected
-    image pieces clickable. Keeping every visual row inside one table removes
-    the old per-row div/table wrappers that were the main seam suspect.
+    Complex hotspot rows cannot share one HTML table because Outlook applies a
+    single column grid across all rows. The segment dimensions therefore come
+    from the prepared PNG itself and rows are rebuilt with inline image pieces.
+    """
+    try:
+        actual_w, actual_h = _get_img_dimensions(slice_path)
+    except Exception:
+        actual_w, actual_h = 650, 650
+
+    if not alt:
+        alt = Path(slice_path).name
+    safe_alt = escape(alt, quote=True)
+
+    if is_base64:
+        import base64
+        with open(slice_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        ext = Path(slice_path).suffix.lower().lstrip(".")
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+        src = f"data:{mime};base64,{b64}"
+    else:
+        src = cid_or_src
+    safe_src = escape(src, quote=True)
+
+    img_tag = (
+        f'<img src="{safe_src}" '
+        f'width="{actual_w}" height="{actual_h}" '
+        f'alt="{safe_alt}" '
+        f'border="0" hspace="0" vspace="0" align="left" '
+        f'style="display: block; width: {actual_w}px; height: {actual_h}px; '
+        f'border: 0; outline: none; text-decoration: none; '
+        f'margin: 0; padding: 0; vertical-align: top; '
+        f'line-height: 0; font-size: 0; -ms-interpolation-mode: bicubic;" />'
+    )
+    if not href:
+        return (
+            f'<span style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
+            f'margin: 0; padding: 0; border: 0; vertical-align: top; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
+            f'{img_tag}'
+            f'</span>'
+        )
+
+    safe_href = escape(href, quote=True)
+    return (
+        f'<a href="{safe_href}" target="_blank" '
+        f'style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
+        f'margin: 0; padding: 0; border: 0; vertical-align: top; '
+        f'text-decoration: none; outline: none; '
+        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
+        f'{img_tag}'
+        f'</a>'
+    )
+
+
+def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
+                                is_base64: bool = False) -> Tuple[str, int]:
+    """
+    Build hotspot/multi-segment rows without a shared table column grid.
+
+    Each visual row is independent: segments sit inline in a zero-line-height
+    block. This keeps arbitrary button positions from forcing unrelated rows
+    into the same Outlook table columns.
     """
     display_w = _normalize_display_width(display_w)
-    rows = ""
+    blocks = ""
     cid_counter = 0
 
     for group in groups:
-        allocated_widths = _allocate_group_widths(group, display_w)
-        row_height = _compute_group_height(group, display_w)
-        cells = ""
+        row_width = 0
+        row_height = 0
+        for s in group:
+            try:
+                actual_w, actual_h = _get_img_dimensions(s.path)
+            except Exception:
+                actual_w, actual_h = display_w, display_w
+            row_width += actual_w
+            row_height = max(row_height, actual_h)
+        row_width = row_width or display_w
+        row_height = row_height or _even_pixel_4x(display_w)
+
+        segments = ""
         for s in group:
             if is_base64:
                 cid_or_src = ""
             else:
                 cid_counter += 1
                 cid_or_src = f"cid:slice_{cid_counter:03d}"
-            cells += _build_cell(
-                s.path, cid_or_src, display_w, s.href, s.alt_text,
-                s.original_width, is_base64=is_base64,
-                forced_display_w=allocated_widths.get(s.path),
-                forced_display_h=row_height,
+            segments += _build_inline_segment(
+                s.path, cid_or_src, s.href, s.alt_text, is_base64=is_base64
             )
-        rows += (
-            f'<tr height="{row_height}" style="height: {row_height}px; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
-            f'valign="top" align="left">\n'
-            f'{cells}'
-            f'</tr>\n'
-        )
 
-    table = (
-        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
-        f'width="{display_w}" '
-        f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-        f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
-        f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
-        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-        f'table-layout: fixed;">\n'
-        f'{rows}'
-        f'</table>\n'
-    )
-    return table, cid_counter
+        blocks += (
+            f'<div style="display: block; width: {row_width}px; height: {row_height}px; '
+            f'max-width: {display_w}px; overflow: hidden; white-space: nowrap; '
+            f'margin: 0 auto; padding: 0; border: 0; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; '
+            f'vertical-align: top; text-align: left;">'
+            f'{segments}'
+            f'</div>'
+        )
+    return blocks, cid_counter
 
 
 def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
@@ -830,7 +887,7 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             )
         else:
             effective_w = _normalize_display_width(display_w)
-            content_blocks, cid_counter = _build_complex_table_stack(
+            content_blocks, cid_counter = _build_complex_inline_stack(
                 groups, effective_w, is_base64=False
             )
 
@@ -918,7 +975,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             slices = materialize_display_slices_strict(slices, effective_w)
             sorted_slices = sorted(slices, key=lambda s: s.sort_key)
             groups = _group_by_source(sorted_slices)
-            content_blocks, cid_counter = _build_complex_table_stack(
+            content_blocks, cid_counter = _build_complex_inline_stack(
                 groups, effective_w, is_base64=True
             )
         return (
