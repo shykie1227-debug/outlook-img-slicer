@@ -34,22 +34,35 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python build.py
 
+      - name: Compute release asset names
+        id: asset_names
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}"
+          if ($tag -match "v(\d+\.\d+\.\d+)") {
+            $version = $Matches[1]
+          } else {
+            $version = "dev"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "zip_name=OutlookImgSlicer-V$version.zip" >> $env:GITHUB_OUTPUT
+
       - name: Compress EXE
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/Outlook长图插入工具.exe" -DestinationPath "dist/OutlookImgSlicer-V5.0.0.zip" -Force
+          Compress-Archive -Path "dist/Outlook长图插入工具.exe" -DestinationPath "dist/${{ steps.asset_names.outputs.zip_name }}" -Force
           Write-Host "EXE size MB:"
           (Get-Item "dist/Outlook长图插入工具.exe").Length / 1MB
           Write-Host "ZIP size MB:"
-          (Get-Item "dist/OutlookImgSlicer-V5.0.0.zip").Length / 1MB
+          (Get-Item "dist/${{ steps.asset_names.outputs.zip_name }}").Length / 1MB
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OutlookImgSlicer-V5.0.0
+          name: OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}
           path: |
             dist/Outlook长图插入工具.exe
-            dist/OutlookImgSlicer-V5.0.0.zip
+            dist/${{ steps.asset_names.outputs.zip_name }}
           retention-days: 5
 
   release:
@@ -58,16 +71,29 @@ jobs:
     if: github.event_name == 'release'
 
     steps:
+      - name: Compute release asset names
+        id: asset_names
+        shell: bash
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          if [[ "$tag" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            version="${BASH_REMATCH[1]}"
+          else
+            version="dev"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "zip_name=OutlookImgSlicer-V$version.zip" >> "$GITHUB_OUTPUT"
+
       - name: Download EXE
         uses: actions/download-artifact@v4
         with:
-          name: OutlookImgSlicer-V5.0.0
+          name: OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}
 
       - name: Upload Release assets
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            "Outlook长图插入工具.exe" \
-            "OutlookImgSlicer-V5.0.0.zip" \
+            "Outlook长图插入工具.exe#Outlook.exe" \
+            "${{ steps.asset_names.outputs.zip_name }}" \
             --repo "${{ github.repository }}" \
             --clobber
         env:
