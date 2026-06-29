@@ -139,6 +139,12 @@ def print_change_log():
         print(f"  [警告] 历史记录保存失败（不影响构建）: {type(e).__name__}: {e}")
 
 
+def pause_before_exit():
+    """Pause for double-click Windows users, but never fail in CI/non-interactive shells."""
+    if sys.stdin is not None and sys.stdin.isatty():
+        input("\n按回车键退出...")
+
+
 def run(cmd: list, **kwargs):
     print(f"\n>>> {' '.join(str(c) for c in cmd)}")
     result = subprocess.run(cmd, **kwargs)
@@ -148,7 +154,7 @@ def run(cmd: list, **kwargs):
             print("STDOUT:", result.stdout[-2000:])
         if result.stderr:
             print("STDERR:", result.stderr[-2000:])
-        input("\n按回车键退出...")
+        pause_before_exit()
         sys.exit(result.returncode)
     return result
 
@@ -202,7 +208,7 @@ def check_and_install_deps():
         print(f"[ERROR] 自动安装失败:")
         print(result.stdout[-2000:])
         print(result.stderr[-2000:])
-        input("\n按回车键退出...")
+        pause_before_exit()
         sys.exit(1)
     print("[INFO] 依赖安装完成！")
 
@@ -299,7 +305,7 @@ def main():
     spec_file = PROJECT_ROOT / "outlook_img_slicer.spec"
     if not spec_file.exists():
         print(f"[ERROR] spec 文件不存在: {spec_file}")
-        input("\n按回车键退出...")
+        pause_before_exit()
         sys.exit(1)
 
     print("\n开始构建（--onefile 模式）...")
@@ -321,7 +327,7 @@ def main():
 
     print("\n打包完成！")
     print(f"产物目录: {dist_dir}")
-    input("\n按回车键退出...")
+    pause_before_exit()
 
 
 if __name__ == "__main__":
