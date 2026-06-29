@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 打包配置 - outlook-img-slicer V4.0.20260513
+PyInstaller 打包配置 - outlook-img-slicer V5.0.20260629
 真正的单文件模式（--onefile），优化体积
 """
 import sys
@@ -31,6 +31,11 @@ hiddenimports = [
     # V4 新增模块
     "image_safety",
     "html_assembler",
+    "clipboard_html",
+    "cut_editor",
+    "hotspot_editor",
+    "hotspot_slicer",
+    "clickable_map",
     # V4.6 新增：PSD 支持（psd-tools 依赖 numpy）
     "psd_slicer",
     "psd_tools",

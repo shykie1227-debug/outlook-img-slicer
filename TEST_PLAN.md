@@ -5,6 +5,9 @@
 ### 1.1 测试范围
 - `image_slicer.py` - 图像切片模块
 - `html_assembler.py` - HTML 组装模块
+- `clipboard_html.py` - Windows CF_HTML 字节偏移
+- `cut_editor.py` - 手动切线与防呆
+- `hotspot_slicer.py` - 可点击按钮最小物理切片
 - `pdf_slicer.py` - PDF 解析模块
 - `outlook_sender.py` - Outlook 发送模块
 
@@ -105,8 +108,12 @@ pytest tests/ --cov=. --cov-report=html
 
 ## 6. 验收标准
 
-- [x] 所有测试用例通过 (23/23)
-- [x] 核心模块覆盖率 ≥ 80%
+- [x] 自动化回归测试通过（V5.0 当前 93 项）
+- [x] 中文 CF_HTML 片段起止字节准确
+- [x] 两个上下错开的按钮由 25 个片段降为 9 个
+- [x] 手动切线保持像素完整，并限制每片 80–1200px
+- [x] 同名文件、多实例临时工作区互相隔离
+- [x] HTML 浏览器检查：9 张图片、2 个链接、5 个视觉行、1 个外层表格、0 张破图
 - [x] 错误路径测试覆盖 ImportError、IOError、ValueError
 - [x] Linux/macOS 环境可完整运行测试（跳过 Windows 特定部分）
-- [x] 发现并修复 `html_assembler.py` 中 CSS 双花括号转义 bug
+- [ ] Windows 经典 Outlook 实机发送与 EXE 构建由用户本地完成

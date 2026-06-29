@@ -533,46 +533,7 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
     allocated_widths = _allocate_group_widths(group, display_w)
     row_height = _compute_group_height(group, display_w)
 
-    if len(group) == 1:
-        s = group[0]
-        if is_base64:
-            cid_or_src = ""
-        else:
-            cid_counter += 1
-            cid_or_src = f"cid:slice_{cid_counter:03d}"
-        cell = _build_cell(
-            s.path, cid_or_src, display_w, s.href, s.alt_text,
-            s.original_width, is_base64=is_base64,
-            forced_display_w=allocated_widths.get(s.path),
-            forced_display_h=row_height,
-        )
-        # 用 <div> 包裹让 cell 垂直堆叠，不产生行间距
-        block = (
-            f'<div style="margin: 0; padding: 0; border: 0; '
-            f'font-size: 0; line-height: 0; '
-            f'mso-line-height-rule: exactly; '
-            f'vertical-align: top; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
-            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
-            f'width="{display_w}" '
-            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
-            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-            f'table-layout: fixed;">\n'
-            f'<tr height="{row_height}" style="height: {row_height}px; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
-            f'valign="top" align="left">\n'
-            f'{cell}'
-            f'</tr>\n'
-            f'</table>\n'
-            f'</div>\n'
-        )
-        return block, cid_counter
-
-    # 多段（hotspot 横向拼接）：内层 table 单行
+    # V4.9.4: 单条/多段统一用 <table><tr>，去除 <div> 包裹消除 Outlook 行间距
     cells = ""
     for s in group:
         if is_base64:
@@ -587,7 +548,7 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
             forced_display_h=row_height,
         )
 
-    inner_table = (
+    block = (
         f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
         f'width="{display_w}" '
         f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
@@ -602,16 +563,7 @@ def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
         f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" valign="top" align="left">\n'
         f'{cells}'
         f'</tr>\n'
-        f'</table>'
-    )
-    block = (
-        f'<div style="margin: 0; padding: 0; border: 0; '
-        f'font-size: 0; line-height: 0; '
-        f'mso-line-height-rule: exactly; '
-        f'vertical-align: top; '
-        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
-        f'{inner_table}\n'
-        f'</div>\n'
+        f'</table>\n'
     )
     return block, cid_counter
 
@@ -682,9 +634,8 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
     """
     Build hotspot/multi-segment rows without a shared table column grid.
 
-    Each visual row is independent: segments sit inline in a zero-line-height
-    block. This keeps arbitrary button positions from forcing unrelated rows
-    into the same Outlook table columns.
+    每个视觉行独立使用 inline segment。这样上下两行按钮位置不同时，
+    Outlook Word 不会把它们强制套进同一组表格列，也不会产生嵌套表格边界。
     """
     display_w = _normalize_display_width(display_w)
     blocks = ""
@@ -768,18 +719,16 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             if len(group) == 1 and row_height >= max_h:
                 for s, part in source_parts:
                     counter += 1
-                    target_w = _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
+                    # V4.9.4: 单条路径保留原始宽度，不归一化到 4 的倍数
+                    target_w = part.width
                     target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
                     # 宽度一致但高度不足 → 底部延展最后一行像素
-                    if part.width == target_w and max_h < row_height:
+                    if max_h < row_height:
                         out = Image.new("RGB", (target_w, row_height))
                         out.paste(part, (0, 0))
                         last_row = part.crop((0, max_h - 1, target_w, max_h))
                         for yy in range(max_h, row_height):
                             out.paste(last_row, (0, yy))
-                    # 宽度不一致 → resize
-                    elif part.width != target_w or max_h != row_height:
-                        out = part.resize((target_w, row_height), Image.LANCZOS)
                     else:
                         # 宽高完全一致 → 直接保存副本（必须建新文件满足 strict 检查）
                         out = part.copy()
@@ -789,7 +738,7 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                         href=s.href,
                         alt_text=s.alt_text,
                         sort_key=s.sort_key,
-                        original_width=display_w_even,
+                        original_width=target_w,
                     ))
                 continue
 

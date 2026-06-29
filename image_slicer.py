@@ -7,12 +7,61 @@ V4.8.7 Outlook 缝隙根治：切片阶段保证输出 PNG 总高严格 = 原图
 """
 import os
 import tempfile
+import shutil
+import atexit
 from math import ceil
 from typing import List, Tuple
 from pathlib import Path
 from PIL import Image
 
 from image_safety import check_image_safety, ImageSafetyError
+
+
+_generated_temp_dirs: set[str] = set()
+
+
+def _new_output_dir(prefix: str) -> Path:
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    _generated_temp_dirs.add(str(path.resolve()))
+    return path
+
+
+def create_temp_workspace(prefix: str) -> Path:
+    """Create a process-owned isolated workspace for another image pipeline."""
+    return _new_output_dir(prefix)
+
+
+def cleanup_generated_slices(paths: List[str]) -> int:
+    """Delete only isolated workspaces created by this process."""
+    candidate_dirs = {
+        str(Path(path).parent.resolve())
+        for path in paths
+        if path
+    }
+    deleted = 0
+    for directory in candidate_dirs & set(_generated_temp_dirs):
+        try:
+            shutil.rmtree(directory)
+            deleted += 1
+        except OSError:
+            continue
+        _generated_temp_dirs.discard(directory)
+    return deleted
+
+
+def cleanup_all_generated_temp_dirs() -> int:
+    deleted = 0
+    for directory in list(_generated_temp_dirs):
+        try:
+            shutil.rmtree(directory)
+            deleted += 1
+        except OSError:
+            continue
+        _generated_temp_dirs.discard(directory)
+    return deleted
+
+
+atexit.register(cleanup_all_generated_temp_dirs)
 
 
 # ── 智能切图常量 ────────────────────────────
@@ -323,7 +372,8 @@ def _find_smart_cut(pixels, width: int, height: int, target_cut: int,
 
 
 def detect_and_slice(image_path: str, max_height: int = 1200,
-                     smart: bool = False, target_width: int = None) -> List[str]:
+                     smart: bool = False, target_width: int = None,
+                     always_copy: bool = False) -> List[str]:
     """
     检测图像高度，必要时进行无损切片。
 
@@ -332,6 +382,7 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
         max_height: 单片最大高度（像素），默认 1200px
         smart: 是否启用智能切图（避免切断内容），默认 False=等分切图
         target_width: 目标宽度（像素），若指定则在切片前将图片缩放到此宽度，None=保持原宽
+        always_copy: 即使无需缩放/切片也复制到隔离工作区，供文档转换页使用
 
     Returns:
         切片后的临时文件路径列表
@@ -355,10 +406,16 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
             if scale_ratio != 1.0:
                 new_w = int(orig_w * scale_ratio)
                 img = img.resize((new_w, scaled_h), Image.LANCZOS)
-                temp_dir = tempfile.gettempdir()
+                temp_dir = _new_output_dir("outlook_scaled_")
                 base_name = Path(image_path).stem
-                out_path = os.path.join(temp_dir, f"scaled_{base_name}.png")
+                out_path = str(temp_dir / f"scaled_{base_name}.png")
                 img.save(out_path, format="PNG", optimize=True)
+                return [out_path]
+            if always_copy:
+                temp_dir = _new_output_dir("outlook_source_")
+                out_path = str(temp_dir / f"source_{Path(image_path).stem}.png")
+                output = img.convert("RGB") if img.mode != "RGB" else img.copy()
+                output.save(out_path, format="PNG", optimize=True)
                 return [out_path]
             return [image_path]
 
@@ -381,7 +438,7 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
 
         slice_count = ceil(out_h / max_height)
         slice_paths: List[str] = []
-        temp_dir = tempfile.gettempdir()
+        temp_dir = _new_output_dir("outlook_slices_")
         base_name = Path(image_path).stem
 
         current_top = 0
@@ -420,7 +477,7 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
 
             ext = ".png"
             slice_filename = f"slice_{i}_{base_name}{ext}"
-            slice_path = os.path.join(temp_dir, slice_filename)
+            slice_path = str(temp_dir / slice_filename)
 
             if slice_img.mode in ("RGBA", "P"):
                 slice_img = slice_img.convert("RGB")
@@ -438,3 +495,90 @@ def get_image_info(image_path: str) -> dict:
     with Image.open(image_path) as img:
         w, h = img.size
         return {"width": w, "height": h, "format": img.format}
+
+
+def validate_cut_positions(
+    total_height: int,
+    cut_positions: List[int],
+    min_height: int = 80,
+    max_height: int = 1200,
+) -> List[int]:
+    """Validate manual horizontal cut positions for Outlook-safe slices."""
+    try:
+        total_height = int(total_height)
+        positions = [int(position) for position in cut_positions]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("切线位置必须是整数像素。") from exc
+
+    if total_height <= 0:
+        raise ValueError("图片总高度必须大于 0。")
+    if positions != sorted(set(positions)):
+        raise ValueError("切线位置必须严格递增，不能交叉或重复。")
+    if positions and (positions[0] <= 0 or positions[-1] >= total_height):
+        raise ValueError("切线必须位于图片内部，不能贴住顶部或底部。")
+
+    boundaries = [0, *positions, total_height]
+    heights = [
+        boundaries[index + 1] - boundaries[index]
+        for index in range(len(boundaries) - 1)
+    ]
+    if any(height < min_height for height in heights):
+        raise ValueError(f"每张切片高度至少需要 {min_height}px。")
+    if any(height > max_height for height in heights):
+        raise ValueError(f"每张切片高度不能超过 Outlook 安全上限 {max_height}px。")
+    return positions
+
+
+def reslice_existing_stack(
+    slice_paths: List[str],
+    cut_positions: List[int],
+    output_dir: str = None,
+    min_height: int = 80,
+    max_height: int = 1200,
+) -> List[str]:
+    """Recompose existing vertical slices and cut them again without losing pixels."""
+    if not slice_paths:
+        raise ValueError("没有可调整的切片。")
+
+    opened = []
+    try:
+        for path in slice_paths:
+            with Image.open(path) as image:
+                opened.append(image.convert("RGB").copy())
+
+        canvas_width = max(image.width for image in opened)
+        total_height = sum(image.height for image in opened)
+        positions = validate_cut_positions(
+            total_height,
+            cut_positions,
+            min_height=min_height,
+            max_height=max_height,
+        )
+
+        combined = Image.new("RGB", (canvas_width, total_height), (255, 255, 255))
+        current_y = 0
+        for image in opened:
+            x = (canvas_width - image.width) // 2
+            combined.paste(image, (x, current_y))
+            current_y += image.height
+
+        target_dir = Path(output_dir) if output_dir else _new_output_dir(
+            "outlook_manual_cuts_"
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+        boundaries = [0, *positions, total_height]
+        result = []
+        for index, (top, bottom) in enumerate(
+            zip(boundaries, boundaries[1:]),
+            start=1,
+        ):
+            target = target_dir / f"manual_slice_{index:03d}.png"
+            combined.crop((0, top, canvas_width, bottom)).save(
+                target,
+                format="PNG",
+                optimize=True,
+            )
+            result.append(str(target))
+        return result
+    except OSError as exc:
+        raise RuntimeError(f"手动切图失败: {exc}") from exc

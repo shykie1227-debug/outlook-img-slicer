@@ -23,3 +23,6 @@ TODO.local.md
 .aider*
 .conversation.md
 CHAT_HISTORY.md
+
+# Release binaries are uploaded to GitHub Releases, not committed
+release-artifacts/*.exe

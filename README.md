@@ -1,6 +1,6 @@
 # Outlook 长图无损插入工具
 
-将长图 / 长截图自动切片后插入 Outlook 邮件正文，突破邮件客户端 1728px 高度限制，100% 无损拼接。
+将长图 / 长截图自动切片后插入经典 Outlook 邮件正文。支持手动调整切线、图片按钮链接和本地 HTML 复制，全程离线且不会自动发送邮件。
 
 <p align="center">
   <a href="https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest">
@@ -19,13 +19,15 @@
 
 ## ✨ 功能特性
 
-- 🎯 **智能切片** — 高度超过 1200px 自动垂直分块，支持任意图片格式
+- 🎯 **安全切片** — 高度超过 1200px 自动垂直分块，默认邮件宽度 650px
+- ✋ **手动切线** — 自动切图后可拖动横线微调切开位置，内置 80–1200px 防呆范围
 - 📎 **拖拽上传** — 支持 JPG / PNG / WebP / GIF / BMP / PDF / PPT / PPTX / **PSD** 直接拖入
 - 🧠 **三重智能切图加强** — BLANK_VARIANCE / TRANSITION / TEXT_BUFFER 加严，避免切断文字
-- 🎯 **可点击热区** — 在图上框选按钮位置挂 URL，邮件里点击跳转（Outlook `<map>+<area>` 热点）
-- 🧩 **无缝拼接** — HTML 表格布局，Outlook 中图片零间隙
-- 📤 **一键发送** — Outlook COM 自动化，自动弹出预填好的邮件窗口
-- 🖥️ **Windows 专属** — 仅支持 Windows 10/11，需安装 Microsoft Outlook
+- 🎯 **可点击热区** — 在图上框选按钮位置挂 URL，使用 Outlook 支持的物理图片分段
+- 🧩 **最小分片** — 只切按钮所在行，减少附件数量和 Outlook 重排风险
+- 📤 **创建草稿** — Outlook COM 自动弹出预填邮件窗口，由用户检查后手动发送
+- 📋 **可靠复制** — Windows CF_HTML 使用正确的 UTF-8 字节偏移，避免中文内容截断
+- 🖥️ **Windows 专属** — 创建邮件需 Windows 10/11 和经典 Outlook
 - 🔲 **DPI 自适应** — 完美支持高分屏（100% / 125% / 150% / 175%）
 - 🧹 **临时清理** — 程序退出自动删除切片文件，无残留
 - ⚙️ **免安装** — 下载双击即用，无需配置 Python 环境
@@ -65,9 +67,8 @@ python main.py
 ### 📦 方式四：自行打包
 
 ```bash
-pip install pyinstaller
-pyinstaller --clean --noconfirm outlook_img_slicer.spec
-# 输出目录: dist/Outlook长图插入工具/
+python build.py
+# 输出: dist/Outlook长图插入工具.exe
 ```
 
 ---
@@ -78,9 +79,9 @@ pyinstaller --clean --noconfirm outlook_img_slicer.spec
 
 1. 下载并双击 `Outlook长图插入工具.exe` 启动程序
 2. 将长图 / 长截图**拖入**窗口，或点击**选择文件**
-3. （可选）调整宽度、勾选智能切图、添加可点击热区
+3. （可选）点击**调整切图位置**拖动切线，或点击缩略图添加按钮链接
 4. 填写收件人（可选）和邮件标题（可选）
-5. 点击**创建 Outlook 邮件** → Outlook 自动弹出
+5. 点击**在经典 Outlook 中创建邮件** → Outlook 自动弹出
 6. 在邮件窗口中核对内容，发送！
 
 ### 支持的文件格式
@@ -92,7 +93,15 @@ pyinstaller --clean --noconfirm outlook_img_slicer.spec
 | 幻灯片 | PPT / PPTX | 需 PowerPoint 或 LibreOffice 全保真渲染 |
 | 设计稿 | PSD | 自动合并所有可见图层 |
 
-### 🎯 可点击热区（V4.6.1 新功能）
+### ✋ 手动调整切图位置（V5.0）
+
+1. 自动切图完成后点击**调整切图位置**
+2. 在整图预览中拖动橙色横线
+3. 工具会自动限制每张切片至少 80px、最多 1200px
+4. 点击**应用切线**后重新检查缩略图
+5. 如果已经添加按钮链接，调整前会明确提示链接区域将被清空
+
+### 🎯 可点击热区
 
 在切片上**框选可点击区域 + 填 URL** → 邮件中该区域变成可点击链接：
 
@@ -101,7 +110,7 @@ pyinstaller --clean --noconfirm outlook_img_slicer.spec
 3. 输入 URL（如 `https://example.com/buy`）→ 添加
 4. 已添加的热区用橙色虚线标注
 5. 列表项右键可**改 URL / 改区域 / 删除**
-6. 「复制 HTML」或「发送邮件」时自动嵌入 `<map>+<area>` 热点
+6. 「复制到 Outlook」或「创建邮件」时自动生成带链接的物理图片片段
 
 ---
 
@@ -109,15 +118,17 @@ pyinstaller --clean --noconfirm outlook_img_slicer.spec
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Outlook 长图助手 V4.6.1                            │  ← 标题栏
+│  Outlook 长图助手 V5.0.0                            │  ← 标题栏
 │  长图/PDF/PPT/PSD切片后插入Outlook邮件               │
+│  1 放入文件 → 2 调整切线/添加链接 → 3 创建邮件       │
 ├─────────────────────────────────────────────────────┤
 │      📂                                             │  ← 拖拽上传区
 │   拖拽或点击上传                                    │
 │   支持 JPG · PNG · PDF · PPT · PSD                  │
 ├─────────────────────────────────────────────────────┤
-│  [重置]  宽度：[960] px  [───●────]                │
-│         [ ] 智能切图   [📋 复制HTML] [🎯 添加按钮] │
+│  [重置]  邮件宽度：[650] px  [──●────]             │
+│  [ ] 导出图片  [✓] 避开文字切图（推荐）             │
+│  [复制到Outlook] [调整切图位置] [添加可点击按钮]     │
 ├─────────────────────────────────────────────────────┤
 │  邮件标题（可选）_____________________________      │
 ├─────────────────────────────────────────────────────┤
@@ -146,8 +157,8 @@ pyinstaller --clean --noconfirm outlook_img_slicer.spec
                     └──────────┬──────────┘
                                │
                     ┌──────────▼──────────┐
-                    │  生成 HTML 表格     │
-                    │  + 可点击热区 <map>  │
+                    │ 普通图连续 <img>     │
+                    │ 按钮行最小物理切片   │
                     └──────────┬──────────┘
                                │
                     ┌──────────▼──────────┐
@@ -157,7 +168,7 @@ pyinstaller --clean --noconfirm outlook_img_slicer.spec
                     └─────────────────────┘
 ```
 
-**为什么用表格？** Outlook 对 CSS 支持残缺，`<table>` 是唯一能在所有版本 Outlook（尤其 Outlook 2007-2016）中可靠居中且无间隙拼接图片的布局方案。
+**为什么只保留一个外层表格？** 经典 Outlook 使用 Word 引擎。一个外层表格负责邮件宽度和居中，普通切片在同一单元格内连续排列；按钮所在行独立拼接，避免多层表格互相影响列宽。
 
 **为什么不自动发送？** 邮件发送是不可逆操作——本工具仅弹出预填好的邮件窗口，由用户**手动检查后点发送**，符合「本地运行 + 用户最终决策」原则。
 
@@ -174,7 +185,10 @@ outlook-img-slicer/
 ├── psd_slicer.py            # 🎨 PSD 解析模块（psd-tools 合并可见图层）
 ├── clickable_map.py         # 🎯 可点击热区数据层
 ├── hotspot_editor.py        # 🎯 热区交互编辑器
-├── html_assembler.py        # 🧩 HTML 组装模块（表格 + <map> 热区）
+├── hotspot_slicer.py        # ✂️ 热区最小物理切片
+├── cut_editor.py            # ✋ 手动切线编辑器
+├── clipboard_html.py        # 📋 Windows CF_HTML 封装
+├── html_assembler.py        # 🧩 Outlook HTML 组装模块
 ├── outlook_sender.py        # 📬 Outlook 自动化模块（pywin32 COM）
 ├── image_safety.py          # 🛡️ 图片安全检查
 ├── requirements.txt         # 📦 Python 依赖声明
@@ -195,7 +209,10 @@ outlook-img-slicer/
 | `psd_slicer.py` | 解析 PSD 文档（合并所有可见图层） |
 | `clickable_map.py` | 热区数据模型（Hotspot + HotspotMap） |
 | `hotspot_editor.py` | 热区交互编辑器（拖框选 + URL 编辑） |
-| `html_assembler.py` | 将切片生成为 `<table>` HTML + `<map>` 热区 |
+| `hotspot_slicer.py` | 将按钮区域转换为最少数量的可点击图片片段 |
+| `cut_editor.py` | 手动拖动并校验水平切线 |
+| `clipboard_html.py` | 生成 UTF-8 字节偏移正确的 Windows CF_HTML |
+| `html_assembler.py` | 生成 Outlook 兼容的 CID / Base64 HTML |
 | `outlook_sender.py` | 通过 `win32com.client` 启动 Outlook 并填充邮件 |
 
 ---
@@ -204,14 +221,14 @@ outlook-img-slicer/
 
 | 类别 | 技术 |
 |:---|:---|
-| 语言 | Python 3.8+ |
+| 语言 | Python 3.10+ |
 | UI 框架 | PySide6 (Qt6) |
 | 图像处理 | Pillow ≥ 10.0 |
 | PDF / PPT 解析 | PyMuPDF ≥ 1.23 |
 | PSD 解析 | psd-tools ≥ 1.10 + numpy |
 | Outlook 自动化 | pywin32 ≥ 306（仅 Windows） |
 | 打包 | PyInstaller 6.0 |
-| 邮件布局 | HTML `<table>` + inline style + `<map>` 热区 |
+| 邮件布局 | 单外层 `<table>` + 连续图片 + 独立热区行 |
 
 ---
 
@@ -244,6 +261,14 @@ A: **不会**。本工具**完全不联网、不上传、完全本地运行**。
 ---
 
 ## 📝 更新日志
+
+### V5.0.0 — 2026-06-29
+
+- 修复中文 CF_HTML 偏移导致的粘贴截断。
+- 热区改为逐行最小切片，减少 Outlook 附件数量和错位风险。
+- 新增手动切线编辑器、三步引导和 80–1200px 防呆。
+- 同名图片、文档转换页和热区中间文件使用独立临时工作区。
+- 默认邮件宽度改为 650px，主操作明确标注经典 Outlook。
 
 ### [V4.6.1 xiaoming](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest) — 2026-06-01
 

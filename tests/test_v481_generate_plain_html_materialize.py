@@ -94,7 +94,7 @@ def test_generate_plain_html_with_href_produces_a_tags():
     a_count = len(re.findall(r'<a\s+href=', html))
     assert a_count == 1, f"应有 1 个 <a> 标签，实际 {a_count}"
 
-    # <a> 横向拼接时必须 inline-block；内部 <img> 仍是 block 防 baseline 缝。
+    # V5.0: 横向片段必须 inline-block；内部图片仍保持 block。
     a_style_match = re.search(r'<a\s+href[^>]*style="([^"]+)"', html)
     assert a_style_match, "<a> 标签缺失 style"
     assert "display: inline-block" in a_style_match.group(1), \

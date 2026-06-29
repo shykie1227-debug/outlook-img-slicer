@@ -39,8 +39,9 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
     sliced, link_map = slice_paths_by_hotspots(
         [str(src)], hotspots, source_index_map={"grid.png": 1.0}
     )
-    # X lines: 0,100,250,650 => 3 cols; Y lines: 0,100,180,300,380,500 => 5 rows
-    assert len(sliced) == 15
+    # 每个按钮行 3 段，三个无按钮行各保持整图：3 + 3 + 3 = 9。
+    # 不再把按钮 X 边界扩散到所有 Y 行。
+    assert len(sliced) == 9
     assert sum(1 for name in link_map if link_map[name]) == 2
 
     slices = [
@@ -57,10 +58,9 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
 
     assert "https://top.example" in html
     assert "https://bottom.example" in html
-    # V2 必须输出多行，而不是把 15 个 cell 横向塞进单行。
-    assert html.count("<div") >= 5
-    # V4.9.5: hotspot rows must not share an inner table column grid.
+    # V5.0: 每个视觉行独立 inline，且整封邮件只有一个外层 table。
     assert html.count("<table") == 1
+    assert html.count("<div") == 5
     assert "<tr height=" not in html
 
     # 所有预渲染 PNG 边缘不得出现默认黑/白异常色。

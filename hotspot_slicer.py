@@ -27,6 +27,7 @@ from typing import List, Tuple
 from PIL import Image
 
 from clickable_map import Hotspot, HotspotMap
+from image_slicer import create_temp_workspace
 
 
 # V4.8.10: 用户手动拖选一排按钮时，1~3px 压线属于正常操作误差。
@@ -177,28 +178,36 @@ def slice_image_with_hotspots(
     if not ok:
         raise ValueError(reason)
 
-    # 2) 计算 X/Y 网格线
-    x_lines = {0, img_w}
+    # 2) 只建立全局 Y 行；每一行单独计算当行真正需要的 X 边界。
+    # 旧实现把所有按钮的 X 边界扩散到所有 Y 行，两个上下错开的按钮就会
+    # 生成 5×5=25 个片段。Outlook 附件数量因此快速膨胀并增加重排风险。
     y_lines = {0, img_h}
     for h in hotspots:
-        x_lines.add(h.x1)
-        x_lines.add(h.x2)
         y_lines.add(h.y1)
         y_lines.add(h.y2)
-    x_lines = sorted(x_lines)
     y_lines = sorted(y_lines)
 
-    # 3) 物理切割。sort_key 用 row-major 编码，让 HTML 按 Y 行分组、X 列拼接。
+    # 3) 物理切割。无按钮行保持一整张图；按钮行只按当行按钮分段。
     stripes: List[CutStripe] = []
     for row in range(len(y_lines) - 1):
         y1, y2 = y_lines[row], y_lines[row + 1]
+        active_hotspots = [
+            h for h in hotspots
+            if h.y1 <= y1 and h.y2 >= y2
+        ]
+        x_lines = {0, img_w}
+        for h in active_hotspots:
+            x_lines.add(h.x1)
+            x_lines.add(h.x2)
+        x_lines = sorted(x_lines)
+
         for col in range(len(x_lines) - 1):
             x1, x2 = x_lines[col], x_lines[col + 1]
             if x1 == x2 or y1 == y2:
                 continue
             cell_img = img.crop((x1, y1, x2, y2))
             href, text = None, ""
-            for h in hotspots:
+            for h in active_hotspots:
                 if x1 >= h.x1 and x2 <= h.x2 and y1 >= h.y1 and y2 <= h.y2:
                     href, text = h.url, h.text
                     break
@@ -241,7 +250,7 @@ def slice_paths_by_hotspots(
     link_map: dict = {}
     if not image_paths:
         return slices_with_key, link_map
-    base_dir = os.path.dirname(image_paths[0])
+    hotspot_output_dir = None
     counter = 0  # 文件名唯一性用，不参与排序
 
     for idx, path in enumerate(image_paths):
@@ -260,11 +269,13 @@ def slice_paths_by_hotspots(
                 link_map[fname] = None
                 continue
             # 有 hotspot：物理切割，每条竖条 sort_key = source_index + N*0.001
+            if hotspot_output_dir is None:
+                hotspot_output_dir = create_temp_workspace("outlook_hotspots_")
             stripes = slice_image_with_hotspots(img, hots, source_index=source_index)
             for s in stripes:
                 counter += 1
                 new_name = f"hs_{counter:03d}.png"
-                new_path = os.path.join(base_dir, new_name)
+                new_path = str(hotspot_output_dir / new_name)
                 s.image.save(new_path, "PNG")
                 slices_with_key.append((new_path, s.sort_key))
                 link_map[new_name] = s.href

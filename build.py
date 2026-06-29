@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-build.py - Outlook 长图插入工具 V3 一键打包脚本
+build.py - Outlook 长图插入工具 V5 一键打包脚本
 用法: python build.py
 依赖: pip install pyinstaller Pillow PyMuPDF PySide6 pywin32 python-pptx lxml
 V4.7.7 R3: pywin32==306 → pywin32（不锁版本，兼容 Python 3.14 + 3.11/3.12），
@@ -269,7 +269,7 @@ def create_onedir_fallback(dist_dir: Path = None, build_dir: Path = None):
 
 
 def main():
-    print("=== Outlook 长图插入工具 V3 打包脚本 ===")
+    print("=== Outlook 长图插入工具 V5 打包脚本 ===")
     print(f"项目目录: {PROJECT_ROOT}")
     print(f"Python: {sys.version}")
 

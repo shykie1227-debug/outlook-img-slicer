@@ -1,5 +1,5 @@
 """
-Outlook 长图无损插入工具 - 主程序 V4
+Outlook 长图无损插入工具 - 主程序 V5
 PySide6 窗口应用，支持拖拽上传、自动切片、邮件体积检测、一键复制HTML、多图合并
 """
 import os
@@ -22,7 +22,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator
 
-from image_slicer import detect_and_slice, get_image_info
+from image_slicer import (
+    detect_and_slice,
+    get_image_info,
+    reslice_existing_stack,
+    cleanup_generated_slices,
+)
 # V4.7.7 Fix E: 删除 auto_merge_images 死 import（原 _handle_multi_files 已删）
 # image_slicer.auto_merge_images 函数本身保留以备未来使用
 from pdf_slicer import pdf_to_images
@@ -43,70 +48,24 @@ from image_safety import check_image_safety, ImageSafetyError, estimate_email_si
 # ProcessModeDialog 类保留在 mode_dialog.py 中以便 v4.6.2-v4.7.6 用户回退，
 # 不再从 main.py 调用。
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
+from clipboard_html import (
+    build_windows_clipboard_html as _build_windows_clipboard_html,
+)
+from cut_editor import CutEditorDialog
 
 
-VERSION = "4.9.5"
+VERSION = "5.0.0"
 VERSION_BY = "xiaoming"
-# V4.9.5: 可点击按钮功能恢复后，热区行不再共享同一套表格列；
-# 普通无按钮链路仍走 V3 direct image stack，降低 Outlook 拼接缝风险。
+# V5.0: 修复剪贴板 UTF-8 截断，最小化热区切片，并加入手动切线编辑。
 HOTSPOT_FEATURE_ENABLED = True
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20
 COMPRESS_QUALITY = 65  # 压缩时 JPEG 质量
 
 
-def _extract_html_fragment(html: str) -> str:
-    """Extract pasteable body content from a full HTML document."""
-    body_match = re.search(r"<body\b[^>]*>(.*)</body>", html, flags=re.IGNORECASE | re.DOTALL)
-    return body_match.group(1) if body_match else html
-
-
-def _build_windows_clipboard_html(html: str) -> bytes:
-    """
-    Build CF_HTML payload for Windows clipboard consumers.
-
-    Some WebView2-based editors, including new Outlook for Windows, ignore Qt's
-    generic text/html MIME entry but read the native "HTML Format" clipboard data.
-    Offsets are byte offsets in the final UTF-8 payload.
-    """
-    fragment = _extract_html_fragment(html)
-    body = (
-        "<html><body>"
-        "<!--StartFragment-->"
-        f"{fragment}"
-        "<!--EndFragment-->"
-        "</body></html>"
-    )
-    header_template = (
-        "Version:0.9\r\n"
-        "StartHTML:{start_html:010d}\r\n"
-        "EndHTML:{end_html:010d}\r\n"
-        "StartFragment:{start_fragment:010d}\r\n"
-        "EndFragment:{end_fragment:010d}\r\n"
-        "SourceURL:about:blank\r\n"
-    )
-    placeholder_header = header_template.format(
-        start_html=0,
-        end_html=0,
-        start_fragment=0,
-        end_fragment=0,
-    )
-    start_html = len(placeholder_header.encode("utf-8"))
-    start_fragment = start_html + body.index("<!--StartFragment-->") + len("<!--StartFragment-->")
-    end_fragment = start_html + body.index("<!--EndFragment-->")
-    end_html = start_html + len(body.encode("utf-8"))
-    header = header_template.format(
-        start_html=start_html,
-        end_html=end_html,
-        start_fragment=start_fragment,
-        end_fragment=end_fragment,
-    )
-    return (header + body).encode("utf-8")
-
-
 class Config:
     APP_TITLE = f"Outlook 长图助手 V{VERSION}"
-    DEFAULT_WIDTH = 960
+    DEFAULT_WIDTH = 650
     MAX_HEIGHT_PER_SLICE = OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE
     MAX_SLICE_COUNT = 20
     WINDOW_WIDTH = 760
@@ -119,9 +78,9 @@ class Config:
 
 class Theme:
     PRIMARY = "#0078D4"
-    PRIMARY_HOVER = "#2563EB"
-    PRIMARY_ACTIVE = "#1D4ED8"
-    PRIMARY_DISABLED = "#BFDBFE"
+    PRIMARY_HOVER = "#106EBE"
+    PRIMARY_ACTIVE = "#005A9E"
+    PRIMARY_DISABLED = "#C7E0F4"
     PRIMARY_TEXT = "#FFFFFF"
     SECONDARY_BG = "#FFFFFF"
     SECONDARY_HOVER = "#F3F4F6"
@@ -130,13 +89,14 @@ class Theme:
     GHOST_BG = "#F3F4F6"
     GHOST_HOVER = "#E5E7EB"
     GHOST_TEXT = "#374151"
-    SUCCESS = "#10B981"
-    ERROR = "#EF4444"
-    WARNING = "#F59E0B"
-    BG = "#F0F2F5"
+    SUCCESS = "#0E7B3C"
+    ERROR = "#C4314B"
+    WARNING = "#D83B01"
+    BG = "#F8F9FA"
     CARD = "#FFFFFF"
-    BORDER = "#E4E7EC"
-    BORDER_HOVER = "#C8CDD6"
+    CARD_SHADOW = "rgba(0, 0, 0, 0.08)"
+    BORDER = "#E1E4E8"
+    BORDER_HOVER = "#BDC3C7"
     BORDER_FOCUS = "#0078D4"
     TEXT_PRIMARY = "#111827"
     TEXT_SECONDARY = "#6B7280"
@@ -242,10 +202,10 @@ class DropZone(QFrame):
         self._apply_style()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 32, 28, 32)
-        layout.setSpacing(10)
-        layout.setAlignment(Qt.AlignCenter)
+        self.content_layout = QVBoxLayout(self)
+        self.content_layout.setContentsMargins(28, 32, 28, 32)
+        self.content_layout.setSpacing(10)
+        self.content_layout.setAlignment(Qt.AlignCenter)
 
         self.icon_label = QLabel("📂")
         self.icon_label.setAlignment(Qt.AlignCenter)
@@ -259,9 +219,24 @@ class DropZone(QFrame):
         self.tip_label.setFont(_font("Microsoft YaHei", 12))
         self.tip_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent; border: none;")
 
-        layout.addWidget(self.icon_label)
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.tip_label)
+        self.content_layout.addWidget(self.icon_label)
+        self.content_layout.addWidget(self.title_label)
+        self.content_layout.addWidget(self.tip_label)
+
+    def set_compact(self, compact: bool):
+        """Collapse the large drop target after processing so previews stay visible."""
+        if compact:
+            self.icon_label.hide()
+            self.content_layout.setContentsMargins(16, 7, 16, 7)
+            self.content_layout.setSpacing(2)
+            self.setMinimumHeight(72)
+            self.setMaximumHeight(72)
+        else:
+            self.icon_label.show()
+            self.content_layout.setContentsMargins(28, 32, 28, 32)
+            self.content_layout.setSpacing(10)
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
 
     def _apply_style(self):
         border = Theme.DROPZONE_HOVER_BORDER if self._hovered else Theme.DROPZONE_IDLE_BORDER
@@ -332,7 +307,8 @@ class ProcessWorker(QThread):
             for p in slice_paths:
                 final.extend(detect_and_slice(
                     p, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
-                    smart=self.smart, target_width=self.width
+                    smart=self.smart, target_width=self.width,
+                    always_copy=True,
                 ))
             # 切片结果已生成在工作目录，把原图删了（切片 PNG 会保留供后续步骤）
             for p in slice_paths:
@@ -343,15 +319,8 @@ class ProcessWorker(QThread):
             # final 路径在工作目录里，留给 send/copy 时再用，最后由 atexit 兜底
             return final
         finally:
-            # 保留 final 切片 PNG（不删）；但工作目录本身是临时性的，下次启动会被 mkdtemp 顶掉
-            # 兜底：清掉剩余 .png 之外的文件
-            try:
-                for entry in os.listdir(work_dir):
-                    full = os.path.join(work_dir, entry)
-                    if not entry.endswith(".png"):
-                        os.remove(full) if os.path.isfile(full) else None
-            except OSError:
-                pass
+            # detect_and_slice 的最终输出位于独立工作区，转换中间页可立即清理。
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     def run(self):
         try:
@@ -415,6 +384,18 @@ class MainWindow(QMainWindow):
         subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         root.addWidget(subtitle)
 
+        self.guide_label = QLabel(
+            "1  放入文件    →    2  调整切线 / 添加链接    →    3  创建邮件"
+        )
+        self.guide_label.setFont(_font("Microsoft YaHei", 11, QFont.Medium))
+        self.guide_label.setStyleSheet(
+            f"color: {Theme.PRIMARY_ACTIVE}; background: #EFF6FF; "
+            f"border: 1px solid {Theme.PRIMARY_DISABLED}; border-radius: 8px; "
+            f"padding: 8px 12px;"
+        )
+        self.guide_label.setAlignment(Qt.AlignCenter)
+        root.addWidget(self.guide_label)
+
         # ══ Drop Zone ════════════════════════
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self._handle_dropped_files)
@@ -433,7 +414,7 @@ class MainWindow(QMainWindow):
         self.btn_reset.clicked.connect(self.reset_app)
         toolbar.addWidget(self.btn_reset)
 
-        width_lbl = QLabel("宽度：")
+        width_lbl = QLabel("邮件宽度：")
         width_lbl.setFont(_font("Microsoft YaHei", 12))
         width_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
         toolbar.addWidget(width_lbl)
@@ -507,21 +488,41 @@ class MainWindow(QMainWindow):
         sep_lbl.setFixedWidth(12)
         toolbar2.addWidget(sep_lbl)
 
-        self.chk_smart = QCheckBox("智能切图")
+        self.chk_smart = QCheckBox("避开文字切图（推荐）")
         self.chk_smart.setFont(_font("Microsoft YaHei", 12))
         self.chk_smart.setChecked(True)  # 默认智能切图，优先避免切断文字
         self.chk_smart.setCursor(Qt.PointingHandCursor)
         self.chk_smart.setStyleSheet(_chk_indicator_style)
         toolbar2.addWidget(self.chk_smart)
+        toolbar2.addStretch()
+        root.addLayout(toolbar2)
 
-        self.btn_copy_html = QPushButton("📋 复制HTML")
+        # 第三行只放处理完成后才会使用的动作，避免 760px 窗口横向挤压。
+        toolbar3 = QHBoxLayout()
+        toolbar3.setSpacing(10)
+
+        self.btn_copy_html = QPushButton("📋 复制到 Outlook")
         self.btn_copy_html.setFont(_font("Microsoft YaHei", 12))
         self.btn_copy_html.setCursor(Qt.PointingHandCursor)
         self.btn_copy_html.setEnabled(False)
         self.btn_copy_html.setStyleSheet(_btn_ghost())
-        self.btn_copy_html.setFixedSize(_btn_size("📋 复制HTML", 12, extra_w=20, height=34))
+        self.btn_copy_html.setFixedSize(_btn_size("📋 复制到 Outlook", 12, extra_w=20, height=34))
         self.btn_copy_html.clicked.connect(self._copy_html)
-        toolbar2.addWidget(self.btn_copy_html)
+        toolbar3.addWidget(self.btn_copy_html)
+
+        self.btn_adjust_cuts = QPushButton("调整切图位置")
+        self.btn_adjust_cuts.setFont(_font("Microsoft YaHei", 12))
+        self.btn_adjust_cuts.setCursor(Qt.PointingHandCursor)
+        self.btn_adjust_cuts.setEnabled(False)
+        self.btn_adjust_cuts.setStyleSheet(_btn_ghost())
+        self.btn_adjust_cuts.setFixedSize(
+            _btn_size("调整切图位置", 12, extra_w=22, height=34)
+        )
+        self.btn_adjust_cuts.setToolTip(
+            "切图完成后可拖动横线微调切开位置；自动限制在 Outlook 安全高度内"
+        )
+        self.btn_adjust_cuts.clicked.connect(self._adjust_cut_positions)
+        toolbar3.addWidget(self.btn_adjust_cuts)
 
         self.btn_hotspot = QPushButton("🎯 添加可点击按钮")
         self.btn_hotspot.setFont(_font("Microsoft YaHei", 12))
@@ -533,10 +534,10 @@ class MainWindow(QMainWindow):
         self.btn_hotspot.clicked.connect(self._open_hotspot_editor)
         self.btn_hotspot.setVisible(HOTSPOT_FEATURE_ENABLED)
         if HOTSPOT_FEATURE_ENABLED:
-            toolbar2.addWidget(self.btn_hotspot)
+            toolbar3.addWidget(self.btn_hotspot)
 
-        toolbar2.addStretch()
-        root.addLayout(toolbar2)
+        toolbar3.addStretch()
+        root.addLayout(toolbar3)
 
         # ══ 邮件标题 ════════════════════════
         subject_lbl = QLabel("邮件标题（可选）")
@@ -554,7 +555,7 @@ class MainWindow(QMainWindow):
         # ══ 预览区 ═════════════════════════
         self.preview_area = QScrollArea()
         self.preview_area.setWidgetResizable(True)
-        self.preview_area.setFixedHeight(140)
+        self.preview_area.setFixedHeight(160)
         self.preview_area.setStyleSheet(
             f"QScrollArea {{ border: 1px solid {Theme.BORDER}; border-radius: 12px; "
             f"background: {Theme.CARD}; }}"
@@ -590,7 +591,7 @@ class MainWindow(QMainWindow):
         btn_row.setSpacing(10)
         btn_row.setContentsMargins(0, 4, 0, 0)
 
-        self.btn_send = QPushButton("创建 Outlook 邮件")
+        self.btn_send = QPushButton("在经典 Outlook 中创建邮件")
         self.btn_send.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
         self.btn_send.setCursor(Qt.PointingHandCursor)
         self.btn_send.setEnabled(False)
@@ -627,6 +628,7 @@ class MainWindow(QMainWindow):
         ver_col.addWidget(ver2)
         ver_row.addLayout(ver_col)
         root.addLayout(ver_row)
+        self._set_status("拖入文件后自动切图，再检查切线并在经典 Outlook 中创建邮件", "info")
 
     # ── 工具函数 ────────────────────────────
     def _get_width(self) -> int:
@@ -640,15 +642,24 @@ class MainWindow(QMainWindow):
         return v
 
     def _set_status(self, text: str, level: str = "info"):
+        icons = {"info": "ℹ️", "success": "✅", "error": "❌", "warning": "⚠️"}
         colors = {"info": Theme.TEXT_SECONDARY, "success": Theme.SUCCESS,
                   "error": Theme.ERROR, "warning": Theme.WARNING}
-        self.status_label.setText(text)
+        clean = text.strip()
+        prefixes = tuple(icons.values())
+        while clean.startswith(prefixes):
+            for prefix in prefixes:
+                if clean.startswith(prefix):
+                    clean = clean[len(prefix):].strip()
+                    break
+        self.status_label.setText(f"{icons.get(level, '')} {clean}".strip())
         self.status_label.setStyleSheet(
             f"color: {colors.get(level, Theme.TEXT_SECONDARY)}; "
-            f"font-size: 12px; background: transparent;"
+            f"font-size: 12px; background: transparent; padding: 4px 0;"
         )
 
     def _reset_drop_zone(self):
+        self.drop_zone.set_compact(False)
         self.drop_zone.title_label.setText("拖拽图片到此处")
         self.drop_zone.icon_label.setText("📂")
         self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT · PSD/PSB，点击上传")
@@ -1013,7 +1024,13 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_processed(self, paths: List[str]):
+        previous_paths = list(self.slice_paths)
         self.slice_paths = paths
+        if previous_paths and set(previous_paths) != set(paths):
+            cleanup_generated_slices(previous_paths)
+        self.drop_zone.set_compact(bool(paths))
+        if paths:
+            self.drop_zone.tip_label.setText("处理完成；可重新拖入文件替换")
         # V4.6.7：按生成顺序填 source_index（原切片 = 1.0, 2.0, 3.0, ...）
         # 这里的“顺序”由 image_slicer.detect_and_slice 返回顺序决定
         # —— _build_slices_with_hotspots 会用本映射，未误用 path.index() 兑底
@@ -1030,6 +1047,7 @@ class MainWindow(QMainWindow):
         self.btn_save.setEnabled(bool(paths))
         self.btn_copy_html.setEnabled(bool(paths))
         self.btn_hotspot.setEnabled(bool(paths) and HOTSPOT_FEATURE_ENABLED)
+        self.btn_adjust_cuts.setEnabled(len(paths) > 1)
 
         # 体积检测
         size_mb = estimate_email_size_mb(paths) if paths else 0
@@ -1201,20 +1219,14 @@ class MainWindow(QMainWindow):
         temp_files: List[str] = []
         try:
             display_w = self._get_width()
+            from html_assembler import _materialized_temp_files
+            tracked_before = len(_materialized_temp_files)
             html = generate_plain_html(
                 self._build_slices_with_hotspots(), display_w
             )
-            # generate_plain_html 内部会调 materialize_display_slices_strict
-            # 通过路径前缀识别本次新增的临时文件
-            from html_assembler import _materialized_temp_files
-            before = len(_materialized_temp_files)
-            # 重新跑一次以拿到路径？不，更稳的做法：扫 _materialized_temp_files 增量
-            # 实际上 generate_plain_html 已经 track 了，我们直接拿这次跑出来的 temp
-            # 但它没返回 paths — 我们用 glob 推断本次产生的文件太脆
-            # 简化为：清理所有 mail_ 前缀的临时文件（best-effort）
-            temp_dir = tempfile.gettempdir()
-            import glob as _glob
-            temp_files = _glob.glob(os.path.join(temp_dir, "mail_*.png"))
+            # 只清理本次 generate_plain_html 新登记的文件。不能 glob 系统临时目录，
+            # 否则会误删另一个应用实例仍在使用的 mail_*.png。
+            temp_files = list(_materialized_temp_files[tracked_before:])
 
             mime = QMimeData()
             mime.setHtml(html)
@@ -1362,6 +1374,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "发送失败", str(exc))
 
     def reset_app(self):
+        cleanup_generated_slices(self.slice_paths)
         self.slice_paths = []
         # V4.6.7 修复：重置时同步清空 source_index 映射，避免残留
         self.slice_source_index = {}
@@ -1385,7 +1398,58 @@ class MainWindow(QMainWindow):
         self.btn_save.setEnabled(False)
         self.btn_copy_html.setEnabled(False)
         self.btn_hotspot.setEnabled(False)
-        self._set_status("")
+        self.btn_adjust_cuts.setEnabled(False)
+        self._set_status("拖入文件后自动切图，再检查切线并在经典 Outlook 中创建邮件", "info")
+
+    def _adjust_cut_positions(self):
+        """打开可视化切线编辑器，并在应用前执行安全与热区防呆检查。"""
+        if len(self.slice_paths) < 2:
+            QMessageBox.information(
+                self,
+                "无需调整",
+                "当前只有一张切片，没有可移动的切线。",
+            )
+            return
+
+        try:
+            dialog = CutEditorDialog(
+                self.slice_paths,
+                max_slice_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
+                parent=self,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "无法打开切线编辑器", str(exc))
+            return
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        if not self.hotspot_map.is_empty():
+            reply = QMessageBox.warning(
+                self,
+                "需要重新添加链接",
+                "调整切图位置会改变图片坐标，现有可点击按钮将被清空。\n\n"
+                "是否继续应用新的切线？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        try:
+            new_paths = reslice_existing_stack(
+                self.slice_paths,
+                dialog.get_cut_positions(),
+                min_height=CutEditorDialog.MIN_SLICE_HEIGHT,
+                max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
+            )
+            self._on_processed(new_paths)
+            self._set_status(
+                f"已应用手动切线，共 {len(new_paths)} 张；请重新检查链接区域",
+                "success",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "调整切图失败", str(exc))
 
     def _on_thumb_clicked(self, ev, path: str, idx: int):
         """点击缩略图 → 打开热区编辑器"""
