@@ -37,10 +37,20 @@ from PySide6.QtWidgets import (
     QScrollArea, QListWidget, QListWidgetItem, QMessageBox,
     QDialogButtonBox, QInputDialog, QFrame
 )
-from PySide6.QtCore import Qt, QRect, QPoint, Signal
-from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QMouseEvent, QFont
+from PySide6.QtCore import Qt, QRect, QPoint, Signal, QSize
+from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QMouseEvent, QFont, QIcon
 
 from clickable_map import HotspotMap, Hotspot
+
+import os
+
+_ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+
+def _icon(name: str, size: int = 20, color: str | None = None) -> QIcon:
+    path = os.path.join(_ICONS_DIR, f"{name}.svg")
+    if os.path.exists(path):
+        return QIcon(path)
+    return QIcon()
 
 
 # ── 颜色常量（独立出来便于复用） ──
@@ -116,7 +126,7 @@ class ImageCanvas(QLabel):
         # V4.6.8：删除 setFixedSize，改用 setMinimumSize，让画布能随父容器缩放
         # 注意：setMinimumSize.width 仍然是 display_w，缩小后画布会留空
         self.setMinimumSize(self.display_w, self.display_h)
-        self.setStyleSheet("border: 1px solid #D1D5DB; background: #F3F4F6;")
+        self.setStyleSheet("border: 1px solid #e7eaef; background: #f9f9fa;")
 
         # 拖框选状态
         self._dragging = False
@@ -271,16 +281,16 @@ class HotspotEditorDialog(QDialog):
         # ── 顶部新手引导（3 步图示 + 实时状态） ──
         guide = QFrame()
         guide.setStyleSheet(
-            "QFrame { background: #EFF6FF; border: 1px solid #BFDBFE; "
-            "border-radius: 8px; padding: 10px; }"
+            "QFrame { background: #eff1f4; border: 1px solid #e7eaef; "
+            "border-radius: 8px; padding: 10px; font-family: Microsoft YaHei, sans-serif; }"
         )
         guide_layout = QVBoxLayout(guide)
         guide_layout.setContentsMargins(12, 8, 12, 8)
         guide_layout.setSpacing(4)
 
-        guide_title = QLabel("🎯 3 步添加可点击按钮")
+        guide_title = QLabel("3 步添加可点击按钮")
         guide_title.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
-        guide_title.setStyleSheet("color: #1E3A8A; background: transparent;")
+        guide_title.setStyleSheet("color: #0e1115; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         guide_layout.addWidget(guide_title)
 
         guide_steps = QLabel(
@@ -289,15 +299,15 @@ class HotspotEditorDialog(QDialog):
             "  ③ 点 <b>✓ 添加</b> 按钮，重复 ①②③ 可添加多个"
         )
         guide_steps.setFont(QFont("Microsoft YaHei", 10))
-        guide_steps.setStyleSheet("color: #1E40AF; background: transparent;")
+        guide_steps.setStyleSheet("color: #333942; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         guide_steps.setWordWrap(True)
         guide_layout.addWidget(guide_steps)
 
         # 状态提示条（用于"添加成功"等实时反馈）
-        self.status_label = QLabel("📍 提示：框选区域会自动激活 URL 输入框")
+        self.status_label = QLabel("提示：框选区域会自动激活 URL 输入框")
         self.status_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
         self.status_label.setStyleSheet(
-            "color: #0078D4; background: #DBEAFE; padding: 6px 10px; "
+            "color: #333942; background: #eff1f4; padding: 6px 10px; "
             "border-radius: 4px;"
         )
         guide_layout.addWidget(self.status_label)
@@ -310,7 +320,7 @@ class HotspotEditorDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #E4E7EC; border-radius: 8px; background: #F9FAFB; }"
+            "QScrollArea { border: 1px solid #e7eaef; border-radius: 10px; background: #f9f9fa; }"
         )
         # V4.6.8：画布接受“期望宽度”参数，会按这个宽度等比缩放图片
         # 默认为 800（小窗口也能显示完整），画布有 scroll 可在原图超出时滚动
@@ -329,25 +339,28 @@ class HotspotEditorDialog(QDialog):
 
         url_lbl = QLabel("URL:")
         url_lbl.setFont(QFont("Microsoft YaHei", 11))
-        url_lbl.setStyleSheet("color: #374151; background: transparent;")
+        url_lbl.setStyleSheet("color: #0e1115; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         input_row.addWidget(url_lbl)
 
         self.input_url = QLineEdit()
         self.input_url.setPlaceholderText("https://example.com  (留空协议时自动加 https://)")
         self.input_url.setFixedHeight(34)
         self.input_url.setStyleSheet(
-            "QLineEdit { background: white; border: 1px solid #D1D5DB; border-radius: 6px; padding: 0 8px; }"
+            "QLineEdit { background: white; border: 1px solid #e7eaef; border-radius: 8px; padding: 0 8px; font-family: Microsoft YaHei, sans-serif; }"
+            "QLineEdit:focus { border-color: #557fff; }"
         )
         self.input_url.returnPressed.connect(self._add_or_update_hotspot)
         input_row.addWidget(self.input_url, 1)
 
-        self.btn_add = QPushButton("✓ 添加")
+        self.btn_add = QPushButton(" 添加")
         self.btn_add.setFixedSize(72, 34)
         self.btn_add.setCursor(Qt.PointingHandCursor)
+        self.btn_add.setIcon(_icon("check", 18))
+        self.btn_add.setIconSize(QSize(18, 18))
         self.btn_add.setStyleSheet(
-            "QPushButton { background: #0078D4; color: white; border: none; border-radius: 6px; font-weight: bold; }"
-            "QPushButton:hover { background: #2563EB; }"
-            "QPushButton:disabled { background: #BFDBFE; color: white; }"
+            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+            "QPushButton:hover { background: #0057da; }"
+            "QPushButton:disabled { background: #e5e9ff; color: white; }"
         )
         self.btn_add.clicked.connect(self._add_or_update_hotspot)
         input_row.addWidget(self.btn_add)
@@ -356,8 +369,8 @@ class HotspotEditorDialog(QDialog):
         self.btn_cancel_sel.setFixedSize(90, 34)
         self.btn_cancel_sel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel_sel.setStyleSheet(
-            "QPushButton { background: #F3F4F6; color: #374151; border: 1px solid #D1D5DB; border-radius: 6px; }"
-            "QPushButton:hover { background: #E5E7EB; }"
+            "QPushButton { background: #eff1f4; color: #0e1115; border: 1px solid #e7eaef; border-radius: 999px; }"
+            "QPushButton:hover { background: #dde1e8; }"
         )
         self.btn_cancel_sel.clicked.connect(self._clear_pending)
         input_row.addWidget(self.btn_cancel_sel)
@@ -367,21 +380,21 @@ class HotspotEditorDialog(QDialog):
         # 选区信息
         self.selection_label = QLabel("当前未选择区域")
         self.selection_label.setFont(QFont("Microsoft YaHei", 10))
-        self.selection_label.setStyleSheet("color: #6B7280; background: transparent;")
+        self.selection_label.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         root.addWidget(self.selection_label)
 
         # 已添加列表
         list_lbl = QLabel(f"已添加热区（{len(self._current)} 个）:")
         list_lbl.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
-        list_lbl.setStyleSheet("color: #111827; background: transparent;")
+        list_lbl.setStyleSheet("color: #0e1115; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         self.list_label = list_lbl  # 保存引用以便更新计数
         root.addWidget(list_lbl)
 
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet(
-            "QListWidget { border: 1px solid #E4E7EC; border-radius: 6px; background: white; }"
-            "QListWidget::item { padding: 6px; border-bottom: 1px solid #F3F4F6; }"
-            "QListWidget::item:selected { background: #EFF6FF; color: #1E3A8A; }"
+            "QListWidget { border: 1px solid #e7eaef; border-radius: 8px; background: #f9f9fa; }"
+            "QListWidget::item { padding: 6px; border-bottom: 1px solid #eff1f4; }"
+            "QListWidget::item:selected { background: #e5e9ff; color: #00266b; }"
         )
         # V4.6.8：删除 setFixedHeight(160)，改为最小高度 + 拉伸比例
         self.list_widget.setMinimumHeight(120)
@@ -396,9 +409,11 @@ class HotspotEditorDialog(QDialog):
         self.btn_close = QPushButton("完成")
         self.btn_close.setFixedSize(90, 36)
         self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.setIcon(_icon("check", 18))
+        self.btn_close.setIconSize(QSize(18, 18))
         self.btn_close.setStyleSheet(
-            "QPushButton { background: #10B981; color: white; border: none; border-radius: 6px; font-weight: bold; }"
-            "QPushButton:hover { background: #059669; }"
+            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+            "QPushButton:hover { background: #0057da; }"
         )
         self.btn_close.clicked.connect(self._save_and_close)
         bottom.addWidget(self.btn_close)
@@ -476,10 +491,10 @@ class HotspotEditorDialog(QDialog):
         if not hasattr(self, "status_label"):
             return
         colors = {
-            "info":    ("#0078D4", "#DBEAFE"),  # 蓝底蓝字
-            "success": ("#059669", "#D1FAE5"),  # 绿底绿字
-            "warning": ("#D97706", "#FEF3C7"),  # 黄底黄字
-            "error":   ("#DC2626", "#FEE2E2"),  # 红底红字
+            "info":    ("#333942", "#eff1f4"),
+            "success": ("#10b981", "#ecfdf5"),
+            "warning": ("#f59e0b", "#fffbeb"),
+            "error":   ("#ef4444", "#fef2f2"),
         }
         fg, bg = colors.get(kind, colors["info"])
         self.status_label.setText(text)
@@ -553,11 +568,11 @@ class HotspotEditorDialog(QDialog):
         self.selection_label.setText("当前未选择区域")
         self._refresh()
         # 更新按钮文字回「添加」
-        self.btn_add.setText("✓ 添加")
+        self.btn_add.setText(" 添加")
         if edit_mode_done:
             self.btn_add.setStyleSheet(
-                "QPushButton { background: #0078D4; color: white; border: none; border-radius: 6px; font-weight: bold; }"
-                "QPushButton:hover { background: #2563EB; }"
+                "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+                "QPushButton:hover { background: #0057da; }"
             )
 
     # ── 列表项操作（编辑/改区域/删除） ─────
@@ -597,10 +612,10 @@ class HotspotEditorDialog(QDialog):
             f"✎ 改区域模式：正在修改热区 {idx + 1}，请重新拖选新区域后点「✓ 更新」"
         )
         # 改按钮文字和颜色
-        self.btn_add.setText("✓ 更新")
+        self.btn_add.setText(" 更新")
         self.btn_add.setStyleSheet(
-            "QPushButton { background: #DC2626; color: white; border: none; border-radius: 6px; font-weight: bold; }"
-            "QPushButton:hover { background: #B91C1C; }"
+            "QPushButton { background: #ef4444; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+            "QPushButton:hover { background: #dc2626; }"
         )
         # 清空 URL 输入（用户可能要改 URL）
         self.input_url.setText(self._current[idx].url)
@@ -654,10 +669,10 @@ class HotspotEditorDialog(QDialog):
             return
         idx = item.data(Qt.UserRole)
         menu = QMenu(self)
-        act_url = menu.addAction("✏️ 编辑 URL")
-        act_area = menu.addAction("✎ 改区域")
+        act_url = menu.addAction("编辑 URL")
+        act_area = menu.addAction("改区域")
         menu.addSeparator()
-        act_del = menu.addAction("🗑 删除")
+        act_del = menu.addAction("删除")
         chosen = menu.exec(self.list_widget.mapToGlobal(pos))
         if chosen == act_url:
             self._on_item_double_clicked(item)

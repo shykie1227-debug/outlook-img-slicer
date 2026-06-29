@@ -1,0 +1,74 @@
+# Electron Builder 配置（V6.0.0）
+# 用法：npm run dist   (在根目录)
+# 前置条件：
+#   1. app/dist 已构建 (npm run build:renderer)
+#   2. electron/dist-electron 已构建 (npm run build:main)
+#   3. sidecar/dist/sidecar_server.exe 已 PyInstaller 打包（Windows 上运行 PyInstaller）
+appId: com.outlook.img.slicer
+productName: Outlook 长图助手
+copyright: Copyright © 2026
+artifactName: ${productName}-V${version}-${arch}.${ext}
+
+directories:
+  output: release-artifacts/electron
+  buildResources: build-resources
+
+files:
+  - electron/dist-electron/**/*
+  - package.json
+  - "!**/*.map"
+
+extraResources:
+  # 把 app 渲染产物作为额外资源
+  - from: app/dist
+    to: app
+    filter: ["**/*"]
+  # Python Sidecar 可执行（PyInstaller 产物）
+  - from: sidecar/dist
+    to: sidecar
+    filter: ["**/*"]
+  # 窗口图标（用于主进程 setIcon）
+  - from: icon.ico
+    to: icon.ico
+
+asar: true
+asarUnpack:
+  # Sidecar exe 不能在 asar 内（需要 spawn 外部 exe）
+  - "**/*.exe"
+  - "**/*.dll"
+
+# Windows NSIS 配置
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: icon.ico
+  artifactName: ${productName}-V${version}-Setup.${ext}
+  # 不自动更新（产品定位：本地工具）
+  # 不代码签名（个人使用）
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Outlook 长图助手
+  installerLanguages: ["zh_CN", "en_US"]
+  language: "2052"  # 简体中文
+  # 不联网检测
+  deleteAppDataOnUninstall: false
+
+# Mac 配置（开发用，产物用户不下载）
+mac:
+  target: dir
+  icon: icon.ico
+  category: public.app-category.productivity
+
+# 通用：应用元信息
+extraMetadata:
+  name: Outlook 长图助手
+  version: 6.0.0
+  author: outlook-img-slicer
+  description: Outlook 长图助手（V6 Electron + V5 Python Sidecar）

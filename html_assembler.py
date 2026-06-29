@@ -406,6 +406,10 @@ def _group_by_source(slices: List[SliceItem]) -> List[List[SliceItem]]:
       source_index + row*0.001 + col*0.000001
     因此同一原图必须按 row 分成多行，每行内部再按 col 横向拼接。
     否则所有网格 cell 会被错误拼成一个超宽横排。
+
+    V5.0.1: 兼容 V1 hotspot 编码 (source_index + N*0.001)，
+    识别方式：如果切片没有 col 编码（百万分位为 0），按 V1 编码把
+    N*0.001 视为同一行的列，不再拆成多行。
     """
     sorted_slices = sorted(slices, key=lambda s: s.sort_key)
     groups: List[List[SliceItem]] = []
@@ -414,8 +418,14 @@ def _group_by_source(slices: List[SliceItem]) -> List[List[SliceItem]]:
     for s in sorted_slices:
         src_idx = int(s.sort_key)
         frac = max(0.0, s.sort_key - src_idx)
-        # row 编码在千分位；普通原图 frac=0，作为 row=0。
-        row_idx = int(frac * 1000 + 1e-6)
+        # 百万分位：V2 hotspot 网格的 col 编码；V1 无此编码
+        col_frac = frac - int(frac * 1000 + 1e-6) / 1000
+        if abs(col_frac) < 1e-7:
+            # V1 hotspot 或普通切片：row=0，按 source_index 合并
+            row_idx = 0
+        else:
+            # V2 网格：row 编码在千分位
+            row_idx = int(frac * 1000 + 1e-6)
         key = (src_idx, row_idx)
         if current_key is None or key != current_key:
             if current_group:
@@ -682,24 +692,120 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
     """
     生成一组"最终显示尺寸"的临时切片。
 
-    对每组（group）的整体策略：
-    - 多条（hotspot 竖条）：拼合成一行 → 缩放到目标总尺寸 → 再按宽度切回
-    - 单条（普通切片）：只补齐高度到 4px 倍数，不缩放，使用底部像素延展
-      （不补白/补黑，避免在非白色背景的切图底部产生割裂感）。
-    不单独缩放每段（避免段间缩放比例不一致导致过渡错位）。
+    V5.0.2 重构（消除段间 1px 缝 + 视觉宽度统一）：
+    旧实现对单段切片独立缩放，LANCZOS 舍入误差导致最后一段少 1px，
+    段间出现 1px 白线，且各原图独立缩放比例可能不一致。
+
+    新实现：
+    - 单段（普通切片）：按 original_width 等比缩放到 display_w_even
+    - 多段（hotspot 行）：横向拼合 + 整体缩放 + 切回（不变）
+    - V5.0.2 新增：把同一 source_index 的所有单段切片聚合，拼成完整长图
+      一次性缩放后按比例切回，最后一段吃余数（消除 1px 缝 + 视觉宽度严格统一）
+
+    注：单 source_index 内的所有段共享 original_width，且通常来自同一原图。
     """
     if not slices:
         return []
 
-    groups = _group_by_source(slices)
+    display_w_even = _normalize_display_width(display_w)
+
+    # V5.0.2: 按 (source_index, hotspot_row) 分组聚合
+    # - 纯普通切片（frac=0）：按 source_index 聚合
+    # - V1/V2 hotspot 切条：按 (source_index, row) 聚合（每行一组）
+    by_source_plain: dict = {}
+    hotspot_rows_map: dict = {}  # (src_idx, row_idx) -> [slices]
+
+    sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+    for s in sorted_slices:
+        src_idx = int(s.sort_key)
+        frac = s.sort_key - src_idx
+        col_frac = frac - int(frac * 1000 + 1e-6) / 1000
+        if abs(frac) < 1e-7:
+            # 纯普通切片（无 hotspot 切条）：按 source_index 聚合
+            by_source_plain.setdefault(src_idx, []).append(s)
+        else:
+            # hotspot 切条：按 (source_index, row) 分组
+            row_idx = int(frac * 1000 + 1e-6)
+            key = (src_idx, row_idx)
+            hotspot_rows_map.setdefault(key, []).append(s)
+
     prepared: List[SliceItem] = []
     out_dir = Path(slices[0].path).parent
     batch = uuid.uuid4().hex[:8]
     counter = 0
 
-    display_w_even = _normalize_display_width(display_w)
+    # 1. 处理纯普通切片：按 source_index 聚合，整体缩放后切回
+    for src_idx in sorted(by_source_plain.keys()):
+        seg_list = by_source_plain[src_idx]
+        try:
+            # 读取所有段的 actual 尺寸
+            segs = []
+            for s in seg_list:
+                with Image.open(s.path) as img:
+                    part = img.convert("RGB")
+                    segs.append((s, part.copy(), part.width, part.height))
+            if not segs:
+                continue
+            # 推断原图总宽：取所有段的 original_width 最大值
+            orig_w = max((getattr(s, 'original_width', 0) or 0) for s, _, _, _ in segs) or segs[0][2]
+            # 单段原图宽度如果都和 actual_w 一致，用 actual_w
+            if all(p_w == orig_w for _, _, p_w, _ in segs):
+                # 所有段都来自同一原图
+                total_h = sum(p_h for _, _, _, p_h in segs)
+                scale = display_w_even / orig_w if orig_w != display_w_even else 1.0
+                target_w = display_w_even if scale != 1.0 else orig_w
+                # V5.0.2: 先算精确总高，再向上 4 倍数化
+                target_total_h = _even_pixel_4x(int(total_h * scale + 0.999))
+                # 拼成完整长图
+                full = Image.new("RGB", (orig_w, total_h))
+                y = 0
+                for _, part, _, p_h in segs:
+                    full.paste(part, (0, y))
+                    y += p_h
+                # 缩放（如果需要）并补齐到 target_total_h
+                if scale != 1.0:
+                    full_resized = full.resize((target_w, target_total_h), Image.LANCZOS)
+                else:
+                    # V5.0.2: scale=1.0 时也需要补齐高度到 target_total_h（4 的倍数）
+                    # 避免 row_height (836) > actual_h (833) 时裁剪超界
+                    if total_h < target_total_h:
+                        full_resized = Image.new("RGB", (orig_w, target_total_h))
+                        full_resized.paste(full, (0, 0))
+                        # 底部延展最后一行像素（与 _compute_group_height 行为一致）
+                        last_row = full.crop((0, total_h - 1, orig_w, total_h))
+                        for yy in range(total_h, target_total_h):
+                            full_resized.paste(last_row, (0, yy))
+                    else:
+                        full_resized = full
+                # 按比例切回，最后一段吃余数
+                crop_y = 0
+                for i, (s, _, _, p_h) in enumerate(segs):
+                    counter += 1
+                    if i == len(segs) - 1:
+                        # 最后一段：吃余数
+                        seg_h = target_total_h - crop_y
+                    else:
+                        seg_h = _even_pixel_4x(int(p_h * scale + 0.999))
+                    target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
+                    part = full_resized.crop((0, crop_y, target_w, crop_y + seg_h))
+                    part.save(target_path, "PNG")
+                    crop_y += seg_h
+                    prepared.append(SliceItem(
+                        path=str(target_path),
+                        href=s.href,
+                        alt_text=s.alt_text,
+                        sort_key=s.sort_key,
+                        original_width=target_w,
+                    ))
+        except Exception:
+            for s in seg_list:
+                prepared.append(s)
 
-    for group in groups:
+    # 2. 处理 hotspot 行
+    for key in sorted(hotspot_rows_map.keys()):
+        group = hotspot_rows_map[key]
+        if not group:
+            continue
         allocated_widths = _allocate_group_widths(group, display_w_even)
         row_height = _compute_group_height(group, display_w_even)
         try:
@@ -715,34 +821,6 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             if total_w <= 0 or max_h <= 0:
                 raise ValueError("invalid image size")
 
-            # 单条路径：只高度补齐，不缩放宽度
-            if len(group) == 1 and row_height >= max_h:
-                for s, part in source_parts:
-                    counter += 1
-                    # V4.9.4: 单条路径保留原始宽度，不归一化到 4 的倍数
-                    target_w = part.width
-                    target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
-                    # 宽度一致但高度不足 → 底部延展最后一行像素
-                    if max_h < row_height:
-                        out = Image.new("RGB", (target_w, row_height))
-                        out.paste(part, (0, 0))
-                        last_row = part.crop((0, max_h - 1, target_w, max_h))
-                        for yy in range(max_h, row_height):
-                            out.paste(last_row, (0, yy))
-                    else:
-                        # 宽高完全一致 → 直接保存副本（必须建新文件满足 strict 检查）
-                        out = part.copy()
-                    out.save(target_path, "PNG")
-                    prepared.append(SliceItem(
-                        path=str(target_path),
-                        href=s.href,
-                        alt_text=s.alt_text,
-                        sort_key=s.sort_key,
-                        original_width=target_w,
-                    ))
-                continue
-
-            # 多竖条路径（hotspot）：拼合 → 整体缩放 → 切回
             source_row = Image.new("RGB", (total_w, max_h))
             x = 0
             for _, part in source_parts:
@@ -774,6 +852,8 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             for s in group:
                 prepared.append(s)
 
+    # 按 sort_key 排序返回
+    prepared.sort(key=lambda s: s.sort_key)
     return prepared
 
 

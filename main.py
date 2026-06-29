@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QSlider, QCheckBox, QDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator, QIcon
 
 from image_slicer import (
     detect_and_slice,
@@ -52,6 +52,65 @@ from clipboard_html import (
     build_windows_clipboard_html as _build_windows_clipboard_html,
 )
 from cut_editor import CutEditorDialog
+import os
+
+# ── 图标加载 ────────────────────────────────
+_ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+
+def _icon(name: str, size: int = 20, color: str | None = None) -> QIcon:
+    """Load an SVG icon from the icons directory.
+
+    Args:
+        name: Icon filename without .svg extension (e.g. 'upload-cloud')
+        size: Not used by QIcon directly, for reference only
+        color: Optional hex color to dynamically tint the icon (e.g. '#0065fd')
+               Will try name-color variant first, then dynamically recolor.
+    """
+    # Try color variant first (e.g. 'check-blue')
+    if color:
+        variant_name = f"{name}-{_color_name(color)}"
+        variant_path = os.path.join(_ICONS_DIR, f"{variant_name}.svg")
+        if os.path.exists(variant_path):
+            return QIcon(variant_path)
+
+    path = os.path.join(_ICONS_DIR, f"{name}.svg")
+    if os.path.exists(path):
+        if color:
+            return _tinted_icon(path, color)
+        return QIcon(path)
+    return QIcon()
+
+
+def _color_name(hex_color: str) -> str:
+    """Map hex colors to short names for variant file lookup."""
+    mapping = {
+        "#0065fd": "blue",
+        "#7f8d9f": "muted",
+        "#ef4444": "red",
+        "#f59e0b": "yellow",
+        "#10b981": "green",
+        "#0e1115": "dark",
+    }
+    return mapping.get(hex_color.lower(), hex_color.lstrip("#"))
+
+
+def _tinted_icon(svg_path: str, color: str) -> QIcon:
+    """Dynamically recolor an SVG icon by replacing stroke attributes."""
+    try:
+        with open(svg_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Replace stroke colors with the new color
+        import re
+        tinted = re.sub(r'stroke="[^"]*"', f'stroke="{color}"', content)
+        tinted = re.sub(r'fill="currentColor"', f'fill="{color}"', tinted)
+        # Write to a temp file
+        tmp_path = svg_path + f".tinted.{color.lstrip('#')}.svg"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(tinted)
+        icon = QIcon(tmp_path)
+        return icon
+    except Exception:
+        return QIcon(svg_path)
 
 
 VERSION = "5.0.0"
@@ -77,34 +136,34 @@ class Config:
 
 
 class Theme:
-    PRIMARY = "#0078D4"
-    PRIMARY_HOVER = "#106EBE"
-    PRIMARY_ACTIVE = "#005A9E"
-    PRIMARY_DISABLED = "#C7E0F4"
-    PRIMARY_TEXT = "#FFFFFF"
-    SECONDARY_BG = "#FFFFFF"
-    SECONDARY_HOVER = "#F3F4F6"
-    SECONDARY_BORDER = "#D1D5DB"
-    SECONDARY_TEXT = "#374151"
-    GHOST_BG = "#F3F4F6"
-    GHOST_HOVER = "#E5E7EB"
-    GHOST_TEXT = "#374151"
-    SUCCESS = "#0E7B3C"
-    ERROR = "#C4314B"
-    WARNING = "#D83B01"
-    BG = "#F8F9FA"
-    CARD = "#FFFFFF"
-    CARD_SHADOW = "rgba(0, 0, 0, 0.08)"
-    BORDER = "#E1E4E8"
-    BORDER_HOVER = "#BDC3C7"
-    BORDER_FOCUS = "#0078D4"
-    TEXT_PRIMARY = "#111827"
-    TEXT_SECONDARY = "#6B7280"
-    TEXT_PLACEHOLDER = "#9CA3AF"
-    TEXT_DISABLED = "#C8CDD6"
-    DROPZONE_IDLE_BORDER = "#D1D5DB"
-    DROPZONE_HOVER_BG = "#EFF6FF"
-    DROPZONE_HOVER_BORDER = "#0078D4"
+    PRIMARY = "#0065fd"
+    PRIMARY_HOVER = "#0057da"
+    PRIMARY_ACTIVE = "#0043ad"
+    PRIMARY_DISABLED = "#e5e9ff"
+    PRIMARY_TEXT = "#ffffff"
+    SECONDARY_BG = "#ffffff"
+    SECONDARY_HOVER = "#eff1f4"
+    SECONDARY_BORDER = "#e7eaef"
+    SECONDARY_TEXT = "#0e1115"
+    GHOST_BG = "#eff1f4"
+    GHOST_HOVER = "#dde1e8"
+    GHOST_TEXT = "#0e1115"
+    SUCCESS = "#10b981"
+    ERROR = "#ef4444"
+    WARNING = "#f59e0b"
+    BG = "#ffffff"
+    CARD = "#f9f9fa"
+    CARD_SHADOW = "rgba(0, 0, 0, 0.04)"
+    BORDER = "#e7eaef"
+    BORDER_HOVER = "#d0d5dd"
+    BORDER_FOCUS = "#557fff"
+    TEXT_PRIMARY = "#0e1115"
+    TEXT_SECONDARY = "#333942"
+    TEXT_PLACEHOLDER = "#7f8d9f"
+    TEXT_DISABLED = "#b0b8c4"
+    DROPZONE_IDLE_BORDER = "#e7eaef"
+    DROPZONE_HOVER_BG = "#e5e9ff"
+    DROPZONE_HOVER_BORDER = "#0065fd"
 
 
 def _load_psd_images(psd_path: str):
@@ -148,7 +207,7 @@ def _btn_size(text: str, font_size: int = 13, extra_w: int = 36, height: int = 3
 def _btn_primary() -> str:
     return (
         f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; "
-        f"border: none; border-radius: 10px; font-family: Microsoft YaHei, sans-serif; }}"
+        f"border: none; border-radius: 999px; font-weight: 500; font-family: Microsoft YaHei, sans-serif;}}"
         f"QPushButton:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
         f"QPushButton:pressed {{ background: {Theme.PRIMARY_ACTIVE}; }}"
         f"QPushButton:disabled {{ background: {Theme.PRIMARY_DISABLED}; color: {Theme.TEXT_PLACEHOLDER}; }}"
@@ -158,8 +217,8 @@ def _btn_primary() -> str:
 def _btn_secondary() -> str:
     return (
         f"QPushButton {{ background: {Theme.SECONDARY_BG}; color: {Theme.SECONDARY_TEXT}; "
-        f"border: 1px solid {Theme.SECONDARY_BORDER}; border-radius: 10px; "
-        f"font-family: Microsoft YaHei, sans-serif; }}"
+        f"border: 1px solid {Theme.SECONDARY_BORDER}; border-radius: 999px; "
+        f"font-family: Microsoft YaHei, sans-serif;}}"
         f"QPushButton:hover {{ background: {Theme.SECONDARY_HOVER}; border-color: {Theme.BORDER_HOVER}; }}"
         f"QPushButton:disabled {{ color: {Theme.TEXT_DISABLED}; border-color: {Theme.BORDER}; }}"
     )
@@ -168,8 +227,8 @@ def _btn_secondary() -> str:
 def _btn_ghost() -> str:
     return (
         f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; "
-        f"border: 1px solid {Theme.SECONDARY_BORDER}; border-radius: 8px; "
-        f"font-family: Microsoft YaHei, sans-serif; }}"
+        f"border: none; border-radius: 999px; "
+        f"font-family: Microsoft YaHei, sans-serif;}}"
         f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
         f"QPushButton:disabled {{ color: {Theme.TEXT_DISABLED}; }}"
     )
@@ -179,7 +238,7 @@ def _input_style() -> str:
     return (
         f"QLineEdit {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
         f"border: 1px solid {Theme.BORDER}; border-radius: 8px; "
-        f"padding: 0 12px; font-family: Microsoft YaHei, sans-serif; }}"
+        f"padding: 0 12px; font-family: Microsoft YaHei, sans-serif;}}"
         f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         f"QLineEdit::placeholder {{ color: {Theme.TEXT_PLACEHOLDER}; }}"
     )
@@ -207,9 +266,10 @@ class DropZone(QFrame):
         self.content_layout.setSpacing(10)
         self.content_layout.setAlignment(Qt.AlignCenter)
 
-        self.icon_label = QLabel("📂")
+        self.icon_label = QLabel()
         self.icon_label.setAlignment(Qt.AlignCenter)
-        self.icon_label.setStyleSheet("font-size: 44px; background: transparent; border: none;")
+        self.icon_label.setPixmap(_icon("upload-cloud", 44).pixmap(44, 44))
+        self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.title_label = QLabel("拖拽图片到此处")
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
@@ -242,7 +302,7 @@ class DropZone(QFrame):
         border = Theme.DROPZONE_HOVER_BORDER if self._hovered else Theme.DROPZONE_IDLE_BORDER
         bg = Theme.DROPZONE_HOVER_BG if self._hovered else Theme.CARD
         self.setStyleSheet(
-            f"QFrame {{ background: {bg}; border: 2px dashed {border}; border-radius: 14px; }}"
+            f"QFrame {{ background: {bg}; border: 2px dashed {border}; border-radius: 12px; }}"
         )
 
     def enterEvent(self, event):
@@ -389,8 +449,8 @@ class MainWindow(QMainWindow):
         )
         self.guide_label.setFont(_font("Microsoft YaHei", 11, QFont.Medium))
         self.guide_label.setStyleSheet(
-            f"color: {Theme.PRIMARY_ACTIVE}; background: #EFF6FF; "
-            f"border: 1px solid {Theme.PRIMARY_DISABLED}; border-radius: 8px; "
+            f"color: {Theme.TEXT_SECONDARY}; background: {Theme.GHOST_BG}; "
+            f"border: 1px solid {Theme.BORDER}; border-radius: 999px; "
             f"padding: 8px 12px;"
         )
         self.guide_label.setAlignment(Qt.AlignCenter)
@@ -406,11 +466,13 @@ class MainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
-        self.btn_reset = QPushButton("🔄 重置")
+        self.btn_reset = QPushButton(" 重置")
         self.btn_reset.setFont(_font("Microsoft YaHei", 12))
         self.btn_reset.setCursor(Qt.PointingHandCursor)
         self.btn_reset.setStyleSheet(_btn_ghost())
-        self.btn_reset.setFixedSize(_btn_size("🔄 重置", 12, extra_w=20, height=34))
+        self.btn_reset.setIcon(_icon("rotate-ccw", 18))
+        self.btn_reset.setIconSize(QSize(18, 18))
+        self.btn_reset.setFixedSize(_btn_size(" 重置", 12, extra_w=20, height=34))
         self.btn_reset.clicked.connect(self.reset_app)
         toolbar.addWidget(self.btn_reset)
 
@@ -461,7 +523,7 @@ class MainWindow(QMainWindow):
 
         # V4.7.7 Fix E: 导出模式 toggle（关闭=切图 / 打开=导出图片）
         # 替代 V4.6.2 拖入后弹 ProcessModeDialog 的体验，直接在面板切换。
-        self.chk_export_mode = QCheckBox("🖼️ 导出图片")
+        self.chk_export_mode = QCheckBox(" 导出图片")
         self.chk_export_mode.setFont(_font("Microsoft YaHei", 12))
         self.chk_export_mode.setChecked(False)  # 默认=切图模式（V4.6.1 行为）
         self.chk_export_mode.setCursor(Qt.PointingHandCursor)
@@ -478,6 +540,7 @@ class MainWindow(QMainWindow):
             f"border-color: {Theme.PRIMARY}; }}"
         )
         self.chk_export_mode.setStyleSheet(_chk_indicator_style)
+        self.chk_export_mode.setIcon(_icon("image", 18))
         self.chk_export_mode.stateChanged.connect(self._on_export_mode_changed)
         toolbar2.addWidget(self.chk_export_mode)
 
@@ -501,22 +564,26 @@ class MainWindow(QMainWindow):
         toolbar3 = QHBoxLayout()
         toolbar3.setSpacing(10)
 
-        self.btn_copy_html = QPushButton("📋 复制到 Outlook")
+        self.btn_copy_html = QPushButton(" 复制到 Outlook")
         self.btn_copy_html.setFont(_font("Microsoft YaHei", 12))
         self.btn_copy_html.setCursor(Qt.PointingHandCursor)
         self.btn_copy_html.setEnabled(False)
         self.btn_copy_html.setStyleSheet(_btn_ghost())
-        self.btn_copy_html.setFixedSize(_btn_size("📋 复制到 Outlook", 12, extra_w=20, height=34))
+        self.btn_copy_html.setIcon(_icon("clipboard-copy", 18))
+        self.btn_copy_html.setIconSize(QSize(18, 18))
+        self.btn_copy_html.setFixedSize(_btn_size(" 复制到 Outlook", 12, extra_w=20, height=34))
         self.btn_copy_html.clicked.connect(self._copy_html)
         toolbar3.addWidget(self.btn_copy_html)
 
-        self.btn_adjust_cuts = QPushButton("调整切图位置")
+        self.btn_adjust_cuts = QPushButton(" 调整切图位置")
         self.btn_adjust_cuts.setFont(_font("Microsoft YaHei", 12))
         self.btn_adjust_cuts.setCursor(Qt.PointingHandCursor)
         self.btn_adjust_cuts.setEnabled(False)
         self.btn_adjust_cuts.setStyleSheet(_btn_ghost())
+        self.btn_adjust_cuts.setIcon(_icon("scissors", 18))
+        self.btn_adjust_cuts.setIconSize(QSize(18, 18))
         self.btn_adjust_cuts.setFixedSize(
-            _btn_size("调整切图位置", 12, extra_w=22, height=34)
+            _btn_size(" 调整切图位置", 12, extra_w=22, height=34)
         )
         self.btn_adjust_cuts.setToolTip(
             "切图完成后可拖动横线微调切开位置；自动限制在 Outlook 安全高度内"
@@ -524,12 +591,14 @@ class MainWindow(QMainWindow):
         self.btn_adjust_cuts.clicked.connect(self._adjust_cut_positions)
         toolbar3.addWidget(self.btn_adjust_cuts)
 
-        self.btn_hotspot = QPushButton("🎯 添加可点击按钮")
+        self.btn_hotspot = QPushButton(" 添加可点击按钮")
         self.btn_hotspot.setFont(_font("Microsoft YaHei", 12))
         self.btn_hotspot.setCursor(Qt.PointingHandCursor)
         self.btn_hotspot.setEnabled(False)
         self.btn_hotspot.setStyleSheet(_btn_ghost())
-        self.btn_hotspot.setFixedSize(_btn_size("🎯 添加可点击按钮", 12, extra_w=20, height=34))
+        self.btn_hotspot.setIcon(_icon("mouse-pointer-click", 18))
+        self.btn_hotspot.setIconSize(QSize(18, 18))
+        self.btn_hotspot.setFixedSize(_btn_size(" 添加可点击按钮", 12, extra_w=20, height=34))
         self.btn_hotspot.setToolTip("在切片上框选按钮区域并添加链接")
         self.btn_hotspot.clicked.connect(self._open_hotspot_editor)
         self.btn_hotspot.setVisible(HOTSPOT_FEATURE_ENABLED)
@@ -557,7 +626,7 @@ class MainWindow(QMainWindow):
         self.preview_area.setWidgetResizable(True)
         self.preview_area.setFixedHeight(160)
         self.preview_area.setStyleSheet(
-            f"QScrollArea {{ border: 1px solid {Theme.BORDER}; border-radius: 12px; "
+            f"QScrollArea {{ border: 1px solid {Theme.BORDER}; border-radius: 10px; "
             f"background: {Theme.CARD}; }}"
         )
         self.thumb_container = QWidget()
@@ -591,20 +660,24 @@ class MainWindow(QMainWindow):
         btn_row.setSpacing(10)
         btn_row.setContentsMargins(0, 4, 0, 0)
 
-        self.btn_send = QPushButton("在经典 Outlook 中创建邮件")
+        self.btn_send = QPushButton(" 在 Outlook 中创建邮件")
         self.btn_send.setFont(_font("Microsoft YaHei", 14, QFont.Bold))
         self.btn_send.setCursor(Qt.PointingHandCursor)
         self.btn_send.setEnabled(False)
         self.btn_send.setStyleSheet(_btn_primary())
         self.btn_send.setFixedHeight(44)
+        self.btn_send.setIcon(_icon("mail", 20))
+        self.btn_send.setIconSize(QSize(20, 20))
         self.btn_send.clicked.connect(self._send_email)
 
-        self.btn_save = QPushButton("保存切图")
+        self.btn_save = QPushButton(" 保存切图")
         self.btn_save.setFont(_font("Microsoft YaHei", 13, QFont.Medium))
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setEnabled(False)
         self.btn_save.setStyleSheet(_btn_secondary())
         self.btn_save.setFixedHeight(44)
+        self.btn_save.setIcon(_icon("arrow-down-to-line", 18))
+        self.btn_save.setIconSize(QSize(18, 18))
         self.btn_save.clicked.connect(self._save_slices)
 
         btn_row.addWidget(self.btn_send, stretch=5)
@@ -661,7 +734,7 @@ class MainWindow(QMainWindow):
     def _reset_drop_zone(self):
         self.drop_zone.set_compact(False)
         self.drop_zone.title_label.setText("拖拽图片到此处")
-        self.drop_zone.icon_label.setText("📂")
+        self.drop_zone.icon_label.setPixmap(_icon("upload-cloud", 44).pixmap(44, 44))
         self.drop_zone.tip_label.setText("支持 JPG · PNG · PDF · PPT · PSD/PSB，点击上传")
 
     def _on_width_edited(self):
@@ -732,13 +805,13 @@ class MainWindow(QMainWindow):
         if bool(state):
             # 导出模式
             self._set_status(
-                "🖼️ 导出图片模式：拖入文件后将合并/转换为单张长图保存到本地",
+                "导出图片模式：拖入文件后将合并/转换为单张长图保存到本地",
                 "info"
             )
         else:
             # 切图模式（默认）
             self._set_status(
-                "✂️ 切图模式：拖入文件后将切成多片，可在面板添加可点击按钮后发送 Outlook",
+                "切图模式：拖入文件后将切成多片，可在面板添加可点击按钮后发送 Outlook",
                 "info"
             )
 
@@ -999,7 +1072,7 @@ class MainWindow(QMainWindow):
 
         self.file_path = path
         self.drop_zone.title_label.setText(Path(path).name)
-        self.drop_zone.icon_label.setText("✅")
+        self.drop_zone.icon_label.setPixmap(_icon("check", 44).pixmap(44, 44))
         self.drop_zone.tip_label.setText("正在切片处理...")
         self._set_status("正在处理，请稍候...", "info")
         self.progress_bar.setValue(0)
@@ -1086,11 +1159,11 @@ class MainWindow(QMainWindow):
                 wrapper.setCursor(Qt.PointingHandCursor)
                 wrapper.setToolTip(
                     f"切片 {i + 1}: {Path(path).name}\n"
-                    f"💡 点击可添加/编辑可点击按钮（热区）"
+                    f"点击可添加/编辑可点击按钮（热区）"
                 )
                 wrapper.setStyleSheet(
                     "QWidget { background: transparent; }"
-                    "QWidget:hover { background: #EFF6FF; border-radius: 8px; }"
+                    "QWidget:hover { background: #e5e9ff; border-radius: 8px; }"
                 )
             else:
                 wrapper.setCursor(Qt.ArrowCursor)
@@ -1121,9 +1194,9 @@ class MainWindow(QMainWindow):
             label.setFont(QFont("Microsoft YaHei", 9))
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet(
-                "color: #6B7280; background: transparent; padding: 2px;"
+                "color: #7f8d9f; background: transparent; padding: 2px;"
                 if not HOTSPOT_FEATURE_ENABLED
-                else "color: #0078D4; background: transparent; padding: 2px;"
+                else "color: #0065fd; background: transparent; padding: 2px;"
             )
             wrapper_layout.addWidget(label)
 
@@ -1135,7 +1208,7 @@ class MainWindow(QMainWindow):
         # V4.6.4：状态条提示缩略图可点
         if paths and HOTSPOT_FEATURE_ENABLED:
             self._set_status(
-                f"🖼️ 已生成 {len(paths)} 张切片 — 点击下方任一缩略图可添加可点击热区",
+                f"已生成 {len(paths)} 张切片 — 点击下方任一缩略图可添加可点击热区",
                 "info",
             )
 
@@ -1233,11 +1306,11 @@ class MainWindow(QMainWindow):
             mime.setData("HTML Format", _build_windows_clipboard_html(html))
             mime.setText(html)
             QGuiApplication.clipboard().setMimeData(mime)
-            self._set_status("📋 HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
+            self._set_status("HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
             # V4.8.7: 已复制到剪贴板（base64 内嵌），清理临时文件
             deleted = cleanup_temp_slices(temp_files)
             if deleted:
-                self._set_status(f"📋 HTML 已复制（已清理 {deleted} 个临时文件）", "success")
+                self._set_status(f"HTML 已复制（已清理 {deleted} 个临时文件）", "success")
         except Exception as exc:
             QMessageBox.critical(self, "复制失败", str(exc))
 
@@ -1337,8 +1410,12 @@ class MainWindow(QMainWindow):
                     f"<b>压缩后</b> 缩小至约 {COMPRESS_QUALITY}% 品质（推荐）\n"
                     f"<b>原画质</b> 保持当前品质直接发送"
                 )
-                btn_compress = btn_box.addButton(f"🔽 压缩至 {COMPRESS_QUALITY}%", QMessageBox.AcceptRole)
-                btn_box.addButton("🎨 原画质发送", QMessageBox.NoRole)
+                btn_compress = btn_box.addButton(f" 压缩至 {COMPRESS_QUALITY}%", QMessageBox.AcceptRole)
+                btn_compress.setIcon(_icon("arrow-down-to-line", 18))
+                btn_compress.setIconSize(QSize(18, 18))
+                btn_quality = btn_box.addButton(" 原画质发送", QMessageBox.NoRole)
+                btn_quality.setIcon(_icon("palette", 18))
+                btn_quality.setIconSize(QSize(18, 18))
                 btn_cancel = btn_box.addButton("取消", QMessageBox.RejectRole)
                 btn_box.setDefaultButton(btn_compress)
                 btn_box.exec()
@@ -1352,7 +1429,7 @@ class MainWindow(QMainWindow):
                     slices = self._compress_slice_items(slices)
                     compressed_size = estimate_email_size_mb([s.path for s in slices])
                     self._set_status(
-                        f"🔽 已压缩至约 {compressed_size}MB，正在打开邮件...",
+                        f"已压缩至约 {compressed_size}MB，正在打开邮件...",
                         "success"
                     )
 
@@ -1365,11 +1442,11 @@ class MainWindow(QMainWindow):
                 slices=slices,
                 image_paths=[s.path for s in slices]
             )
-            self._set_status("✅ 邮件窗口已打开，请检查后发送", "success")
+            self._set_status("邮件窗口已打开，请检查后发送", "success")
             # V4.8.7: Outlook 已收到 CID 附件，本地临时 PNG 可清理
             deleted = cleanup_temp_slices(temp_files)
             if deleted:
-                self._set_status(f"✅ 邮件窗口已打开（已清理 {deleted} 个临时文件）", "success")
+                self._set_status(f"邮件窗口已打开（已清理 {deleted} 个临时文件）", "success")
         except Exception as exc:
             QMessageBox.critical(self, "发送失败", str(exc))
 
@@ -1463,7 +1540,7 @@ class MainWindow(QMainWindow):
     def _open_hotspot_editor(self):
         """「添加可点击按钮」按钮 → 弹出切片选择 + 打开编辑器"""
         if not HOTSPOT_FEATURE_ENABLED:
-            self._set_status("🎯 可点击按钮功能已临时隐藏：优先修复 Outlook 切图拼接缝问题", "warning")
+            self._set_status("可点击按钮功能已临时隐藏：优先修复 Outlook 切图拼接缝问题", "warning")
             return
         if not self.slice_paths:
             return
@@ -1487,7 +1564,7 @@ class MainWindow(QMainWindow):
         # V4.6.6 V1：热区已标注，将在发送/复制时按 hotspot 纵向切割
         if not self.hotspot_map.is_empty():
             self._set_status(
-                f"🎯 已为 {len(self.hotspot_map.all_slices())} 个切片添加共 "
+                f"已为 {len(self.hotspot_map.all_slices())} 个切片添加共 "
                 f"{self.hotspot_map.total_count()} 个可点击按钮 "
                 f"（V1：发送时按 hotspot 物理切割，原图上无任何标注）",
                 "success",
@@ -1497,6 +1574,12 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setFont(_font())
+    # V5.0.3 修复：设置窗口图标（任务栏 + 标题栏）
+    _app_icon_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "icon.ico"
+    )
+    if os.path.exists(_app_icon_path):
+        app.setWindowIcon(QIcon(_app_icon_path))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

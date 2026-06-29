@@ -1,0 +1,35 @@
+{
+  "name": "outlook-img-slicer",
+  "version": "6.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Outlook 长图助手（V6 Electron + V5 Python Sidecar）",
+  "workspaces": [
+    "electron",
+    "app"
+  ],
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "dev:vite": "cd app && npm run dev",
+    "dev:electron": "cd electron && VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build:renderer": "cd app && npm run build",
+    "build:main": "cd electron && npm run build",
+    "build:sidecar": "cd sidecar && pyinstaller --onefile --name sidecar_server sidecar_server.py",
+    "build": "npm run build:renderer && npm run build:main",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "test:python": "python3 -m pytest tests/ -q",
+    "test:electron": "cd electron && npm test",
+    "test:app": "cd app && npm test",
+    "test": "npm run test:python && npm run test:electron && npm run test:app",
+    "typecheck": "cd electron && tsc --noEmit && cd ../app && tsc --noEmit"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3",
+    "jsdom": "^22.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

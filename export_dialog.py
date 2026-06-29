@@ -31,10 +31,18 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton,
     QButtonGroup, QLineEdit, QFileDialog, QGroupBox, QCheckBox, QMessageBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QFont, QIcon
 
 import os
+
+_ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+
+def _icon(name: str, size: int = 20, color: str | None = None) -> QIcon:
+    path = os.path.join(_ICONS_DIR, f"{name}.svg")
+    if os.path.exists(path):
+        return QIcon(path)
+    return QIcon()
 
 
 # ── 格式常量 ───────────────────────────────────────
@@ -65,13 +73,19 @@ class ExportFormatDialog(QDialog):
         root.setContentsMargins(20, 18, 20, 18)
         root.setSpacing(12)
 
+        self.setStyleSheet(
+            "QGroupBox { border: 1px solid #e7eaef; border-radius: 8px; "
+            "margin-top: 12px; padding-top: 16px; font-family: Microsoft YaHei, sans-serif; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }"
+        )
+
         # ── 1. 文件信息 ──
         file_info = self._summarize_files()
         info_lbl = QLabel(file_info)
         info_lbl.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
         info_lbl.setStyleSheet(
-            "color: #0078D4; background: #EFF6FF; padding: 10px 12px; "
-            "border-radius: 6px; border: 1px solid #BFDBFE;"
+            "color: #0e1115; background: #eff1f4; padding: 10px 12px; "
+            "border-radius: 999px; border: 1px solid #e7eaef; font-family: Microsoft YaHei, sans-serif;"
         )
         info_lbl.setWordWrap(True)
         root.addWidget(info_lbl)
@@ -82,13 +96,13 @@ class ExportFormatDialog(QDialog):
         fmt_layout = QVBoxLayout(fmt_group)
         fmt_layout.setSpacing(6)
 
-        self.radio_png = QRadioButton("🖼️  PNG（推荐 — 无损，支持透明底）")
+        self.radio_png = QRadioButton("PNG（推荐 — 无损，支持透明底）")
         self.radio_png.setFont(QFont("Microsoft YaHei", 11))
         self.radio_png.setChecked(True)
         self.radio_png.setToolTip("PNG 格式无损，支持透明背景，文件较大")
         self.radio_png.toggled.connect(self._on_format_changed)
 
-        self.radio_jpg = QRadioButton("📷  JPG（更小体积，强制白底）")
+        self.radio_jpg = QRadioButton("JPG（更小体积，强制白底）")
         self.radio_jpg.setFont(QFont("Microsoft YaHei", 11))
         self.radio_jpg.setToolTip("JPG 格式有损压缩，文件小，但不支持透明底（强制白色背景）")
         self.radio_jpg.toggled.connect(self._on_format_changed)
@@ -103,17 +117,18 @@ class ExportFormatDialog(QDialog):
         alpha_layout = QVBoxLayout(alpha_group)
         alpha_layout.setSpacing(4)
 
-        self.chk_alpha = QCheckBox("✓ 保留透明底（仅 PNG 格式有效）")
+        self.chk_alpha = QCheckBox(" 保留透明底（仅 PNG 格式有效）")
         self.chk_alpha.setFont(QFont("Microsoft YaHei", 10))
         self.chk_alpha.setChecked(True)
         self.chk_alpha.setToolTip(
             "勾选：源图透明区域在导出后仍然透明（仅 PNG）\n"
             "不勾选：透明区域填充为白色（适合邮件等场景）"
         )
+        self.chk_alpha.setIcon(_icon("check", 18))
 
         self.alpha_hint = QLabel("💡 当前 PNG 格式，可选透明底")
         self.alpha_hint.setFont(QFont("Microsoft YaHei", 9))
-        self.alpha_hint.setStyleSheet("color: #6B7280; background: transparent;")
+        self.alpha_hint.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif;")
 
         alpha_layout.addWidget(self.chk_alpha)
         alpha_layout.addWidget(self.alpha_hint)
@@ -134,6 +149,13 @@ class ExportFormatDialog(QDialog):
         btn_browse = QPushButton("浏览…")
         btn_browse.setFont(QFont("Microsoft YaHei", 10))
         btn_browse.setCursor(Qt.PointingHandCursor)
+        btn_browse.setIcon(_icon("folder-open", 16))
+        btn_browse.setIconSize(QSize(16, 16))
+        btn_browse.setStyleSheet(
+            "QPushButton { background: #eff1f4; color: #0e1115; border: none; border-radius: 999px; "
+            "padding: 6px 14px; font-family: Microsoft YaHei, sans-serif; }"
+            "QPushButton:hover { background: #dde1e8; }"
+        )
         btn_browse.clicked.connect(self._browse_save_dir)
         save_layout.addWidget(btn_browse)
 
@@ -146,6 +168,11 @@ class ExportFormatDialog(QDialog):
         btn_cancel.setFont(QFont("Microsoft YaHei", 11))
         btn_cancel.setFixedSize(90, 34)
         btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setStyleSheet(
+            "QPushButton { background: #eff1f4; color: #0e1115; border: none; border-radius: 999px; "
+            "font-family: Microsoft YaHei, sans-serif; }"
+            "QPushButton:hover { background: #dde1e8; }"
+        )
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
 
@@ -153,9 +180,11 @@ class ExportFormatDialog(QDialog):
         btn_ok.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
         btn_ok.setFixedSize(90, 34)
         btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.setIcon(_icon("arrow-down-to-line", 18))
+        btn_ok.setIconSize(QSize(18, 18))
         btn_ok.setStyleSheet(
-            "QPushButton { background: #0078D4; color: white; border: none; border-radius: 6px; }"
-            "QPushButton:hover { background: #2563EB; }"
+            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-family: Microsoft YaHei, sans-serif; }"
+            "QPushButton:hover { background: #0057da; }"
         )
         btn_ok.setDefault(True)
         btn_ok.clicked.connect(self._on_accept)
@@ -173,8 +202,8 @@ class ExportFormatDialog(QDialog):
         except Exception:
             size_str = "未知"
         if n == 1:
-            return f"📄 已拖入文件：{Path(self.file_paths[0]).name}（{size_str}）"
-        return f"📦 已拖入 {n} 个文件（共 {size_str}）"
+            return f"已拖入文件：{Path(self.file_paths[0]).name}（{size_str}）"
+        return f"已拖入 {n} 个文件（共 {size_str}）"
 
     def _on_format_changed(self):
         """格式切换：JPG 强制白底，PNG 可选透明底"""
@@ -182,11 +211,11 @@ class ExportFormatDialog(QDialog):
             self.chk_alpha.setEnabled(False)
             self.chk_alpha.setChecked(False)
             self.alpha_hint.setText("⚠️ JPG 格式强制白底，透明底选项已禁用")
-            self.alpha_hint.setStyleSheet("color: #DC2626; background: transparent;")
+            self.alpha_hint.setStyleSheet("color: #ef4444; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         else:
             self.chk_alpha.setEnabled(True)
             self.alpha_hint.setText("💡 当前 PNG 格式，可选透明底")
-            self.alpha_hint.setStyleSheet("color: #6B7280; background: transparent;")
+            self.alpha_hint.setStyleSheet("color: #7f8d9f; background: transparent;")
 
     def _browse_save_dir(self):
         current = self.input_save.text().strip()

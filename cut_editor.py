@@ -30,7 +30,7 @@ class DraggableCutLine(QGraphicsLineItem):
     def __init__(self, owner: "CutEditorDialog", scene_width: int, scene_y: float):
         super().__init__(0, 0, scene_width, 0)
         self.owner = owner
-        self.setPen(QPen(QColor("#D83B01"), 3, Qt.DashLine))
+        self.setPen(QPen(QColor("#0065fd"), 3, Qt.DashLine))
         self.setCursor(QCursor(Qt.SizeVerCursor))
         self.setZValue(10)
         self.setFlags(
@@ -125,15 +125,15 @@ class CutEditorDialog(QDialog):
 
     def _build_ui(self):
         self.setWindowTitle("调整切图位置")
-        self.resize(720, 680)
-        self.setMinimumSize(620, 520)
+        self.resize(760, 700)
+        self.setMinimumSize(640, 540)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 16, 18, 16)
         root.setSpacing(10)
 
         title = QLabel("拖动橙色横线，调整图片切开的位置")
-        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #0e1115; font-family: Microsoft YaHei, sans-serif;")
         root.addWidget(title)
 
         hint = QLabel(
@@ -141,7 +141,7 @@ class CutEditorDialog(QDialog):
             f"且不超过经典 Outlook 安全上限 {self.max_slice_height}px。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #6B7280; font-size: 12px;")
+        hint.setStyleSheet("color: #333942; font-size: 12px; font-family: Microsoft YaHei, sans-serif;")
         root.addWidget(hint)
 
         preview = self._combined_preview()
@@ -152,7 +152,7 @@ class CutEditorDialog(QDialog):
         self.view = QGraphicsView(self.scene)
         self.view.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.view.setStyleSheet(
-            "QGraphicsView { background: #F8F9FA; border: 1px solid #E1E4E8; "
+            "QGraphicsView { background: #f9f9fa; border: 1px solid #e7eaef; "
             "border-radius: 8px; }"
         )
         root.addWidget(self.view, 1)
@@ -169,8 +169,8 @@ class CutEditorDialog(QDialog):
         self.summary_label = QLabel()
         self.summary_label.setWordWrap(True)
         self.summary_label.setStyleSheet(
-            "color: #005A9E; background: #EFF6FF; border: 1px solid #C7E0F4; "
-            "border-radius: 6px; padding: 7px 10px;"
+            "color: #0065fd; background: #eff1f4; border: 1px solid #e7eaef; "
+            "border-radius: 999px; padding: 7px 10px; font-family: Microsoft YaHei, sans-serif;"
         )
         root.addWidget(self.summary_label)
 

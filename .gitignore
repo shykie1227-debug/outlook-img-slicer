@@ -1,28 +1,67 @@
+# Node / Electron
+node_modules/
+dist/
+dist-electron/
+release/
+
+# Vite
+app/dist/
+.vite/
+
+# Python
 __pycache__/
 *.pyc
-.pytest_cache/
-.hypothesis/
+*.pyo
+*.pyd
+.Python
 *.egg-info/
-dist/
-build/
-DS_Store
-.DS_Store
+.venv/
+venv/
+.pytest_cache/
 
-# === 本地开发日志（不入 git，每次覆盖会丢历史）===
-test.md
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+
+# 临时
+*.tmp
+*.log
+
+# Sidecar 临时目录
+sidecar/_tmp_*/
+
+# 测试产物
+tests/_artifacts/
+
+# Build artifacts
+build/
+release-artifacts/*.exe
+release-artifacts/*.zip
+release-artifacts/*-split/
+release-artifacts/build-*/
+release-artifacts/dist-*/
+release-artifacts/electron/
+
+# AI/editor local state
+.claude/
+.trae/
+.cursor/
+.copilot/
+.aider*
+
+# Local scratch
 *.local.md
 dev-log/
 dev-notes/
 scratch.md
 TODO.local.md
-
-# === AI 协作痕迹（不入 git）===
-.claude/
-.cursor/
-.copilot/
-.aider*
-.conversation.md
-CHAT_HISTORY.md
-
-# Release binaries are uploaded to GitHub Releases, not committed
-release-artifacts/*.exe
+test.md
+test_write.txt
+.hypothesis/
+AGENTS.md
+CLAUDE.md
+release-artifacts/v4.9.4-notes.md
