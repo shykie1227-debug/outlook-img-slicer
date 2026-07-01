@@ -1,4 +1,4 @@
-# Outlook 长图插入工具 V3 依赖
+# Outlook 长图插入工具 V6 依赖
 Pillow>=10.0.0
 PySide6>=6.5.0
 pywin32>=306
@@ -8,3 +8,6 @@ PyMuPDF>=1.23        # PDF / PPT 转换后 PDF 拆分
 python-pptx>=1.0     # PPT/PPTX 元数据与兼容依赖
 lxml>=4.9            # python-pptx XML 依赖
 PyInstaller>=6.0.0
+cairosvg>=2.7.0      # SVG 转 PNG 转换
+svglib>=1.5.1        # SVG 转 PNG 备选方案
+reportlab>=4.0       # svglib 依赖

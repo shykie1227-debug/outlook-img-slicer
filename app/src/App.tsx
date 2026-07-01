@@ -483,7 +483,7 @@ export function App(): JSX.Element {
 
       <footer className="border-t border-slate-200 dark:border-slate-800 px-6 py-3 text-xs text-slate-500 flex justify-between">
         <span>
-          Electron {window.api.versions.electron} · Chrome {window.api.versions.chrome} · Node{" "}
+          Outlook 长图助手 V6.0.0 · Electron {window.api.versions.electron} · Chrome {window.api.versions.chrome} · Node{" "}
           {window.api.versions.node}
         </span>
         <span>本地运行 · 不联网 · 不上传</span>

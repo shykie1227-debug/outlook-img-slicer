@@ -113,9 +113,9 @@ def _tinted_icon(svg_path: str, color: str) -> QIcon:
         return QIcon(svg_path)
 
 
-VERSION = "5.0.0"
+VERSION = "6.0.0"
 VERSION_BY = "xiaoming"
-# V5.0: 修复剪贴板 UTF-8 截断，最小化热区切片，并加入手动切线编辑。
+# V6.0: Electron + React 重构，SVG 支持，Outlook 兼容性修复。
 HOTSPOT_FEATURE_ENABLED = True
 OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE = 1200
 MAX_EMAIL_SIZE_MB = 20

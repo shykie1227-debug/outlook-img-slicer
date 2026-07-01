@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 打包配置 - outlook-img-slicer V5.0.20260629
+PyInstaller 打包配置 - outlook-img-slicer V6.0.0
 真正的单文件模式（--onefile），优化体积
 """
 import sys
