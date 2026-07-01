@@ -28,17 +28,95 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
 
+NPM_CMD = "npm"
+NODE_CMD = "node"
+
 
 def pause_before_exit():
     if sys.stdin is not None and sys.stdin.isatty():
         input("\n按回车键退出...")
 
 
+def find_npm():
+    global NPM_CMD, NODE_CMD
+    
+    try:
+        result = subprocess.run(["node", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            NODE_CMD = "node"
+            node_version = result.stdout.strip()
+            print(f"[OK] Node.js: {node_version}")
+        else:
+            raise Exception("node not found")
+    except Exception:
+        print("[INFO] 尝试查找 Node.js 安装路径...")
+        common_paths = [
+            r"C:\Program Files\nodejs\node.exe",
+            r"C:\Program Files (x86)\nodejs\node.exe",
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "nodejs", "node.exe"),
+            os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "node", "bin", "node.exe"),
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                NODE_CMD = path
+                result = subprocess.run([path, "--version"], capture_output=True, text=True)
+                if result.returncode == 0:
+                    print(f"[OK] Node.js: {result.stdout.strip()} ({path})")
+                    break
+        else:
+            print("[ERROR] 未找到 Node.js，请先安装 Node.js 18+")
+            print("        下载地址: https://nodejs.org/")
+            return False
+    
+    try:
+        result = subprocess.run(["npm", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            NPM_CMD = "npm"
+            npm_version = result.stdout.strip()
+            print(f"[OK] npm: {npm_version}")
+            return True
+    except Exception:
+        pass
+    
+    print("[INFO] npm 命令找不到，尝试通过 node 调用 npm-cli.js...")
+    node_dir = os.path.dirname(NODE_CMD) if os.path.isfile(NODE_CMD) else ""
+    
+    npm_cli_paths = [
+        os.path.join(node_dir, "node_modules", "npm", "bin", "npm-cli.js"),
+        os.path.join(os.path.dirname(sys.executable), "node_modules", "npm", "bin", "npm-cli.js"),
+    ]
+    
+    for npm_cli in npm_cli_paths:
+        if os.path.exists(npm_cli):
+            NPM_CMD = f'"{NODE_CMD}" "{npm_cli}"'
+            result = subprocess.run(f'{NODE_CMD} "{npm_cli}" --version', capture_output=True, text=True, shell=True)
+            if result.returncode == 0:
+                npm_version = result.stdout.strip()
+                print(f"[OK] npm: {npm_version} (via node + npm-cli.js)")
+                return True
+    
+    print("[ERROR] 未找到 npm，请检查 Node.js 安装")
+    return False
+
+
 def run(cmd: list, cwd=None, **kwargs):
     if cwd is None:
         cwd = PROJECT_ROOT
-    print(f"\n>>> {' '.join(str(c) for c in cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, **kwargs)
+    
+    use_shell = False
+    if isinstance(cmd, str):
+        full_cmd = cmd
+        use_shell = True
+    else:
+        full_cmd = " ".join(str(c) for c in cmd)
+    
+    print(f"\n>>> {full_cmd}")
+    
+    if use_shell:
+        result = subprocess.run(full_cmd, cwd=cwd, shell=True, **kwargs)
+    else:
+        result = subprocess.run(cmd, cwd=cwd, **kwargs)
+    
     if result.returncode != 0:
         print(f"[ERROR] Command failed with code {result.returncode}")
         if result.stdout:
@@ -53,8 +131,21 @@ def run(cmd: list, cwd=None, **kwargs):
 def run_with_output(cmd: list, cwd=None):
     if cwd is None:
         cwd = PROJECT_ROOT
-    print(f"\n>>> {' '.join(str(c) for c in cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    
+    use_shell = False
+    if isinstance(cmd, str):
+        full_cmd = cmd
+        use_shell = True
+    else:
+        full_cmd = " ".join(str(c) for c in cmd)
+    
+    print(f"\n>>> {full_cmd}")
+    
+    if use_shell:
+        result = subprocess.run(full_cmd, cwd=cwd, shell=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    else:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    
     if result.returncode != 0:
         print(f"[ERROR] Command failed with code {result.returncode}")
         if result.stdout:
@@ -64,18 +155,6 @@ def run_with_output(cmd: list, cwd=None):
         pause_before_exit()
         sys.exit(result.returncode)
     return result
-
-
-def check_node_version():
-    try:
-        result = run_with_output(["node", "--version"])
-        version = result.stdout.strip()
-        print(f"[OK] Node.js: {version}")
-        return True
-    except Exception as e:
-        print(f"[ERROR] 未找到 Node.js，请先安装 Node.js 18+")
-        print(f"        下载地址: https://nodejs.org/")
-        return False
 
 
 def check_python_version():
@@ -91,17 +170,26 @@ def check_python_version():
 
 def install_node_deps():
     print("\n=== 安装 Node.js 依赖 ===")
-    run(["npm", "install"])
+    if "npm-cli.js" in NPM_CMD:
+        run(f'{NPM_CMD} install')
+    else:
+        run([NPM_CMD, "install"])
 
 
 def build_renderer():
     print("\n=== 构建 React 渲染进程 ===")
-    run(["npm", "run", "build:renderer"])
+    if "npm-cli.js" in NPM_CMD:
+        run(f'{NPM_CMD} run build:renderer')
+    else:
+        run([NPM_CMD, "run", "build:renderer"])
 
 
 def build_main():
     print("\n=== 构建 Electron 主进程 ===")
-    run(["npm", "run", "build:main"])
+    if "npm-cli.js" in NPM_CMD:
+        run(f'{NPM_CMD} run build:main')
+    else:
+        run([NPM_CMD, "run", "build:main"])
 
 
 def install_python_deps():
@@ -145,7 +233,10 @@ def build_sidecar():
 
 def build_electron():
     print("\n=== 使用 electron-builder 打包 ===")
-    run(["npm", "run", "dist:win"])
+    if "npm-cli.js" in NPM_CMD:
+        run(f'{NPM_CMD} run dist:win')
+    else:
+        run([NPM_CMD, "run", "dist:win"])
 
 
 def verify_build():
@@ -180,7 +271,7 @@ def main():
     print(f"Python: {sys.version}")
     print("=" * 60)
 
-    if not check_node_version():
+    if not find_npm():
         sys.exit(1)
     
     if not check_python_version():
