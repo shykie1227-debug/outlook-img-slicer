@@ -45,6 +45,8 @@ export interface SidecarOptions {
   restartBackoffMs?: number;
   /** stop() 等待优雅退出超时（ms） */
   shutdownTimeoutMs?: number;
+  /** send() 请求超时（ms），超过此时长自动 reject */
+  requestTimeoutMs?: number;
   /** cwd 覆盖（默认 sidecar 目录） */
   cwd?: string;
   /** 注入：默认 spawn */
@@ -86,6 +88,7 @@ export class SidecarManager extends EventEmitter {
       maxRestartAttempts: options.maxRestartAttempts ?? 5,
       restartBackoffMs: options.restartBackoffMs ?? 500,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? 3_000,
+      requestTimeoutMs: options.requestTimeoutMs ?? 60_000,
       cwd: options.cwd,
       spawn: spawner,
     };
@@ -156,7 +159,7 @@ export class SidecarManager extends EventEmitter {
 
   async send<K extends CommandName>(
     method: K,
-    params: CommandMap[K]["params"]
+    params: unknown
   ): Promise<CommandMap[K]["result"]> {
     if (!this.ready || !this.proc || !this.proc.stdin) {
       throw new Error(`SidecarManager: not ready (method=${method})`);
@@ -164,7 +167,7 @@ export class SidecarManager extends EventEmitter {
     const id = randomUUID();
     const payload = JSON.stringify({ id, method, params }) + "\n";
 
-    return new Promise<CommandMap[K]["result"]>((resolve, reject) => {
+    const requestPromise = new Promise<CommandMap[K]["result"]>((resolve, reject) => {
       this.pending.set(id, {
         resolve: resolve as (r: unknown) => void,
         reject,
@@ -177,6 +180,15 @@ export class SidecarManager extends EventEmitter {
         }
       });
     });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`SidecarManager: request timeout (method=${method}, id=${id})`));
+      }, this.opts.requestTimeoutMs);
+    });
+
+    return Promise.race([requestPromise, timeoutPromise]);
   }
 
   // ─────────────────────────────────────

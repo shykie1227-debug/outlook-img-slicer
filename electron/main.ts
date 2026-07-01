@@ -237,9 +237,9 @@ app.whenReady().then(async () => {
     process.stderr.write(`[main] sidecar start failed: ${(err as Error).message}\n`);
     // 继续运行，UI 会显示 Sidecar 错误状态
   }
-  registerIpc(ipcMain as never, sidecar);
+  registerIpc(ipcMain, sidecar);
   appHandlerChannels = registerAppHandlers(
-    ipcMain as never,
+    ipcMain,
     {
       showOpenDialog: (win, opts) =>
         dialog.showOpenDialog(win as never, opts as never),
@@ -276,9 +276,9 @@ app.on("before-quit", async (event) => {
     } catch {
       /* ignore */
     }
-    unregisterIpc(ipcMain as never);
+    unregisterIpc(ipcMain);
     if (appHandlerChannels.length > 0) {
-      unregisterAppHandlers(ipcMain as never, appHandlerChannels);
+      unregisterAppHandlers(ipcMain, appHandlerChannels);
       appHandlerChannels = [];
     }
     sidecar = null;

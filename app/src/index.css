@@ -16,6 +16,15 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+html {
+  /* 修复 Windows 深色模式下滚动条、input 默认色 */
+  color-scheme: light dark;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 body {
   background: #0f172a;
   color: #e2e8f0;

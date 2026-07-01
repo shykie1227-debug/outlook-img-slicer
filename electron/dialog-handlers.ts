@@ -11,6 +11,7 @@
  * - shell: Electron shell 模块（测试时用 mock）
  */
 import { existsSync } from "node:fs";
+import type { BrowserWindow } from "electron";
 
 export interface OpenImageDialogOptions {
   /** 默认展示的目录 */
@@ -18,7 +19,7 @@ export interface OpenImageDialogOptions {
   /** 文件类型过滤器 */
   filters?: Array<{ name: string; extensions: string[] }>;
   /** 窗口引用（macOS 需要） */
-  window?: unknown;
+  window?: BrowserWindow | null;
 }
 
 export interface OpenImageResult {
@@ -28,7 +29,7 @@ export interface OpenImageResult {
 
 export interface SaveHtmlDialogOptions {
   defaultPath?: string;
-  window?: unknown;
+  window?: BrowserWindow | null;
 }
 
 export interface SaveHtmlResult {
@@ -72,7 +73,7 @@ export function registerAppHandlers(
   ipc: IpcLike,
   dialog: DialogApi,
   _shell: ShellApi,
-  getWindow: () => unknown
+  getWindow: () => BrowserWindow | null
 ): string[] {
   const channels: string[] = [];
 
@@ -80,7 +81,7 @@ export function registerAppHandlers(
     "app:openImage",
     async (_event, opts: OpenImageDialogOptions = {}) => {
       const win = opts.window ?? getWindow();
-      const r = await dialog.showOpenDialog(win, {
+      const r = await dialog.showOpenDialog(win ?? undefined, {
         title: "选择长图",
         defaultPath: opts.defaultPath,
         filters: opts.filters ?? DEFAULT_IMAGE_FILTERS,
@@ -98,7 +99,7 @@ export function registerAppHandlers(
     "app:saveHtml",
     async (_event, opts: SaveHtmlDialogOptions = {}) => {
       const win = opts.window ?? getWindow();
-      const r = await dialog.showSaveDialog(win, {
+      const r = await dialog.showSaveDialog(win ?? undefined, {
         title: "保存 HTML",
         defaultPath: opts.defaultPath ?? "long-image.html",
         filters: [

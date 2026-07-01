@@ -66,16 +66,30 @@ export function ProgressBar({
     <div
       data-testid="progress-bar"
       data-state={hasError ? "error" : allDone ? "done" : "active"}
+      role="progressbar"
+      aria-valuenow={Math.round((current ? current.progress : overall) * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={label}
       className="w-full max-w-2xl mx-auto p-4 rounded-lg border border-slate-800 bg-slate-900/80 space-y-2"
     >
       <div className="flex items-center justify-between text-sm">
         <div data-testid={stateTestId} className="flex items-center gap-2">
           {hasError ? (
-            <span className="text-rose-400">⚠ 错误</span>
+            <>
+              <span aria-hidden="true" className="text-rose-400">⚠</span>
+              <span className="text-rose-400">错误</span>
+            </>
           ) : allDone ? (
-            <span className="text-emerald-400">✓ 已完成</span>
+            <>
+              <span aria-hidden="true" className="text-emerald-400">✓</span>
+              <span className="text-emerald-400">已完成</span>
+            </>
           ) : (
-            <span className="text-sky-400 animate-pulse">● 进行中</span>
+            <>
+              <span aria-hidden="true" className="text-sky-400 animate-pulse">●</span>
+              <span className="text-sky-400">进行中</span>
+            </>
           )}
           <span className="text-slate-300">{label}</span>
           {current?.error && (
@@ -90,7 +104,7 @@ export function ProgressBar({
             <button
               data-testid="cancel-btn"
               onClick={onCancel}
-              className="px-2 py-0.5 text-xs rounded bg-rose-600/30 text-rose-300 hover:bg-rose-600/50"
+              className="px-2 py-0.5 text-xs rounded bg-rose-600/30 text-rose-300 hover:bg-rose-600/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
             >
               取消
             </button>
@@ -100,7 +114,7 @@ export function ProgressBar({
 
       <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
         <div
-          className={`h-full ${barColor} transition-all duration-300`}
+          className={`h-full ${barColor} transition-[width] duration-300`}
           style={{ width: `${current ? currentPct : overallPct}%` }}
         />
       </div>
@@ -110,7 +124,10 @@ export function ProgressBar({
           {tasks.map((t) => (
             <div key={t.id} className="flex items-center justify-between text-xs">
               <span className={t.error ? "text-rose-300" : t.done ? "text-emerald-300" : "text-slate-400"}>
-                {t.error ? "✗" : t.done ? "✓" : "○"} {t.name}
+                <span aria-hidden="true">
+                  {t.error ? "✗" : t.done ? "✓" : "○"}
+                </span>{" "}
+                {t.name}
               </span>
               <span className="text-slate-500">{Math.round(t.progress * 100)}%</span>
             </div>

@@ -12,9 +12,10 @@
  * - 依赖注入：测试时传入 mock ipc
  */
 import type { SidecarManager } from "./sidecar-manager.js";
+import type { CommandName } from "./types.js";
 
 /** IPC 通道 → Sidecar 命令的映射 */
-const CHANNEL_TO_METHOD: Record<string, string> = {
+const CHANNEL_TO_METHOD: Record<string, CommandName | "__status__"> = {
   "image:info": "image.info",
   "image:slice": "image.slice",
   "image:smartSlice": "image.smartSlice",
@@ -25,7 +26,7 @@ const CHANNEL_TO_METHOD: Record<string, string> = {
   "html:clipboard": "html.clipboard",
   "outlook:createDraft": "outlook.createDraft",
   "outlook:copyClipboard": "outlook.copyClipboard",
-  "sidecar:status": "__status__", // 特殊：直接读 sidecar.status()
+  "sidecar:status": "__status__",
 };
 
 export const IPC_CHANNELS = Object.keys(CHANNEL_TO_METHOD);
@@ -46,10 +47,9 @@ export function registerIpc(ipc: IpcLike, sidecar: SidecarManager): void {
     if (method === "__status__") {
       ipc.handle(channel, async () => sidecar.status());
     } else {
+      const cmd: CommandName = method;
       ipc.handle(channel, async (_event, params) => {
-        // 简化：直接透传 params
-        // 真实场景下应做 zod 校验，但 Sidecar 端已经有 TypeError/FileNotFoundError 防御
-        return sidecar.send(method as never, params as never);
+        return sidecar.send(cmd, params);
       });
     }
   }

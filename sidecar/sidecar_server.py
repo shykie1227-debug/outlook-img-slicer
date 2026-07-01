@@ -231,7 +231,7 @@ def _dispatch(req: dict) -> dict:
         # ── HTML 组装（V5 验证算法） ──
         if cmd == "html.assemble":
             from html_assembler import SliceItem, generate_plain_html
-            display_w = int(params.get("display_w", 650))
+            display_w = int(params.get("display_w", 960))
             items = [
                 SliceItem(
                     path=s["path"],

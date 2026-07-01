@@ -2,6 +2,22 @@
 
 记录 Outlook 长图助手的所有重要变更。
 
+## V6.0.1 - 2026-06-30
+
+### 修复
+- **Web Interface Guidelines 合规**：装饰性 emoji 全部加 `aria-hidden="true"`（✂、V6.0.0 徽章、状态点、加载占位）
+- **prefers-reduced-motion 支持**：App.tsx 加 `MotionConfig reducedMotion="user"`，Step 转场在用户启用系统级"减少动效"时自动降级
+- **ImagePreview CLS 修复**：补 `width` / `height` 显式属性 + `aspectRatio` 占位 + `fetchpriority="high"`（above-the-fold 关键图）
+- **焦点环**：所有按钮加 `focus-visible:ring-2 focus-visible:ring-sky-500`
+- **键盘可达性**：DropZone 加 `onKeyDown` 处理 Enter/Space
+- **ProgressBar ARIA**：加 `role="progressbar"` + `aria-valuenow/min/max/label`
+- **SettingsPanel 表单**：补 `name` / `inputMode="numeric"` / `autoComplete="off"`
+- **Windows 深色模式**：index.css 加 `color-scheme: light dark` / `html.dark { color-scheme: dark }`，select 元素显式 `text-slate-100`
+- **transition-all 反模式**：ProgressBar / DropZone 改为 `transition-[width]` / `transition-[border-color,background-color,transform]`
+- **aria-live 异步消息**：错误条、Sidecar 状态徽章加 `role="status" aria-live="polite"`
+- **aria-expanded**：设置按钮加 `aria-expanded={showSettings}`
+- **icon.ico 升级**：从 5 尺寸（16/32/64/128/256）扩展到 6 尺寸（+ 48），HiDPI 任务栏更清晰
+
 ## V6.0.0 - 2026-06-30
 
 ### 重大变更

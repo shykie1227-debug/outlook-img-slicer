@@ -13,7 +13,7 @@
  * 动画：Framer Motion AnimatePresence 切换 step
  */
 import { useEffect } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 
 import { DropZone } from "./components/DropZone";
 import { CutEditor, type CutLine } from "./components/CutEditor";
@@ -40,7 +40,7 @@ const DEFAULT_CUT_OPTIONS = {
   snapThresholdPx: 5,
 };
 
-/** 步骤转场动画配置 */
+/** 步骤转场动画配置：reducedMotion 时退化为 0 持续 */
 const STEP_TRANSITION = {
   initial: { opacity: 0, y: 10 },
   animate: { opacity: 1, y: 0 },
@@ -49,40 +49,69 @@ const STEP_TRANSITION = {
 };
 
 export function App(): JSX.Element {
-  // 单一 store 订阅
-  const step = useAppStore((s) => s.step);
-  const error = useAppStore((s) => s.error);
-  const sourcePath = useAppStore((s) => s.sourcePath);
-  const sourceInfo = useAppStore((s) => s.sourceInfo);
-  const slices = useAppStore((s) => s.slices);
-  const cuts = useAppStore((s) => s.cuts);
-  const selectedCutId = useAppStore((s) => s.selectedCutId);
-  const tasks = useAppStore((s) => s.tasks);
-  const showSettings = useAppStore((s) => s.showSettings);
-  const settings = useAppStore((s) => s.settings);
-  const assembledHtml = useAppStore((s) => s.assembledHtml);
-  const assembledCids = useAppStore((s) => s.assembledCids);
-
-  const status = useAppStore((s) => s.status);
-  const sidecarError = useAppStore((s) => s.sidecarError);
-
-  // Actions
-  const setStep = useAppStore((s) => s.setStep);
-  const setError = useAppStore((s) => s.setError);
-  const setSourcePath = useAppStore((s) => s.setSourcePath);
-  const setSourceInfo = useAppStore((s) => s.setSourceInfo);
-  const setSlices = useAppStore((s) => s.setSlices);
-  const setCuts = useAppStore((s) => s.setCuts);
-  const setSelectedCutId = useAppStore((s) => s.setSelectedCutId);
-  const setTasks = useAppStore((s) => s.setTasks);
-  const patchTask = useAppStore((s) => s.patchTask);
-  const setShowSettings = useAppStore((s) => s.setShowSettings);
-  const setSettings = useAppStore((s) => s.setSettings);
-  const setStatus = useAppStore((s) => s.setStatus);
-  const setSidecarError = useAppStore((s) => s.setSidecarError);
-  const setAssembledHtml = useAppStore((s) => s.setAssembledHtml);
-  const setAssembledCids = useAppStore((s) => s.setAssembledCids);
-  const reset = useAppStore((s) => s.reset);
+  const {
+    step,
+    error,
+    sourcePath,
+    sourceInfo,
+    slices,
+    cuts,
+    selectedCutId,
+    tasks,
+    showSettings,
+    settings,
+    assembledHtml,
+    assembledCids,
+    status,
+    sidecarError,
+    setStep,
+    setError,
+    setSourcePath,
+    setSourceInfo,
+    setSlices,
+    setCuts,
+    setSelectedCutId,
+    setTasks,
+    patchTask,
+    setShowSettings,
+    setSettings,
+    setStatus,
+    setSidecarError,
+    setAssembledHtml,
+    setAssembledCids,
+    reset,
+  } = useAppStore((s) => ({
+    step: s.step,
+    error: s.error,
+    sourcePath: s.sourcePath,
+    sourceInfo: s.sourceInfo,
+    slices: s.slices,
+    cuts: s.cuts,
+    selectedCutId: s.selectedCutId,
+    tasks: s.tasks,
+    showSettings: s.showSettings,
+    settings: s.settings,
+    assembledHtml: s.assembledHtml,
+    assembledCids: s.assembledCids,
+    status: s.status,
+    sidecarError: s.sidecarError,
+    setStep: s.setStep,
+    setError: s.setError,
+    setSourcePath: s.setSourcePath,
+    setSourceInfo: s.setSourceInfo,
+    setSlices: s.setSlices,
+    setCuts: s.setCuts,
+    setSelectedCutId: s.setSelectedCutId,
+    setTasks: s.setTasks,
+    patchTask: s.patchTask,
+    setShowSettings: s.setShowSettings,
+    setSettings: s.setSettings,
+    setStatus: s.setStatus,
+    setSidecarError: s.setSidecarError,
+    setAssembledHtml: s.setAssembledHtml,
+    setAssembledCids: s.setAssembledCids,
+    reset: s.reset,
+  }));
 
   // ─────────────────────────────────────
   // Sidecar 状态订阅
@@ -207,7 +236,7 @@ export function App(): JSX.Element {
           width: s.width,
           height: s.height,
         })),
-        width: settings.emailWidth,
+        display_w: settings.emailWidth,
       });
       setAssembledHtml(r.html);
       setAssembledCids(r.cid_files);
@@ -229,7 +258,7 @@ export function App(): JSX.Element {
       if (!html) {
         const r = await window.api.htmlAssemble({
           slices: slices.map((s) => ({ path: s.path, width: s.width, height: s.height })),
-          width: settings.emailWidth,
+          display_w: settings.emailWidth,
         });
         html = r.html;
         setAssembledHtml(html);
@@ -249,7 +278,7 @@ export function App(): JSX.Element {
       if (!html) {
         const r = await window.api.htmlAssemble({
           slices: slices.map((s) => ({ path: s.path, width: s.width, height: s.height })),
-          width: settings.emailWidth,
+          display_w: settings.emailWidth,
         });
         html = r.html;
         cids = r.cid_files;
@@ -272,7 +301,7 @@ export function App(): JSX.Element {
       if (!html) {
         const r = await window.api.htmlAssemble({
           slices: slices.map((s) => ({ path: s.path, width: s.width, height: s.height })),
-          width: settings.emailWidth,
+          display_w: settings.emailWidth,
         });
         html = r.html;
         setAssembledHtml(html);
@@ -300,14 +329,21 @@ export function App(): JSX.Element {
   // 渲染
   // ─────────────────────────────────────
   return (
+    <MotionConfig reducedMotion="user">
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 flex flex-col transition-colors duration-200">
       <header className="border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-white font-bold">
+          <div
+            aria-hidden="true"
+            className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-white font-bold"
+          >
             ✂
           </div>
           <h1 className="text-xl font-semibold">Outlook 长图助手</h1>
-          <span className="px-2 py-0.5 text-xs rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+          <span
+            aria-hidden="true"
+            className="px-2 py-0.5 text-xs rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/30"
+          >
             V6.0.0
           </span>
         </div>
@@ -315,17 +351,19 @@ export function App(): JSX.Element {
           {sourceInfo && (
             <button
               onClick={onReset}
-              className="px-3 py-1.5 text-sm rounded-md text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800"
+              className="px-3 py-1.5 text-sm rounded-md text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
             >
-              ← 重新开始
+              重新开始
             </button>
           )}
           <button
             data-testid="open-settings"
             onClick={() => setShowSettings(!showSettings)}
-            className="px-3 py-1.5 text-sm rounded-md text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800"
+            aria-expanded={showSettings}
+            className="px-3 py-1.5 text-sm rounded-md text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           >
-            ⚙ 设置
+            <span aria-hidden="true" className="mr-1">⚙</span>
+            设置
           </button>
           <ThemeSwitcher />
           <SidecarStatusBadge status={status} error={sidecarError} />
@@ -338,6 +376,8 @@ export function App(): JSX.Element {
             <motion.div
               key="error"
               {...STEP_TRANSITION}
+              role="status"
+              aria-live="polite"
               className="max-w-2xl mx-auto p-3 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-sm"
             >
               错误：{error}
@@ -380,7 +420,12 @@ export function App(): JSX.Element {
                 <span>{slices.length} 个切片</span>
               </div>
 
-              <ImagePreview path={sourcePath} maxHeight={400} />
+              <ImagePreview
+                path={sourcePath}
+                width={sourceInfo.width}
+                height={sourceInfo.height}
+                maxHeight={400}
+              />
 
               <CutEditor
                 image={{ width: sourceInfo.width, height: sourceInfo.height }}
@@ -396,9 +441,9 @@ export function App(): JSX.Element {
                   <button
                     data-testid="assemble-html"
                     onClick={onAssemble}
-                    className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 text-white"
+                    className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
                   >
-                    拼装 HTML →
+                    拼装 HTML <span aria-hidden="true">→</span>
                   </button>
                 </div>
               )}
@@ -408,23 +453,26 @@ export function App(): JSX.Element {
                   <button
                     data-testid="save-html"
                     onClick={onSaveHtml}
-                    className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 text-white"
+                    className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
                   >
-                    💾 保存 HTML
+                    <span aria-hidden="true" className="mr-1">💾</span>
+                    保存 HTML
                   </button>
                   <button
                     data-testid="copy-clipboard"
                     onClick={onCopyClipboard}
-                    className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white"
+                    className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
                   >
-                    📋 复制到剪贴板
+                    <span aria-hidden="true" className="mr-1">📋</span>
+                    复制到剪贴板
                   </button>
                   <button
                     data-testid="create-draft"
                     onClick={onCreateDraft}
-                    className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 text-white"
+                    className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
                   >
-                    ✉ 创建 Outlook 草稿
+                    <span aria-hidden="true" className="mr-1">✉</span>
+                    创建 Outlook 草稿
                   </button>
                 </div>
               )}
@@ -441,6 +489,7 @@ export function App(): JSX.Element {
         <span>本地运行 · 不联网 · 不上传</span>
       </footer>
     </div>
+    </MotionConfig>
   );
 }
 
@@ -456,27 +505,36 @@ function SidecarStatusBadge({
       <div
         className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm"
         data-testid="sidecar-error"
+        role="status"
+        aria-live="polite"
       >
-        <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+        <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
         Sidecar 异常：{error}
       </div>
     );
   }
   if (!status) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-800 text-slate-400 text-sm">
-        <span className="w-2 h-2 rounded-full bg-slate-500 animate-pulse" />
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-800 text-slate-400 text-sm"
+        role="status"
+        aria-live="polite"
+      >
+        <span aria-hidden="true" className="w-2 h-2 rounded-full bg-slate-500 animate-pulse" />
         Sidecar 连接中…
       </div>
     );
   }
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm">
-      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+    <div
+      className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm"
+      role="status"
+    >
+      <span aria-hidden="true" className="w-2 h-2 rounded-full bg-emerald-400" />
       <span data-testid="sidecar-status-text">在线</span>
-      <span className="text-slate-400">·</span>
+      <span aria-hidden="true" className="text-slate-400">·</span>
       <span data-testid="sidecar-pid">PID {status.pid}</span>
-      <span className="text-slate-400">·</span>
+      <span aria-hidden="true" className="text-slate-400">·</span>
       <span>{status.platform}</span>
     </div>
   );

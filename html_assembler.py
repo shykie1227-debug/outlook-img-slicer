@@ -355,18 +355,22 @@ def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
       - 使用图片实际宽度而非归一化 display_w，消除 650→652 拉伸
       - img style 补充 line-height: 0; font-size: 0; 防 Outlook 行间距
       - 移除 min-height: 1px（V3.0 原始版本无此属性）
+
+    V6.0.1 修复：
+      - 添加 height HTML 属性，Outlook Word 引擎需要明确的 width+height 才能正确渲染
+      - 确保图片高度与预渲染后的 PNG 尺寸一致
     """
     img_tags = ""
     cid_counter = 0
     for group in groups:
         s = group[0]
-        # V4.9.3: 使用图片实际宽度，不强制归一化到 4 的倍数。
-        # V3.0 无缝版本就是用原始宽度，Outlook 会自动缩放到 HTML width 属性。
         try:
-            actual_w, _ = _get_img_dimensions(s.path)
+            actual_w, actual_h = _get_img_dimensions(s.path)
             img_w = actual_w if actual_w > 0 else display_w
+            img_h = actual_h if actual_h > 0 else 650
         except Exception:
             img_w = display_w
+            img_h = 650
 
         if is_base64:
             import base64
@@ -383,9 +387,10 @@ def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
         img_tags += (
             f'<img src="{safe_src}" '
             f'width="{img_w}" '
+            f'height="{img_h}" '
             f'alt="{safe_alt}" '
             f'border="0" hspace="0" vspace="0" '
-            f'style="display: block; width: {img_w}px; '
+            f'style="display: block; width: {img_w}px; height: {img_h}px; '
             f'border: 0; outline: none; text-decoration: none; '
             f'margin: 0; padding: 0; '
             f'line-height: 0; font-size: 0; '
@@ -586,6 +591,10 @@ def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] 
     Complex hotspot rows cannot share one HTML table because Outlook applies a
     single column grid across all rows. The segment dimensions therefore come
     from the prepared PNG itself and rows are rebuilt with inline image pieces.
+
+    V6.0.1 修复：
+      - 将 span/a 改为 td 结构，Outlook Word 引擎不支持 div/span 布局
+      - 使用 table/td 确保按钮行正确渲染，无错位和缝隙
     """
     try:
         actual_w, actual_h = _get_img_dimensions(slice_path)
@@ -611,7 +620,7 @@ def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] 
         f'<img src="{safe_src}" '
         f'width="{actual_w}" height="{actual_h}" '
         f'alt="{safe_alt}" '
-        f'border="0" hspace="0" vspace="0" align="left" '
+        f'border="0" hspace="0" vspace="0" '
         f'style="display: block; width: {actual_w}px; height: {actual_h}px; '
         f'border: 0; outline: none; text-decoration: none; '
         f'margin: 0; padding: 0; vertical-align: top; '
@@ -619,23 +628,31 @@ def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] 
     )
     if not href:
         return (
-            f'<span style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
-            f'margin: 0; padding: 0; border: 0; vertical-align: top; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
+            f'<td width="{actual_w}" height="{actual_h}" align="left" valign="top" '
+            f'style="width: {actual_w}px; height: {actual_h}px; '
+            f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'vertical-align: top; mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">'
             f'{img_tag}'
-            f'</span>'
+            f'</td>'
         )
 
     safe_href = escape(href, quote=True)
     return (
+        f'<td width="{actual_w}" height="{actual_h}" align="left" valign="top" '
+        f'style="width: {actual_w}px; height: {actual_h}px; '
+        f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+        f'vertical-align: top; mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">'
         f'<a href="{safe_href}" target="_blank" '
-        f'style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
-        f'margin: 0; padding: 0; border: 0; vertical-align: top; '
+        f'style="display: block; width: {actual_w}px; height: {actual_h}px; '
+        f'margin: 0; padding: 0; border: 0; '
         f'text-decoration: none; outline: none; '
         f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
         f'{img_tag}'
         f'</a>'
+        f'</td>'
     )
 
 
@@ -646,6 +663,10 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
 
     每个视觉行独立使用 inline segment。这样上下两行按钮位置不同时，
     Outlook Word 不会把它们强制套进同一组表格列，也不会产生嵌套表格边界。
+
+    V6.0.1 修复：
+      - 将 div 改为 table/tr 结构，Outlook Word 引擎不支持 div 布局
+      - 使用独立的 table 确保每行可以有不同数量的列，避免列网格强制对齐
     """
     display_w = _normalize_display_width(display_w)
     blocks = ""
@@ -676,14 +697,21 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
             )
 
         blocks += (
-            f'<div style="display: block; width: {row_width}px; height: {row_height}px; '
-            f'max-width: {display_w}px; overflow: hidden; white-space: nowrap; '
-            f'margin: 0 auto; padding: 0; border: 0; '
+            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+            f'width="{row_width}" height="{row_height}" '
+            f'style="width: {row_width}px; height: {row_height}px; '
+            f'border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; '
-            f'vertical-align: top; text-align: left;">'
+            f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
+            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
+            f'table-layout: fixed;">'
+            f'<tr height="{row_height}" style="height: {row_height}px; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
+            f'valign="top" align="left">'
             f'{segments}'
-            f'</div>'
+            f'</tr>'
+            f'</table>'
         )
     return blocks, cid_counter
 

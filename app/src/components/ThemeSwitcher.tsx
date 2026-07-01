@@ -26,10 +26,10 @@ export function ThemeSwitcher(): JSX.Element {
       data-testid="theme-switcher"
       onClick={toggleTheme}
       title={theme === "dark" ? "切换到亮色" : "切换到暗色"}
-      className="px-3 py-1.5 text-sm rounded-md text-slate-300 dark:text-slate-300 hover:text-white dark:hover:text-white hover:bg-slate-800 dark:hover:bg-slate-800"
-      aria-label="切换主题"
+      aria-label={theme === "dark" ? "切换到亮色" : "切换到暗色"}
+      className="px-3 py-1.5 text-sm rounded-md text-slate-300 hover:text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
     >
-      {theme === "dark" ? "☀" : "🌙"}
+      <span aria-hidden="true">{theme === "dark" ? "☀" : "🌙"}</span>
     </button>
   );
 }

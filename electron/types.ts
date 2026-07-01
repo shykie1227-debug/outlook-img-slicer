@@ -141,6 +141,7 @@ export interface CommandMap {
   "image.info": { params: ImageInfoParams; result: ImageInfoResult };
   "image.safetyCheck": { params: SafetyCheckParams; result: SafetyCheckResult };
   "image.slice": { params: SliceParams; result: SliceResult };
+  "image.smartSlice": { params: SliceParams; result: SliceResult };
   "pdf.toImages": { params: { path: string; dpi?: number }; result: ToImagesResult };
   "pptx.toImages": { params: { path: string }; result: ToImagesResult };
   "psd.toImage": { params: { path: string }; result: PsdToImageResult };

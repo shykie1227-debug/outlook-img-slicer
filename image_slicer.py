@@ -1,9 +1,10 @@
 """
 图像切片器模块
-将长图按指定高度切片，支持 JPG/PNG/BMP/WebP/GIF
+将长图按指定高度切片，支持 JPG/PNG/BMP/WebP/GIF/SVG
 V4.5 智能切图：通过像素灰度方差 + 亮度综合分析查找安全断点，规避文字区
 V4.8.7 Outlook 缝隙根治：切片阶段保证输出 PNG 总高严格 = 原图高，
   配合 html_assembler 的 _even_pixel_up 单组补白底，零累计误差 = 零 1px 缝。
+V6.0.1 SVG 支持：添加 SVG 格式导入，通过 cairosvg 转换为 PNG 后处理
 """
 import os
 import tempfile
@@ -15,6 +16,42 @@ from pathlib import Path
 from PIL import Image
 
 from image_safety import check_image_safety, ImageSafetyError
+
+
+def _convert_svg_to_png(svg_path: str) -> str:
+    """
+    将 SVG 文件转换为 PNG 格式。
+    使用 cairosvg 或 svglib 进行转换，保持矢量清晰度。
+
+    Args:
+        svg_path: SVG 文件路径
+
+    Returns:
+        转换后的 PNG 文件路径（临时文件）
+    """
+    ext = Path(svg_path).suffix.lower()
+    if ext != ".svg":
+        return svg_path
+
+    try:
+        import cairosvg
+        png_path = str(Path(svg_path).with_suffix(".png"))
+        cairosvg.svg2png(url=svg_path, write_to=png_path)
+        return png_path
+    except ImportError:
+        pass
+
+    try:
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
+        png_path = str(Path(svg_path).with_suffix(".png"))
+        drawing = svg2rlg(svg_path)
+        renderPM.drawToFile(drawing, png_path, fmt="PNG")
+        return png_path
+    except ImportError:
+        pass
+
+    raise RuntimeError("SVG 转换需要安装 cairosvg 或 svglib 库")
 
 
 _generated_temp_dirs: set[str] = set()
@@ -393,6 +430,7 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
         pass
 
     try:
+        image_path = _convert_svg_to_png(image_path)
         img = Image.open(image_path)
         orig_w, orig_h = img.size
 
@@ -491,7 +529,16 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
 
 
 def get_image_info(image_path: str) -> dict:
-    """获取图片基本元数据"""
+    """获取图片基本元数据，支持 SVG 格式"""
+    ext = Path(image_path).suffix.lower()
+    if ext == ".svg":
+        try:
+            converted_path = _convert_svg_to_png(image_path)
+            with Image.open(converted_path) as img:
+                w, h = img.size
+                return {"width": w, "height": h, "format": "SVG"}
+        except Exception:
+            return {"width": 0, "height": 0, "format": "SVG"}
     with Image.open(image_path) as img:
         w, h = img.size
         return {"width": w, "height": h, "format": img.format}

@@ -6,14 +6,20 @@
  *
  * Phase 5 接入 Framer Motion 后会替换 CSS 过渡为弹性动效。
  */
-import { useRef, useState, type DragEvent, type ChangeEvent } from "react";
+import {
+  useRef,
+  useState,
+  type DragEvent,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
 
 const SUPPORTED_EXTS = [
-  "png", "jpg", "jpeg", "bmp", "webp", "gif",
+  "png", "jpg", "jpeg", "bmp", "webp", "gif", "svg",
   "pdf", "ppt", "pptx", "psd",
 ];
 
-const FORMAT_LABELS = "PNG · JPG · BMP · WebP · GIF · PDF · PPT · PSD";
+const FORMAT_LABELS = "PNG · JPG · BMP · WebP · GIF · SVG · PDF · PPT · PSD";
 
 export interface DropZoneProps {
   /** 合法文件被放下时调用 */
@@ -111,6 +117,13 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
     inputRef.current?.click();
   };
 
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   const onInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -135,15 +148,17 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       data-testid="dropzone"
       data-state={state}
       onClick={onClick}
+      onKeyDown={onKeyDown}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       role="button"
       tabIndex={0}
-      className={`w-full max-w-2xl aspect-[3/4] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 text-center cursor-pointer transition-all duration-200 ${stateClasses[state] ?? stateClasses.idle}`}
+      aria-label="拖拽或选择长图文件"
+      className={`w-full max-w-2xl aspect-[3/4] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 text-center cursor-pointer transition-[border-color,background-color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${stateClasses[state] ?? stateClasses.idle}`}
     >
-      <div className="w-16 h-16 rounded-full bg-sky-500/10 flex items-center justify-center text-3xl">
+      <div aria-hidden="true" className="w-16 h-16 rounded-full bg-sky-500/10 flex items-center justify-center text-3xl">
         📥
       </div>
       <div className="space-y-1">
@@ -164,6 +179,7 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
         data-testid="dropzone-input"
         className="hidden"
         onChange={onInputChange}
+        aria-label="选择长图文件"
       />
     </div>
   );

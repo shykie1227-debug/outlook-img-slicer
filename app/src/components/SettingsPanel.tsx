@@ -23,7 +23,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  emailWidth: 650,
+  emailWidth: 960,
   maxSliceHeight: 2000,
   outputFormat: "PNG",
   jpegQuality: 95,
@@ -109,11 +109,14 @@ export function SettingsPanel({
         <input
           data-testid="setting-emailWidth"
           type="number"
+          name="emailWidth"
+          inputMode="numeric"
+          autoComplete="off"
           min={400}
           max={1200}
           value={value.emailWidth}
           onChange={onEmailWidth}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm"
+          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         />
       </Field>
 
@@ -121,20 +124,24 @@ export function SettingsPanel({
         <input
           data-testid="setting-maxSliceHeight"
           type="number"
+          name="maxSliceHeight"
+          inputMode="numeric"
+          autoComplete="off"
           min={500}
           max={6000}
           value={value.maxSliceHeight}
           onChange={onMaxHeight}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm"
+          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         />
       </Field>
 
       <Field label="输出格式">
         <select
           data-testid="setting-outputFormat"
+          name="outputFormat"
           value={value.outputFormat}
           onChange={onFormat}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm"
+          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         >
           <option value="PNG">PNG（无损 / 文件大）</option>
           <option value="JPEG">JPEG（有损 / 文件小）</option>
@@ -145,21 +152,25 @@ export function SettingsPanel({
         <input
           data-testid="setting-jpegQuality"
           type="number"
+          name="jpegQuality"
+          inputMode="numeric"
+          autoComplete="off"
           min={50}
           max={100}
           value={value.jpegQuality}
           onChange={onJpegQuality}
           disabled={value.outputFormat !== "JPEG"}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm disabled:opacity-50"
+          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         />
       </Field>
 
       <Field label="主题">
         <select
           data-testid="setting-theme"
+          name="theme"
           value={value.theme}
           onChange={onTheme}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm"
+          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         >
           <option value="light">浅色</option>
           <option value="dark">深色</option>
