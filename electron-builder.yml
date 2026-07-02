@@ -37,28 +37,25 @@ asarUnpack:
   - "**/*.exe"
   - "**/*.dll"
 
-# Windows NSIS 配置
+# Windows 绿色免安装版配置（portable）
 win:
   target:
-    - target: nsis
+    - target: portable
       arch:
         - x64
   icon: icon.ico
-  artifactName: ${productName}-V${version}-Setup.${ext}
+  artifactName: ${productName}-V${version}-portable-${arch}.${ext}
   # 不自动更新（产品定位：本地工具）
   # 不代码签名（个人使用）
 
-nsis:
-  oneClick: false
-  perMachine: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: Outlook 长图助手
-  installerLanguages: ["zh_CN", "en_US"]
-  language: "2052"  # 简体中文
-  # 不联网检测
-  deleteAppDataOnUninstall: false
+portable:
+  # 便携版：解压即用，不写入注册表，不安装到系统目录
+  # 数据存储在程序同目录下的 data 文件夹中
+  artifactName: ${productName}-V${version}-portable-${arch}.${ext}
+  # 不请求管理员权限（普通用户可直接运行）
+  requestExecutionLevel: asInvoker
+  # 不创建快捷方式（绿色版）
+  allowElevation: false
 
 # Mac 配置（开发用，产物用户不下载）
 mac:

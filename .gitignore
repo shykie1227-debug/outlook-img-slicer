@@ -19,6 +19,13 @@ __pycache__/
 venv/
 .pytest_cache/
 
+# PyInstaller
+*.spec
+build/
+sidecar/build/
+sidecar/dist/
+sidecar/*.spec
+
 # IDE / OS
 .DS_Store
 .idea/
@@ -29,7 +36,13 @@ Thumbs.db
 
 # 临时
 *.tmp
+*.temp
 *.log
+*.bak
+*.old
+*.backup
+*.orig
+*~
 
 # Sidecar 临时目录
 sidecar/_tmp_*/
@@ -38,9 +51,9 @@ sidecar/_tmp_*/
 tests/_artifacts/
 
 # Build artifacts
-build/
 release-artifacts/*.exe
 release-artifacts/*.zip
+release-artifacts/*.tar.gz
 release-artifacts/*-split/
 release-artifacts/build-*/
 release-artifacts/dist-*/

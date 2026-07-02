@@ -40,9 +40,9 @@
 
 <div align="center">
 
-**[⬇️ 立即下载 Outlook长图插入工具.exe](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest)**
+**[⬇️ 立即下载 Outlook长图助手绿色版](https://github.com/shykie1227-debug/outlook-img-slicer/releases/latest)**
 
-*单文件 92MB · Windows 10/11 · 免安装 · 双击即用*
+*绿色免安装 · 约 180MB · Windows 10/11 · 解压即用*
 
 </div>
 
@@ -73,8 +73,12 @@ npm run dev
 # 构建渲染进程和主进程
 npm run build
 
-# 打包为 Windows NSIS 安装器（需在 Windows 上执行）
+# 打包为 Windows 绿色免安装版（需在 Windows 上执行）
 npm run dist:win
+# 输出: release-artifacts/electron/Outlook 长图助手-V6.0.0-portable-x64.exe
+
+# 打包为 NSIS 安装版（可选）
+npm run dist:win:nsis
 # 输出: release-artifacts/electron/Outlook 长图助手-V6.0.0-Setup.exe
 ```
 
@@ -84,12 +88,13 @@ npm run dist:win
 
 ### Windows 用户
 
-1. 下载并双击 `Outlook长图插入工具.exe` 启动程序
-2. 将长图 / 长截图**拖入**窗口，或点击**选择文件**
-3. （可选）点击**调整切图位置**拖动切线，或点击缩略图添加按钮链接
-4. 填写收件人（可选）和邮件标题（可选）
-5. 点击**在经典 Outlook 中创建邮件** → Outlook 自动弹出
-6. 在邮件窗口中核对内容，发送！
+1. 下载 `Outlook 长图助手-V6.0.0-portable-x64.exe` 到任意目录
+2. **双击直接运行**（无需安装，绿色免安装）
+3. 将长图 / 长截图**拖入**窗口，或点击**选择文件**
+4. （可选）点击**调整切图位置**拖动切线，或点击缩略图添加按钮链接
+5. 填写收件人（可选）和邮件标题（可选）
+6. 点击**在经典 Outlook 中创建邮件** → Outlook 自动弹出
+7. 在邮件窗口中核对内容，发送！
 
 ### 支持的文件格式
 
@@ -201,14 +206,28 @@ outlook-img-slicer/
 ├── sidecar/                 # 🐍 Python Sidecar（图像处理）
 │   └── sidecar_server.py    # stdio JSON-RPC 服务
 ├── image_slicer.py          # 🖼️ 图像切片模块（智能切图 + 加墙）
+├── image_safety.py          # 🛡️ 图片安全检查
 ├── pdf_slicer.py            # 📄 PDF 解析模块（PyMuPDF）
 ├── ppt_slicer.py            # 🎬 PPT 解析模块（PowerPoint COM / LibreOffice）
 ├── psd_slicer.py            # 🎨 PSD 解析模块（psd-tools 合并可见图层）
+├── hotspot_slicer.py        # 🎯 热区切片算法
+├── clickable_map.py         # 🗺️ 热区数据结构
 ├── html_assembler.py        # 🧩 Outlook HTML 组装模块
+├── clipboard_html.py        # 📋 Windows 剪贴板 HTML
 ├── outlook_sender.py        # 📬 Outlook 自动化模块（pywin32 COM）
 ├── requirements.txt         # 📦 Python 依赖声明
 ├── electron-builder.yml     # 🏭 Electron Builder 打包配置
-└── LOCAL_RULES.md           # 🔒 本地运行原则（禁联网）
+├── build_v6.py              # 🔨 Windows 构建脚本（Python 版）
+├── build_v6.ps1             # 🔨 Windows 构建脚本（PowerShell 版）
+├── docs/                    # 📚 文档
+│   ├── v6-build-guide.md    # V6 构建指南
+│   └── dev-logs/            # 开发日志
+├── tests/                   # 🧪 测试文件
+├── legacy/                  # 📜 遗留代码（V5 及更早）
+│   └── v5-python-ui/        # V5 PySide6 单文件版本
+├── release-artifacts/       # 📦 发布说明
+├── LOCAL_RULES.md           # 🔒 本地运行原则（禁联网）
+└── README.md
 ```
 
 ### 核心模块说明
@@ -241,7 +260,7 @@ outlook-img-slicer/
 | PDF / PPT 解析 | PyMuPDF ≥ 1.23 |
 | PSD 解析 | psd-tools ≥ 1.10 + numpy |
 | Outlook 自动化 | pywin32 ≥ 306（仅 Windows） |
-| 打包 | Electron Builder (NSIS) |
+| 打包 | Electron Builder (Portable 绿色免安装版 / NSIS 安装版) |
 | 邮件布局 | 单外层 `<table>` + 连续图片 + 独立热区行 |
 
 ---
