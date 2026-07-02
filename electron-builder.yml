@@ -7,16 +7,31 @@
 appId: com.outlook.img.slicer
 productName: Outlook 长图助手
 copyright: Copyright © 2026
-artifactName: ${productName}-V${version}-${arch}.${ext}
 
 directories:
   output: release-artifacts/electron
   buildResources: build-resources
 
+# 压缩配置：使用 maximum 减小体积，首次构建较慢但最终体积更小
+compression: maximum
+
+# 移除不需要的默认文件
+removePackageScripts: true
+removePackageKeywords: true
+
 files:
   - electron/dist-electron/**/*
   - package.json
   - "!**/*.map"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}/**"
+  - "!**/node_modules/*.d.ts"
+  - "!**/node_modules/.bin"
+  - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
+  - "!**/._*"
+  - "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
+  - "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}"
+  - "!**/{appveyor.yml,.travis.yml,circle.yml}"
+  - "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
 
 extraResources:
   # 把 app 渲染产物作为额外资源
@@ -26,7 +41,7 @@ extraResources:
   # Python Sidecar 可执行（PyInstaller 产物）
   - from: sidecar/dist
     to: sidecar
-    filter: ["**/*"]
+    filter: ["**/*.exe", "**/*.dll"]
   # 窗口图标（用于主进程 setIcon）
   - from: icon.ico
     to: icon.ico
@@ -37,6 +52,9 @@ asarUnpack:
   - "**/*.exe"
   - "**/*.dll"
 
+# 不包含的语言包，减小体积
+electronLanguages: ["zh-CN", "en-US"]
+
 # Windows 绿色免安装版配置（portable）
 win:
   target:
@@ -45,17 +63,20 @@ win:
         - x64
   icon: icon.ico
   artifactName: ${productName}-V${version}-portable-${arch}.${ext}
-  # 不自动更新（产品定位：本地工具）
   # 不代码签名（个人使用）
+  signAndEditExecutable: false
+  # 不验证签名
+  verifyUpdateCodeSignature: false
 
 portable:
   # 便携版：解压即用，不写入注册表，不安装到系统目录
-  # 数据存储在程序同目录下的 data 文件夹中
   artifactName: ${productName}-V${version}-portable-${arch}.${ext}
   # 不请求管理员权限（普通用户可直接运行）
   requestExecutionLevel: asInvoker
   # 不创建快捷方式（绿色版）
   allowElevation: false
+  # 不关联文件
+  fileAssociations: []
 
 # Mac 配置（开发用，产物用户不下载）
 mac:
