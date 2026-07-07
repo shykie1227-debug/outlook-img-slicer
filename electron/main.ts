@@ -87,7 +87,7 @@ function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     minWidth: 900,
     minHeight: 600,
-    title: "Outlook 长图助手 V6.0.0",
+    title: "Outlook 长图助手 V6.0.3",
     backgroundColor: "#0f172a",
     show: false,
     icon: iconPath,

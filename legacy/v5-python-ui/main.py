@@ -113,7 +113,7 @@ def _tinted_icon(svg_path: str, color: str) -> QIcon:
         return QIcon(svg_path)
 
 
-VERSION = "6.0.0"
+VERSION = "6.0.3"
 VERSION_BY = "xiaoming"
 # V6.0: Electron + React 重构，SVG 支持，Outlook 兼容性修复。
 HOTSPOT_FEATURE_ENABLED = True

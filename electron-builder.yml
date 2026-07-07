@@ -86,7 +86,7 @@ mac:
 # 通用：应用元信息
 extraMetadata:
   name: Outlook 长图助手
-  version: 6.0.0
+  version: 6.0.3
   author: outlook-img-slicer
   description: Outlook 长图助手（V6 Electron + V5 Python Sidecar）
   type: commonjs

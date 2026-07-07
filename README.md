@@ -75,11 +75,11 @@ npm run build
 
 # 打包为 Windows 绿色免安装版（需在 Windows 上执行）
 npm run dist:win
-# 输出: release-artifacts/electron/Outlook 长图助手-V6.0.0-portable-x64.exe
+# 输出: release-artifacts/electron/Outlook 长图助手-V6.0.3-portable-x64.exe
 
 # 打包为 NSIS 安装版（可选）
 npm run dist:win:nsis
-# 输出: release-artifacts/electron/Outlook 长图助手-V6.0.0-Setup.exe
+# 输出: release-artifacts/electron/Outlook 长图助手-V6.0.3-Setup.exe
 ```
 
 ---
@@ -88,7 +88,7 @@ npm run dist:win:nsis
 
 ### Windows 用户
 
-1. 下载 `Outlook 长图助手-V6.0.0-portable-x64.exe` 到任意目录
+1. 下载 `Outlook 长图助手-V6.0.3-portable-x64.exe` 到任意目录
 2. **双击直接运行**（无需安装，绿色免安装）
 3. 将长图 / 长截图**拖入**窗口，或点击**选择文件**
 4. （可选）点击**调整切图位置**拖动切线，或点击缩略图添加按钮链接
@@ -130,7 +130,7 @@ npm run dist:win:nsis
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Outlook 长图助手 V6.0.0                            │  ← 标题栏
+│  Outlook 长图助手 V6.0.3                            │  ← 标题栏
 │  长图/PDF/PPT/PSD切片后插入Outlook邮件               │
 │  1 放入文件 → 2 调整切线/添加链接 → 3 创建邮件       │
 ├─────────────────────────────────────────────────────┤
@@ -295,7 +295,7 @@ A: **不会**。本工具**完全不联网、不上传、完全本地运行**。
 
 ## 📝 更新日志
 
-### V6.0.0 — 2026-07-01
+### V6.0.3 — 2026-07-01
 
 - ✨ **SVG 格式支持** — 支持拖入 SVG 格式图片，自动转换为 PNG 后进行切片处理
 - 🐛 **Outlook 长图显示修复** — 修复复制 HTML 到 Outlook 时长图显示错乱问题，添加明确的 height 属性

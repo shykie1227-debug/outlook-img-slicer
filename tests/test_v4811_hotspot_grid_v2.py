@@ -58,10 +58,12 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
 
     assert "https://top.example" in html
     assert "https://bottom.example" in html
-    # V5.0: 每个视觉行独立 inline，且整封邮件只有一个外层 table。
-    assert html.count("<table") == 1
-    assert html.count("<div") == 5
-    assert "<tr height=" not in html
+    # V6.0.3: 每行独立 <table><tr> 替代 <div>，消除 Outlook 行间距。
+    # 5 行 = 5 个内层 table + 1 个外层 table = 6 个 table。
+    assert html.count("<table") == 6
+    assert html.count("<div") == 0
+    # 每行有独立的 <tr>
+    assert html.count("<tr") == 6  # 5 内层 + 1 外层
 
     # 所有预渲染 PNG 边缘不得出现默认黑/白异常色。
     for item in prepared:

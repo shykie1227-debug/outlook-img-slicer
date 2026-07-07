@@ -158,8 +158,8 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       aria-label="拖拽或选择长图文件"
       className={`w-full max-w-2xl aspect-[3/4] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 text-center cursor-pointer transition-[border-color,background-color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${stateClasses[state] ?? stateClasses.idle}`}
     >
-      <div aria-hidden="true" className="w-16 h-16 rounded-full bg-sky-500/10 flex items-center justify-center text-3xl">
-        📥
+      <div aria-hidden="true" className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center">
+        <img src="../../../icons/folder-color.svg" alt="" className="w-10 h-10" />
       </div>
       <div className="space-y-1">
         <p className="text-lg font-medium">

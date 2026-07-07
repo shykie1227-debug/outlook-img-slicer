@@ -1,6 +1,6 @@
 {
   "name": "outlook-img-slicer-app",
-  "version": "6.0.0",
+  "version": "6.0.3",
   "private": true,
   "type": "module",
   "scripts": {

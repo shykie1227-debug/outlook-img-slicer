@@ -259,7 +259,7 @@ def _dispatch(req: dict) -> dict:
             from clipboard_html import build_windows_clipboard_html
             raw = build_windows_clipboard_html(params["html"])
             return {"ok": True, "result": {
-                "cf_html": base64.b64encode(raw).decode("ascii"),
+                "cf_html_b64": base64.b64encode(raw).decode("ascii"),
                 "cf_html_size": len(raw),
             }}
 

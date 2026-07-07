@@ -1,5 +1,5 @@
 /**
- * App 根组件（V6.0.0 Phase 5）
+ * App 根组件（V6.0.3 Phase 5）
  *
  * 工作流：
  * 1. idle → 点击 DropZone 触发 window.api.openImage() 真实选择图片
@@ -357,7 +357,7 @@ export function App(): JSX.Element {
             aria-hidden="true"
             className="px-2 py-0.5 text-xs rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/30"
           >
-            V6.0.0
+            V6.0.3
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -496,7 +496,7 @@ export function App(): JSX.Element {
 
       <footer className="border-t border-slate-200 dark:border-slate-800 px-6 py-3 text-xs text-slate-500 flex justify-between">
         <span>
-          Outlook 长图助手 V6.0.0 · Electron {window.api.versions.electron} · Chrome {window.api.versions.chrome} · Node{" "}
+          Outlook 长图助手 V6.0.3 · Electron {window.api.versions.electron} · Chrome {window.api.versions.chrome} · Node{" "}
           {window.api.versions.node}
         </span>
         <span>本地运行 · 不联网 · 不上传</span>

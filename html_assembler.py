@@ -656,19 +656,14 @@ def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] 
 def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
                                 is_base64: bool = False) -> Tuple[str, int]:
     """
-    Build hotspot/multi-segment rows using div + span + inline-block.
+    V6.0.3: hotspot/multi-segment 链路改用 <table><tr> 结构替代 <div> 行块。
 
-    每个视觉行用 div 包裹，行内段用 span + inline-block 横向排列。
-    所有行直接堆叠在外层单 <td> 内，避免多表格边界产生的 1px 缝隙。
-
-    V6.0.2 回滚 V6.0.1：
-      - 将多 table + tr 结构改回单 div 容器
-      - 原因：V6.0.1 每行独立 table 违反"单 <tr> + 单 <td>"约束
-      - 多 table 之间在 Outlook Word 引擎中产生 1px 缝隙，累积为可见错位
-      - div + span + inline-block 是 V4.9.x 验证过的稳定方案
+    原 <div> 行块在 Outlook Word 引擎中即使设置 line-height:0 仍可能产生 1-2px
+    行间距。<table><tr> 配合 cellpadding="0" cellspacing="0" 是 Outlook 中
+    最稳定的零间距容器。每行独立 table 避免跨行列约束。
     """
     display_w = _normalize_display_width(display_w)
-    blocks = ""
+    all_rows_html = ""
     cid_counter = 0
 
     for group in groups:
@@ -684,27 +679,35 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
         row_width = row_width or display_w
         row_height = row_height or _even_pixel_4x(display_w)
 
-        segments = ""
+        cells = ""
         for s in group:
             if is_base64:
                 cid_or_src = ""
             else:
                 cid_counter += 1
                 cid_or_src = f"cid:slice_{cid_counter:03d}"
-            segments += _build_inline_segment(
-                s.path, cid_or_src, s.href, s.alt_text, is_base64=is_base64
+            cells += _build_cell(
+                s.path, cid_or_src, display_w, s.href, s.alt_text,
+                s.original_width, is_base64=is_base64,
             )
 
-        blocks += (
-            f'<div style="display: block; width: {row_width}px; height: {row_height}px; '
-            f'margin: 0; padding: 0; border: 0; '
+        all_rows_html += (
+            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+            f'align="center" width="{display_w}" '
+            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; '
-            f'text-align: left; overflow: hidden;">'
-            f'{segments}'
-            f'</div>'
+            f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
+            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+            f'table-layout: fixed;">\n'
+            f'<tr height="{row_height}" style="height: {row_height}px; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
+            f'valign="top" align="left">\n'
+            f'{cells}'
+            f'</tr>\n'
+            f'</table>\n'
         )
-    return blocks, cid_counter
+    return all_rows_html, cid_counter
 
 
 def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:

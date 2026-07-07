@@ -173,6 +173,16 @@ Write-Ok "Main process built"
 # Step 7: Build Python sidecar
 Write-Step 7 8 "Building Python sidecar (PyInstaller)..."
 
+# V6.0.3: 确保 Python 依赖已安装（sidecar 只需核心依赖，不含 PySide6）
+Write-Info "Installing Python dependencies..."
+& $pythonPath -m pip install --upgrade pip 2>&1 | Out-Null
+& $pythonPath -m pip install Pillow PyMuPDF pywin32 psd-tools numpy python-pptx lxml PyInstaller 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Info "Some pip packages failed to install, trying with --break-system-packages..."
+    & $pythonPath -m pip install --break-system-packages Pillow PyMuPDF pywin32 psd-tools numpy python-pptx lxml PyInstaller 2>&1 | Out-Null
+}
+Write-Ok "Python dependencies checked"
+
 $sidecarDir = Join-Path $projectRoot "sidecar"
 $sidecarDist = Join-Path $sidecarDir "dist"
 
@@ -184,20 +194,32 @@ Write-Info "Running PyInstaller (this may take 1-2 minutes)..."
 
 Push-Location $projectRoot
 try {
+    # V6.0.3: 不再静默输出，显示 PyInstaller 日志以便调试
     & $pythonPath -m PyInstaller --onefile --name sidecar_server `
         --distpath $sidecarDist --workpath "$sidecarDir\build" --specpath $sidecarDir `
-        --noconfirm --clean --collect-all PIL --collect-all fitz --collect-all win32com `
-        "$sidecarDir\sidecar_server.py" 2>&1 | Out-Null
+        --noconfirm --clean `
+        --collect-all PIL --collect-all fitz --collect-all win32com --collect-all psd_tools `
+        --hidden-import pymupdf --hidden-import fitz --hidden-import win32com.client `
+        "$sidecarDir\sidecar_server.py" 2>&1 | ForEach-Object { Write-Host "  $_" }
 } finally {
     Pop-Location
 }
 
 $sidecarExe = Join-Path $sidecarDist "sidecar_server.exe"
 if (-not (Test-Path $sidecarExe)) {
-    Fail "Sidecar build failed! Make sure PyInstaller is installed: pip install pyinstaller"
+    Fail "Sidecar build failed! Check PyInstaller output above."
 }
 $sizeMB = (Get-Item $sidecarExe).Length / 1MB
 Write-Ok "Sidecar built ($([math]::Round($sizeMB,1)) MB)"
+
+# V6.0.3: 验证 sidecar 能正常启动
+Write-Info "Verifying sidecar handshake..."
+$testResult = & $sidecarExe 2>&1 | Select-Object -First 1
+if ($testResult -match '"ready":\s*true') {
+    Write-Ok "Sidecar handshake verified"
+} else {
+    Write-Info "Sidecar handshake test (may need stdin): $testResult"
+}
 
 # Step 8: Build Electron EXE
 Write-Step 8 8 "Building Windows EXE (electron-builder)..."
