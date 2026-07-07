@@ -102,11 +102,11 @@ describe("registerIpc()", () => {
     const html = "<p>hello</p>";
     await ipc.invoke("html:assemble", {
       slices: [{ path: "/tmp/s1.png", width: 650, height: 1000 }],
-      width: 650,
+      display_w: 650,
     });
     expect(sidecar.send).toHaveBeenCalledWith("html.assemble", {
       slices: [{ path: "/tmp/s1.png", width: 650, height: 1000 }],
-      width: 650,
+      display_w: 650,
     });
   });
 

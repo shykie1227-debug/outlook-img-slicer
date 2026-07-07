@@ -31,6 +31,6 @@ echo ============================================
 echo   BUILD SUCCESS!
 echo ============================================
 echo.
-echo Output: release-artifacts\electron\
+echo Output: dist\
 echo.
 pause

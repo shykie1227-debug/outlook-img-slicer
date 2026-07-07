@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "npx vite",
+    "build": "npx tsc --noEmit && npx vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

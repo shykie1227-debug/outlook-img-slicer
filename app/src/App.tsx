@@ -61,7 +61,6 @@ export function App(): JSX.Element {
     showSettings,
     settings,
     assembledHtml,
-    assembledCids,
     status,
     sidecarError,
     setStep,
@@ -92,7 +91,6 @@ export function App(): JSX.Element {
     showSettings: s.showSettings,
     settings: s.settings,
     assembledHtml: s.assembledHtml,
-    assembledCids: s.assembledCids,
     status: s.status,
     sidecarError: s.sidecarError,
     setStep: s.setStep,
@@ -235,6 +233,8 @@ export function App(): JSX.Element {
           path: s.path,
           width: s.width,
           height: s.height,
+          sort_key: s.index + 1,
+          original_width: sourceInfo?.width ?? 0,
         })),
         display_w: settings.emailWidth,
       });
@@ -257,7 +257,13 @@ export function App(): JSX.Element {
       let html = assembledHtml;
       if (!html) {
         const r = await window.api.htmlAssemble({
-          slices: slices.map((s) => ({ path: s.path, width: s.width, height: s.height })),
+          slices: slices.map((s) => ({
+            path: s.path,
+            width: s.width,
+            height: s.height,
+            sort_key: s.index + 1,
+            original_width: sourceInfo?.width ?? 0,
+          })),
           display_w: settings.emailWidth,
         });
         html = r.html;
@@ -273,22 +279,23 @@ export function App(): JSX.Element {
 
   const onCreateDraft = async (): Promise<void> => {
     try {
-      let html = assembledHtml;
-      let cids = assembledCids;
-      if (!html) {
-        const r = await window.api.htmlAssemble({
-          slices: slices.map((s) => ({ path: s.path, width: s.width, height: s.height })),
-          display_w: settings.emailWidth,
-        });
-        html = r.html;
-        cids = r.cid_files;
-        setAssembledHtml(html);
-        setAssembledCids(cids);
-      }
+      // Outlook Word 引擎不支持 base64 图片，必须用 CID 附件模式
+      // 不复用 assembledHtml 缓存（那是 base64 模式），始终重新生成 CID 模式
+      const r = await window.api.htmlAssemble({
+        slices: slices.map((s) => ({
+          path: s.path,
+          width: s.width,
+          height: s.height,
+          sort_key: s.index + 1,
+          original_width: sourceInfo?.width ?? 0,
+        })),
+        display_w: settings.emailWidth,
+        mode: "cid",
+      });
       await window.api.outlookCreateDraft({
-        html,
+        html: r.html,
         subject: sourceInfo ? `${sourceInfo.width}×${sourceInfo.height} 长图` : "长图",
-        cid_files: cids,
+        cid_files: r.cid_files,
       });
     } catch (e) {
       setError((e as Error).message);
@@ -300,7 +307,13 @@ export function App(): JSX.Element {
       let html: string = assembledHtml ?? "";
       if (!html) {
         const r = await window.api.htmlAssemble({
-          slices: slices.map((s) => ({ path: s.path, width: s.width, height: s.height })),
+          slices: slices.map((s) => ({
+            path: s.path,
+            width: s.width,
+            height: s.height,
+            sort_key: s.index + 1,
+            original_width: sourceInfo?.width ?? 0,
+          })),
           display_w: settings.emailWidth,
         });
         html = r.html;

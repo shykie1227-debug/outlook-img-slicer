@@ -92,7 +92,7 @@ function createMainWindow(): BrowserWindow {
     show: false,
     icon: iconPath,
     webPreferences: {
-      preload: join(__dirname, "preload.mjs"),
+      preload: join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,

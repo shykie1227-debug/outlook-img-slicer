@@ -356,9 +356,11 @@ def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
       - img style 补充 line-height: 0; font-size: 0; 防 Outlook 行间距
       - 移除 min-height: 1px（V3.0 原始版本无此属性）
 
-    V6.0.1 修复：
-      - 添加 height HTML 属性，Outlook Word 引擎需要明确的 width+height 才能正确渲染
-      - 确保图片高度与预渲染后的 PNG 尺寸一致
+    V6.0.2 回滚 V6.0.1：
+      - 移除 height HTML 属性和 style 中的 height
+      - 原因：Outlook Word 引擎 px→pt 转换 (1px=0.75pt)，非 4 的倍数高度
+        会产生小数 pt，Word 四舍五入后导致图片间 1px 错位，多片累积为可见偏移
+      - V3.0 验证过的稳定方案：只写 width，让 Outlook 按宽高比自动计算 height
     """
     img_tags = ""
     cid_counter = 0
@@ -367,10 +369,8 @@ def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
         try:
             actual_w, actual_h = _get_img_dimensions(s.path)
             img_w = actual_w if actual_w > 0 else display_w
-            img_h = actual_h if actual_h > 0 else 650
         except Exception:
             img_w = display_w
-            img_h = 650
 
         if is_base64:
             import base64
@@ -387,10 +387,9 @@ def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
         img_tags += (
             f'<img src="{safe_src}" '
             f'width="{img_w}" '
-            f'height="{img_h}" '
             f'alt="{safe_alt}" '
             f'border="0" hspace="0" vspace="0" '
-            f'style="display: block; width: {img_w}px; height: {img_h}px; '
+            f'style="display: block; width: {img_w}px; '
             f'border: 0; outline: none; text-decoration: none; '
             f'margin: 0; padding: 0; '
             f'line-height: 0; font-size: 0; '
@@ -592,9 +591,11 @@ def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] 
     single column grid across all rows. The segment dimensions therefore come
     from the prepared PNG itself and rows are rebuilt with inline image pieces.
 
-    V6.0.1 修复：
-      - 将 span/a 改为 td 结构，Outlook Word 引擎不支持 div/span 布局
-      - 使用 table/td 确保按钮行正确渲染，无错位和缝隙
+    V6.0.2 回滚 V6.0.1：
+      - 将 td 结构改回 span + inline-block
+      - 原因：V6.0.1 用 td + display:block 破坏了横向按钮布局
+      - span + inline-block 是 Outlook Word 引擎兼容的横向布局方式
+      - 配合外层单 <td> + 单 <tr>，避免多表格边界产生的 1px 缝隙
     """
     try:
         actual_w, actual_h = _get_img_dimensions(slice_path)
@@ -621,52 +622,50 @@ def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] 
         f'width="{actual_w}" height="{actual_h}" '
         f'alt="{safe_alt}" '
         f'border="0" hspace="0" vspace="0" '
-        f'style="display: block; width: {actual_w}px; height: {actual_h}px; '
+        f'style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
         f'border: 0; outline: none; text-decoration: none; '
         f'margin: 0; padding: 0; vertical-align: top; '
         f'line-height: 0; font-size: 0; -ms-interpolation-mode: bicubic;" />'
     )
     if not href:
         return (
-            f'<td width="{actual_w}" height="{actual_h}" align="left" valign="top" '
-            f'style="width: {actual_w}px; height: {actual_h}px; '
-            f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'vertical-align: top; mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">'
+            f'<span style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
+            f'vertical-align: top; margin: 0; padding: 0; border: 0; '
+            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
             f'{img_tag}'
-            f'</td>'
+            f'</span>'
         )
 
     safe_href = escape(href, quote=True)
     return (
-        f'<td width="{actual_w}" height="{actual_h}" align="left" valign="top" '
-        f'style="width: {actual_w}px; height: {actual_h}px; '
-        f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'vertical-align: top; mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px;">'
+        f'<span style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
+        f'vertical-align: top; margin: 0; padding: 0; border: 0; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
         f'<a href="{safe_href}" target="_blank" '
-        f'style="display: block; width: {actual_w}px; height: {actual_h}px; '
+        f'style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
         f'margin: 0; padding: 0; border: 0; '
         f'text-decoration: none; outline: none; '
         f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
         f'{img_tag}'
         f'</a>'
-        f'</td>'
+        f'</span>'
     )
 
 
 def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
                                 is_base64: bool = False) -> Tuple[str, int]:
     """
-    Build hotspot/multi-segment rows without a shared table column grid.
+    Build hotspot/multi-segment rows using div + span + inline-block.
 
-    每个视觉行独立使用 inline segment。这样上下两行按钮位置不同时，
-    Outlook Word 不会把它们强制套进同一组表格列，也不会产生嵌套表格边界。
+    每个视觉行用 div 包裹，行内段用 span + inline-block 横向排列。
+    所有行直接堆叠在外层单 <td> 内，避免多表格边界产生的 1px 缝隙。
 
-    V6.0.1 修复：
-      - 将 div 改为 table/tr 结构，Outlook Word 引擎不支持 div 布局
-      - 使用独立的 table 确保每行可以有不同数量的列，避免列网格强制对齐
+    V6.0.2 回滚 V6.0.1：
+      - 将多 table + tr 结构改回单 div 容器
+      - 原因：V6.0.1 每行独立 table 违反"单 <tr> + 单 <td>"约束
+      - 多 table 之间在 Outlook Word 引擎中产生 1px 缝隙，累积为可见错位
+      - div + span + inline-block 是 V4.9.x 验证过的稳定方案
     """
     display_w = _normalize_display_width(display_w)
     blocks = ""
@@ -697,21 +696,13 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
             )
 
         blocks += (
-            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
-            f'width="{row_width}" height="{row_height}" '
-            f'style="width: {row_width}px; height: {row_height}px; '
-            f'border: 0; border-collapse: collapse; border-spacing: 0; '
+            f'<div style="display: block; width: {row_width}px; height: {row_height}px; '
+            f'margin: 0; padding: 0; border: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-            f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
-            f'table-layout: fixed;">'
-            f'<tr height="{row_height}" style="height: {row_height}px; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
-            f'valign="top" align="left">'
+            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; '
+            f'text-align: left; overflow: hidden;">'
             f'{segments}'
-            f'</tr>'
-            f'</table>'
+            f'</div>'
         )
     return blocks, cid_counter
 

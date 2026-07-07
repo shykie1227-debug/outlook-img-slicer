@@ -44,6 +44,10 @@ Thumbs.db
 *.orig
 *~
 
+# VM 构建临时文件
+vm_build_pid.txt
+vm_build_status.txt
+
 # Sidecar 临时目录
 sidecar/_tmp_*/
 

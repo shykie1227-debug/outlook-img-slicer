@@ -90,8 +90,9 @@ export interface AssembleSlice {
 }
 export interface AssembleParams {
   slices: AssembleSlice[];
-  width: number;
-  hotspots?: unknown[];
+  display_w: number;
+  /** "base64" = 剪贴板/网页邮箱（自包含）；"cid" = Outlook 草稿（CID 附件） */
+  mode?: "base64" | "cid";
 }
 export interface AssembleResult {
   html: string;

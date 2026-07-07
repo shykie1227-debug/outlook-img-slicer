@@ -230,8 +230,9 @@ def _dispatch(req: dict) -> dict:
 
         # ── HTML 组装（V5 验证算法） ──
         if cmd == "html.assemble":
-            from html_assembler import SliceItem, generate_plain_html
+            from html_assembler import SliceItem, generate_plain_html, assemble_html
             display_w = int(params.get("display_w", 960))
+            mode = params.get("mode", "base64")
             items = [
                 SliceItem(
                     path=s["path"],
@@ -242,14 +243,25 @@ def _dispatch(req: dict) -> dict:
                 )
                 for i, s in enumerate(params.get("slices", []))
             ]
-            html = generate_plain_html(items, display_w=display_w)
-            return {"ok": True, "result": {"html": html, "cid_files": {}}}
+            if mode == "cid":
+                # CID 模式：Outlook 草稿专用，Word 引擎不支持 base64 图片
+                html = assemble_html(items, display_w=display_w)
+                sorted_items = sorted(items, key=lambda s: s.sort_key)
+                cid_files = {f"slice_{i+1:03d}": s.path for i, s in enumerate(sorted_items)}
+            else:
+                # base64 模式：剪贴板/网页邮箱，自包含 HTML
+                html = generate_plain_html(items, display_w=display_w)
+                cid_files = {}
+            return {"ok": True, "result": {"html": html, "cid_files": cid_files}}
 
         # ── CF_HTML 字节（剪贴板） ──
         if cmd == "html.clipboard":
             from clipboard_html import build_windows_clipboard_html
             raw = build_windows_clipboard_html(params["html"])
-            return {"ok": True, "result": {"cf_html_b64": base64.b64encode(raw).decode("ascii")}}
+            return {"ok": True, "result": {
+                "cf_html": base64.b64encode(raw).decode("ascii"),
+                "cf_html_size": len(raw),
+            }}
 
         # ── Outlook 邮件草稿（仅 Windows） ──
         if cmd == "outlook.createDraft":
@@ -257,11 +269,18 @@ def _dispatch(req: dict) -> dict:
             if guard is not None:
                 return guard
             from outlook_sender import create_email_with_images
+            # cid_files: {cid_name: file_path}，按 cid 名排序保证与 HTML 中 cid:slice_XXX 顺序一致
+            cid_files = params.get("cid_files") or {}
+            if cid_files:
+                sorted_cids = sorted(cid_files.keys())
+                image_paths = [cid_files[c] for c in sorted_cids]
+            else:
+                image_paths = []
             mail = create_email_with_images(
                 html_content=params["html"],
                 subject=params.get("subject", ""),
                 to=params.get("to", ""),
-                cid_files=params.get("cid_files"),
+                image_paths=image_paths,
             )
             return {"ok": True, "result": {"mail_id": str(mail), "subject": params.get("subject", "")}}
 
@@ -270,7 +289,7 @@ def _dispatch(req: dict) -> dict:
             if guard is not None:
                 return guard
             from outlook_sender import copy_cf_html_to_clipboard
-            raw = base64.b64decode(params["cf_html_b64"])
+            raw = base64.b64decode(params["cf_html"])
             copy_cf_html_to_clipboard(raw)
             return {"ok": True, "result": {"ok": True}}
 

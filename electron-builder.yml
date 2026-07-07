@@ -9,8 +9,9 @@ productName: Outlook 长图助手
 copyright: Copyright © 2026
 
 directories:
-  output: release-artifacts/electron
+  output: dist
   buildResources: build-resources
+  app: .
 
 # 压缩配置：使用 maximum 减小体积，首次构建较慢但最终体积更小
 compression: maximum
@@ -72,11 +73,9 @@ portable:
   # 便携版：解压即用，不写入注册表，不安装到系统目录
   artifactName: ${productName}-V${version}-portable-${arch}.${ext}
   # 不请求管理员权限（普通用户可直接运行）
-  requestExecutionLevel: asInvoker
+  requestExecutionLevel: user
   # 不创建快捷方式（绿色版）
-  allowElevation: false
-  # 不关联文件
-  fileAssociations: []
+  
 
 # Mac 配置（开发用，产物用户不下载）
 mac:
@@ -90,3 +89,4 @@ extraMetadata:
   version: 6.0.0
   author: outlook-img-slicer
   description: Outlook 长图助手（V6 Electron + V5 Python Sidecar）
+  type: commonjs

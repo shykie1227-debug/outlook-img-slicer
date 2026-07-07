@@ -210,7 +210,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Verify result
-$outDir = Join-Path $projectRoot "release-artifacts\electron"
+$outDir = Join-Path $projectRoot "dist"
 if (-not (Test-Path $outDir)) {
     Fail "Output directory not found!"
 }
@@ -222,6 +222,14 @@ if (-not $exeFiles -or $exeFiles.Count -eq 0) {
 
 $resultExe = $exeFiles | Where-Object { $_.Name -like "*portable*" } | Select-Object -First 1
 if (-not $resultExe) { $resultExe = $exeFiles | Select-Object -First 1 }
+
+# Clean up: keep only the portable EXE, remove all other build artifacts
+Write-Info "Cleaning up build artifacts..."
+$keepFile = $resultExe.Name
+Get-ChildItem -Path $outDir | Where-Object { $_.Name -ne $keepFile } | ForEach-Object {
+    Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue
+}
+Write-Ok "Kept only: $keepFile"
 
 $finalSizeMB = (Get-Item $resultExe).Length / 1MB
 

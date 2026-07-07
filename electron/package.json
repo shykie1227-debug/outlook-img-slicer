@@ -2,10 +2,11 @@
   "name": "outlook-img-slicer-electron",
   "version": "6.0.0",
   "private": true,
+  "type": "commonjs",
   "description": "Electron 主进程（V6.0.0）— Outlook 长图助手",
   "main": "dist-electron/main.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "build:watch": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"

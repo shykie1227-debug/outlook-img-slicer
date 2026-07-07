@@ -3,6 +3,7 @@
   "version": "6.0.0",
   "private": true,
   "type": "module",
+  "main": "electron/dist-electron/main.js",
   "description": "Outlook 长图助手（V6 Electron + V5 Python Sidecar）",
   "workspaces": [
     "electron",

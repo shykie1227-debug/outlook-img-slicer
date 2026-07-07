@@ -2,6 +2,34 @@
 
 记录 Outlook 长图助手的所有重要变更。
 
+## V6.0.3 - 2026-07-06
+
+### 修复（EXE 启动失败）
+- **sidecar_server.exe 未打包**：上次构建绕过了 PyInstaller 步骤，导致 EXE 内缺少 Python Sidecar，应用启动后无法连接后端。改用 vm_build.ps1 完整流程（Step 6 先构建 sidecar，Step 7 再打包 electron）。
+- **preload 文件名不匹配**：main.ts 引用 `preload.mjs` 但 TypeScript 编译产物是 `preload.js`。导致 Electron 找不到 preload 脚本，渲染进程无法调用任何 API（白屏）。修正为 `preload.js`。
+- **ES Module 冲突**：根 package.json 的 `"type": "module"` 导致 Electron 以 ES module 模式加载 CommonJS 编译的 main.js，引发 `exports is not defined` 错误。在 electron-builder.yml 的 `extraMetadata` 中覆盖为 `"type": "commonjs"`。
+
+### 新增
+- **vm_build.ps1 Node.js 自动安装**：VM 中缺少 Node.js 时自动下载 v20.18.0 LTS（华为云镜像）并静默安装。
+- **vm_build.ps1 pip 中国镜像**：Python 依赖安装直接使用清华镜像，避免默认源下载超时。
+- **vm_start_build.ps1 独立进程**：通过 Start-Process 启动构建脚本为独立进程，避免 prlctl exec 长时间运行断开。
+
+## V6.0.2 - 2026-07-03
+
+### 修复（关键 Bug）
+- **长图发送 Outlook 错位**：`_build_v3_plain_image_stack` 移除 `height` HTML 属性。Outlook Word 引擎 px→pt 转换 (1px=0.75pt)，非 4 倍数高度产生小数 pt，Word 四舍五入后导致图片间 1px 错位，多片累积为可见偏移。回滚至 V3.0 验证过的稳定方案：只写 width，让 Outlook 按宽高比自动计算 height。
+- **按钮切片发送 Outlook 破碎**：`_build_inline_segment` 从 V6.0.1 的 `<td>` + `display: block` 回滚为 `<span style="display: inline-block">` + `<a style="display: inline-block">`。V6.0.1 的 td 结构破坏了横向按钮布局。
+- **按钮行间缝隙**：`_build_complex_inline_stack` 从 V6.0.1 的多 `<table><tr>` 结构回滚为单 `<div>` 容器。V6.0.1 每行独立 table 违反"单 <tr> + 单 <td>"约束，多 table 之间在 Outlook Word 引擎中产生 1px 缝隙。
+- **Outlook 草稿图片不显示**：sidecar 新增 CID 模式 (`mode: "cid"`)。Outlook Word 引擎不支持 base64 内联图片，必须用 CID 附件。`onCreateDraft` 现在始终生成 CID 模式 HTML。
+- **剪贴板字段名不匹配**：`html.clipboard` 返回 `cf_html_b64` 但 TypeScript 类型定义为 `cf_html`，导致 `outlook.copyClipboard` 接收不到数据。统一为 `cf_html`。
+- **outlook.createDraft 参数错误**：sidecar 传 `cid_files` 给 `create_email_with_images`，但该函数不接受此参数。改为将 `cid_files` 字典转换为排序的 `image_paths` 列表。
+- **App.tsx 数据流断裂**：4 处 `htmlAssemble` 调用未传 `sort_key` / `original_width`，导致 Python 端排序和宽度比例计算错误。
+
+### 优化
+- **构建脚本精简**：删除冗余的 `build_v6.py`、`build_v6.ps1`、`一键打包.bat`、`一键打包.ps1`、`一键打包说明.md`。仅保留 `build.bat` + `build.ps1`（一键构建，含国内镜像加速）。
+- **输出目录统一**：electron-builder 输出从 `release-artifacts/electron/` 改为 `dist/`。构建后自动清理 dist 目录，仅保留 portable EXE。
+- **types.ts 接口修正**：`AssembleParams.width` 改为 `display_w`（与实际运行时参数名一致），新增 `mode` 参数。
+
 ## V6.0.1 - 2026-06-30
 
 ### 修复
