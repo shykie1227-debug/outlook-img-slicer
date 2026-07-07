@@ -4,8 +4,8 @@ V4.8.7 回归测试：Outlook 1px 缝隙根治验证
 根因（V4.8.6 之前/V4.8.7 修复）：
   image_slicer.py 切片时，N 片 PNG 物理总高 ≠ 原图高。
   例如原图 2500px 切 3 张 → 834, 833, 833（总 2500 ✓）
-  但 html_assembler._compute_group_height 单组走 _even_pixel_up(actual_h)：
-    834 → 834, 833 → 834, 833 → 834（每片 +1px 白底）
+  但 html_assembler._compute_group_height 单组走 _even_pixel_4x(actual_h)：
+    834 → 836, 833 → 836, 833 → 836（每片 +3px 白底，4 倍数）
   materialize 后 PNG 实际 = 834, 834, 834（总 2502）
   HTML 声明 = 834, 834, 834（总 2502）
   → 比原图多 2px → 连续切片之间产生 1-2px 白线
@@ -13,7 +13,7 @@ V4.8.7 回归测试：Outlook 1px 缝隙根治验证
 修复（V4.8.7）：
   image_slicer.py 切片阶段用 _even_ceil(avg_h)，
   前 N-1 片偶数化、最后一片吸收剩余（不再 ceil 后再偶数化）。
-  配合 _even_pixel_up，零累计误差 = 零 1px 缝。
+  配合 _even_pixel_4x，零累计误差 = 零 1px 缝。
 
 本测试覆盖：
   1. 切片阶段 PNG 总高严格 = 原图高
@@ -22,7 +22,7 @@ V4.8.7 回归测试：Outlook 1px 缝隙根治验证
   4. HTML 声明总高 = 原图高（无累计误差）
   5. _even_ceil 行为正确
   6. 各种原图高度（奇/偶/3 片/5 片/边界值）下都满足约束
-  7. V4.8.6 旧测试仍然兼容（_even_pixel_up 行为不变）
+  7. V4.8.6 旧测试仍然兼容（B6 收敛后 _even_pixel_4x 行为稳定）
 """
 import os
 import tempfile
@@ -35,8 +35,6 @@ from PIL import Image
 from image_slicer import _even_ceil, detect_and_slice
 from html_assembler import (
     SliceItem,
-    _even_pixel_up,
-    _even_pixel,
     _even_pixel_4x,
     materialize_display_slices_strict,
     assemble_html,
@@ -255,24 +253,25 @@ class TestV486BugReproduction:
             assert 'height="' not in html
 
 
-# ── 6. V4.8.6 旧测试仍兼容 ──────────────────────────────────────
+# ── 6. V4.8.6 旧测试仍兼容（B6：收敛为 _even_pixel_4x）──────────────
 class TestV486Compat:
-    """_even_pixel_up 单元行为必须不变（避免破坏现有用户）"""
+    """_even_pixel_4x 单元行为必须稳定（B6 收敛后的唯一偶数化策略）"""
 
-    def test_even_pixel_up_returns_even_ceiling(self):
-        assert _even_pixel_up(1) == 1  # 旧测试：n<=1 时返回 1
-        assert _even_pixel_up(2) == 2
-        assert _even_pixel_up(833) == 834
-        assert _even_pixel_up(834) == 834
-        assert _even_pixel_up(100) == 100
-        assert _even_pixel_up(0) == 1
-        assert _even_pixel_up(-5) == 1
+    def test_even_pixel_4x_returns_4x_ceiling(self):
+        assert _even_pixel_4x(1) == 4  # n<=1 时保底 4（4 倍数）
+        assert _even_pixel_4x(2) == 4
+        assert _even_pixel_4x(833) == 836  # 833 → 836 (627.0pt 整数)
+        assert _even_pixel_4x(834) == 836
+        assert _even_pixel_4x(100) == 100
+        assert _even_pixel_4x(0) == 4
+        assert _even_pixel_4x(-5) == 4
 
-    def test_even_pixel_still_rounds_down(self):
-        """V4.7.8 旧行为保留：多组场景仍用 _even_pixel"""
-        assert _even_pixel(1) == 1
-        assert _even_pixel(833) == 832
-        assert _even_pixel(834) == 834
+    def test_even_pixel_4x_is_only_even_strategy(self):
+        """B6：旧 _even_pixel / _even_pixel_up 已删除，_even_pixel_4x 是唯一入口。"""
+        # 4 倍数对齐保证 Outlook px→pt 转换无小数（零 1px 缝）
+        for n in [1, 2, 3, 833, 834, 1000, 1200]:
+            v = _even_pixel_4x(n)
+            assert v % 4 == 0, f"{n} → {v} 不是 4 的倍数"
 
 
 # ── 7. assemble_html/表/margin 防 Word 引擎 1px 缝 ────────────

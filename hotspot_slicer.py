@@ -106,11 +106,24 @@ def validate_hotspots_no_overlap(
                 continue
 
             # 一排按钮轻微压线：自动吸附水平边界。
+            # B2：吸附在「副本」上计算，绝不写回入参 hotspots，
+            #     保证 validate_hotspots_no_overlap 是纯函数（不污染调用方列表）。
             if x_overlap <= HOTSPOT_EDGE_SNAP_TOLERANCE_PX:
-                if a.x1 <= b.x1:
-                    a.x2 = b.x1
+                a_x1, a_x2 = a.x1, a.x2
+                b_x1, b_x2 = b.x1, b.x2
+                if a_x1 <= b_x1:
+                    a_x2 = b_x1
                 else:
-                    b.x2 = a.x1
+                    b_x2 = a_x1
+                # 吸附后若仍相交（极端情况）才视为真实重叠；否则当成已对齐、跳过
+                if (min(a_x2, b_x2) - max(a_x1, b_x1)) > 0 and y_overlap > 0:
+                    return False, (
+                        f"Hotspot #{i + 1} 与 #{j + 1} 实际区域重叠\n\n"
+                        f"  #{i + 1}: x={a.x1}→{a.x2}, y={a.y1}→{a.y2}\n"
+                        f"  #{j + 1}: x={b.x1}→{b.x2}, y={b.y1}→{b.y2}\n"
+                        f"  重叠区域约：{x_overlap}px × {y_overlap}px\n\n"
+                        f"建议：把其中一个按钮稍微移开，或缩小按钮区域。"
+                    )
                 continue
 
             return False, (

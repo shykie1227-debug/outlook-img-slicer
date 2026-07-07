@@ -485,7 +485,7 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
 
             if i == slice_count - 1:
                 # V4.8.7: 最后一片严格吸收到 out_h，保证 N 片 PNG 物理总高 = 原图高。
-                # 配合 html_assembler._even_pixel_up 单组补白底，零累计误差 = 零 1px 缝。
+                # 配合 html_assembler._even_pixel_4x 单组补白底，零累计误差 = 零 1px 缝。
                 bottom = out_h
             else:
                 remaining_slices = slice_count - i
@@ -509,7 +509,12 @@ def detect_and_slice(image_path: str, max_height: int = 1200,
                     min_bottom = top + max(60, int(slice_height * 0.7))
                     min_bottom = max(min_bottom, out_h - ((remaining_slices - 1) * max_height))
                     max_bottom = min(top + max_height, max(top + slice_height, out_h - ((remaining_slices - 1) * max_height)))
+                    # B5: 保证 min_bottom <= max_bottom，避免下方 max/min 取到越界值
+                    min_bottom = min(min_bottom, max_bottom)
                     bottom = max(min_bottom, min(adjusted, max_bottom))
+                    # B5: 防御性 clamp，避免极端长宽比/超大 max_height 导致 bottom
+                    # 越界（> out_h 或 < top+1）使 crop 产生空白行或错位。
+                    bottom = min(max(bottom, top + 1), out_h)
 
             slice_img = img.crop((0, top, out_w, bottom))
 

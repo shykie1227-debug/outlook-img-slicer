@@ -11,11 +11,12 @@ V4.9.0 变更（当前版本）：
     本段，引起按钮错乱。
 
 V4.8.5 缝隙修复：
-  - 取消对单组 PNG 高度的"display_w/total_w → _even_pixel"缩放。
+  - 取消对单组 PNG 高度的"display_w/total_w → 偶数化"缩放。
   - 之前 materialize 会把单组 source_row 从 (display_w, actual_h) resize 到
-    (display_w, _even_pixel(actual_h * display_w / total_w))，对 833px 这种
+    (display_w, 偶数化(actual_h * display_w / total_w))，对 833px 这种
     奇数高度会变成 832px，导致声明 height=832 与原始源图差 1px。
   - 3 张普通切片各缩 1px 累计产生肉眼可见的"每片切图衔接处有缝"。
+  - 偶数化策略已收敛为统一的 _even_pixel_4x（4 的倍数），其余 2x/2x-up 旧函数已删除（B6）。
 
 V4.7.8 优化点：
   - 优化图片尺寸缓存，减少重复读取
@@ -133,20 +134,6 @@ def _clear_dimensions_cache():
     _img_dimensions_cache.clear()
 
 
-def _even_pixel(n: int) -> int:
-    """
-    V4.7.8: 强制偶数像素。
-    Outlook 将 px 转换为 pt 时（如 247px → 185.25pt）会产生小数，
-    留 0.25pt 差 = 1px 白线。所有 height/width 必须是偶数。
-    最佳：4 的倍数（与字体基线对齐）。
-    """
-    if n <= 1:
-        return max(1, n)
-    if n % 2 == 0:
-        return n
-    return n - 1
-
-
 def _even_pixel_4x(n: int) -> int:
     """
     V4.8.8: 向上取 4 的倍数。
@@ -177,41 +164,53 @@ def _normalize_display_width(display_w: int) -> int:
     return _even_pixel_4x(max(1, value))
 
 
-def _even_pixel_up(n: int) -> int:
-    """
-    V4.8.5: 向上偶数化（向下兼容到下一个偶数）。
-    用于多组场景（统一 row_height 仍走此路径）。
-    ⚠️ V4.8.8: 单组场景已改用 _even_pixel_4x，因为 2 倍数但非 4 倍数
-    的 px 值（如 834）在 Outlook px→pt 转换中产生 0.5pt 小数 → 白线。
-    """
-    if n <= 1:
-        return max(1, n)
-    if n % 2 == 0:
-        return n
-    return n + 1
-
-
 def _distribute_units(raw: List[float], total_units: int) -> List[int]:
-    """按最大余数法把 total_units 分配给每段，每段至少 1 个单位。"""
+    """按最大余数法把 total_units 分配给每段，每段至少 1 个单位。
+
+    B1 防护：当 remainder<0 且所有 units 都已 ==1 时，原 while 循环无法再减，
+    会无限自增 idx 造成死循环。这里加两层 guard：
+      1) 单轮若没有任何分支执行（progress_made 为 False）→ 立即停止；
+      2) 迭代次数超过上限（max_iter）→ 停止。
+    停止后若 remainder 仍非 0（如 total_units < 段数，本就不可能每段>=1），
+    退化为「尽量均分、末段吃余数」的确定性结果，保证 sum == total_units、不挂起。
+    """
     if not raw:
         return []
     units = [max(1, int(v)) for v in raw]
     remainder = total_units - sum(units)
+    if remainder == 0:
+        return units
     fractions = sorted(
         range(len(raw)),
         key=lambda i: raw[i] - int(raw[i]),
         reverse=(remainder > 0),
     )
+    # B1: 迭代上限 = 每段最多调整 |remainder| 次 + 容差；超出视为无法收敛。
+    max_iter = len(raw) * (abs(remainder) + 1) + 8
     idx = 0
-    while remainder != 0 and fractions:
+    iteration = 0
+    progress_made = True
+    while remainder != 0 and fractions and iteration < max_iter and progress_made:
+        progress_made = False
         target = fractions[idx % len(fractions)]
         if remainder > 0:
             units[target] += 1
             remainder -= 1
+            progress_made = True
         elif units[target] > 1:
             units[target] -= 1
             remainder += 1
+            progress_made = True
         idx += 1
+        iteration += 1
+    # 退化兜底：保证返回值之和严格等于 total_units（极端窄 cell 场景）。
+    if remainder != 0:
+        n = len(units)
+        if n == 0:
+            return []
+        base = max(0, total_units // n)
+        rem = total_units - base * n
+        units = [base + (1 if i < rem else 0) for i in range(n)]
     return units
 
 
@@ -537,147 +536,33 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
     return _even_pixel_4x(max(1, round(row_h * display_w / total_w)))
 
 
-def _build_group_row(group: List[SliceItem], display_w: int, cid_counter: int,
-                     is_base64: bool = False) -> Tuple[str, int]:
-    """
-    为一张原始切片生成内联 HTML 片段（不产生独立 <tr>，仅返回内容块）。
-    所有组的内容最终放在同一个 <td> 内垂直堆叠，避免多个 <tr> 之间的 1px 缝隙。
-    """
-    display_w = _normalize_display_width(display_w)
-    allocated_widths = _allocate_group_widths(group, display_w)
-    row_height = _compute_group_height(group, display_w)
-
-    # V4.9.4: 单条/多段统一用 <table><tr>，去除 <div> 包裹消除 Outlook 行间距
-    cells = ""
-    for s in group:
-        if is_base64:
-            cid_or_src = ""
-        else:
-            cid_counter += 1
-            cid_or_src = f"cid:slice_{cid_counter:03d}"
-        cells += _build_cell(
-            s.path, cid_or_src, display_w, s.href, s.alt_text,
-            s.original_width, is_base64=is_base64,
-            forced_display_w=allocated_widths.get(s.path),
-            forced_display_h=row_height,
-        )
-
-    block = (
-        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
-        f'width="{display_w}" '
-        f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-        f'mso-table-bspace: 0pt; mso-table-tspace: 0pt; '
-        f'mso-table-bspace-snap: 1000; mso-table-tspace-snap: 1000; '
-        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-        f'table-layout: fixed;">\n'
-        f'<tr height="{row_height}" style="height: {row_height}px; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" valign="top" align="left">\n'
-        f'{cells}'
-        f'</tr>\n'
-        f'</table>\n'
-    )
-    return block, cid_counter
-
-
-def _build_inline_segment(slice_path: str, cid_or_src: str, href: Optional[str] = None,
-                          alt: str = "", is_base64: bool = False) -> str:
-    """
-    Build one pre-rendered visual segment for a hotspot row.
-
-    Complex hotspot rows cannot share one HTML table because Outlook applies a
-    single column grid across all rows. The segment dimensions therefore come
-    from the prepared PNG itself and rows are rebuilt with inline image pieces.
-
-    V6.0.2 回滚 V6.0.1：
-      - 将 td 结构改回 span + inline-block
-      - 原因：V6.0.1 用 td + display:block 破坏了横向按钮布局
-      - span + inline-block 是 Outlook Word 引擎兼容的横向布局方式
-      - 配合外层单 <td> + 单 <tr>，避免多表格边界产生的 1px 缝隙
-    """
-    try:
-        actual_w, actual_h = _get_img_dimensions(slice_path)
-    except Exception:
-        actual_w, actual_h = 650, 650
-
-    if not alt:
-        alt = Path(slice_path).name
-    safe_alt = escape(alt, quote=True)
-
-    if is_base64:
-        import base64
-        with open(slice_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
-        ext = Path(slice_path).suffix.lower().lstrip(".")
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
-        src = f"data:{mime};base64,{b64}"
-    else:
-        src = cid_or_src
-    safe_src = escape(src, quote=True)
-
-    img_tag = (
-        f'<img src="{safe_src}" '
-        f'width="{actual_w}" height="{actual_h}" '
-        f'alt="{safe_alt}" '
-        f'border="0" hspace="0" vspace="0" '
-        f'style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
-        f'border: 0; outline: none; text-decoration: none; '
-        f'margin: 0; padding: 0; vertical-align: top; '
-        f'line-height: 0; font-size: 0; -ms-interpolation-mode: bicubic;" />'
-    )
-    if not href:
-        return (
-            f'<span style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
-            f'vertical-align: top; margin: 0; padding: 0; border: 0; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
-            f'{img_tag}'
-            f'</span>'
-        )
-
-    safe_href = escape(href, quote=True)
-    return (
-        f'<span style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
-        f'vertical-align: top; margin: 0; padding: 0; border: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
-        f'<a href="{safe_href}" target="_blank" '
-        f'style="display: inline-block; width: {actual_w}px; height: {actual_h}px; '
-        f'margin: 0; padding: 0; border: 0; '
-        f'text-decoration: none; outline: none; '
-        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly;">'
-        f'{img_tag}'
-        f'</a>'
-        f'</span>'
-    )
+# NOTE: _build_group_row 与 _build_inline_segment 已删除（B3/B4 死代码，Fix 1-A / Fix 2-C）。
+# - _build_group_row：仅定义、无主路径调用；其「单 table + 单 tr」逻辑已被
+#   _build_complex_inline_stack 的单表多 <tr> 版本取代。
+# - _build_inline_segment：用 inline-block <span> 包裹，Outlook 易重排，方案已否决。
 
 
 def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
                                 is_base64: bool = False) -> Tuple[str, int]:
     """
-    V6.0.3: hotspot/multi-segment 链路改用 <table><tr> 结构替代 <div> 行块。
+    V6.0.3 (Fix 1-A): hotspot/multi-segment 链路统一为「单 <table> + 每行一个 <tr>」。
 
-    原 <div> 行块在 Outlook Word 引擎中即使设置 line-height:0 仍可能产生 1-2px
-    行间距。<table><tr> 配合 cellpadding="0" cellspacing="0" 是 Outlook 中
-    最稳定的零间距容器。每行独立 table 避免跨行列约束。
+    修复前：每个 Y 行各自生成一个独立 <table> 堆进外层单 <td>，
+    Outlook Word 引擎在相邻 block 级 <table> 之间插入约 1px 间距 → 缝隙/错位。
+    修复后：
+      ① 整段只有 1 个内层 <table>，表间 1px 缝消失；
+      ② 同组所有 cell 共享 forced_display_h（来自 _compute_group_height 的 4 倍数化），
+         <tr height> 与 <td>/<img height> 完全一致，纵向不再错位；
+      ③ 各 cell 宽由 _allocate_group_widths 保证「之和 == display_w」，横向不再错位/换行。
     """
     display_w = _normalize_display_width(display_w)
     all_rows_html = ""
     cid_counter = 0
 
     for group in groups:
-        row_width = 0
-        row_height = 0
-        for s in group:
-            try:
-                actual_w, actual_h = _get_img_dimensions(s.path)
-            except Exception:
-                actual_w, actual_h = display_w, display_w
-            row_width += actual_w
-            row_height = max(row_height, actual_h)
-        row_width = row_width or display_w
-        row_height = row_height or _even_pixel_4x(display_w)
+        # 强制「各 cell 宽之和 == display_w」且「整行共享同一 4x 高度」
+        allocated_widths = _allocate_group_widths(group, display_w)
+        row_height = _compute_group_height(group, display_w)
 
         cells = ""
         for s in group:
@@ -689,25 +574,31 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
             cells += _build_cell(
                 s.path, cid_or_src, display_w, s.href, s.alt_text,
                 s.original_width, is_base64=is_base64,
+                forced_display_w=allocated_widths.get(s.path),
+                forced_display_h=row_height,
             )
 
         all_rows_html += (
-            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
-            f'align="center" width="{display_w}" '
-            f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-            f'table-layout: fixed;">\n'
             f'<tr height="{row_height}" style="height: {row_height}px; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
             f'valign="top" align="left">\n'
             f'{cells}'
             f'</tr>\n'
-            f'</table>\n'
         )
-    return all_rows_html, cid_counter
+
+    block = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
+        f'width="{display_w}" '
+        f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
+        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
+        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+        f'table-layout: fixed;">\n'
+        f'{all_rows_html}'
+        f'</table>\n'
+    )
+    return block, cid_counter
 
 
 def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
@@ -938,6 +829,13 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             )
         else:
             effective_w = _normalize_display_width(display_w)
+            # Fix 1-B: 非普通链路（hotspot/多段）先 materialize，保证 PNG 物理尺寸
+            # 与 HTML 声明的 4x 宽/高严格一致，消除纵向/横向错位与表间缝隙。
+            # 临时文件由 materialize_display_slices_strict 内部 _track_temp_files 登记，
+            # 调用方可用 cleanup_temp_slices 清理（V5 main.py 已做）。
+            slices = materialize_display_slices_strict(slices, effective_w)
+            sorted_slices = sorted(slices, key=lambda s: s.sort_key)
+            groups = _group_by_source(sorted_slices)
             content_blocks, cid_counter = _build_complex_inline_stack(
                 groups, effective_w, is_base64=False
             )

@@ -1306,7 +1306,7 @@ class MainWindow(QMainWindow):
             mime.setData("HTML Format", _build_windows_clipboard_html(html))
             mime.setText(html)
             QGuiApplication.clipboard().setMimeData(mime)
-            self._set_status("HTML 已复制（支持 Outlook/Word 直接粘贴渲染）", "success")
+            self._set_status("HTML 已复制（适用于 Gmail / 网页邮箱；Outlook 桌面版请改用『创建 Outlook 草稿』）", "success")
             # V4.8.7: 已复制到剪贴板（base64 内嵌），清理临时文件
             deleted = cleanup_temp_slices(temp_files)
             if deleted:

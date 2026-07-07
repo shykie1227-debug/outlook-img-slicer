@@ -68,4 +68,11 @@ def test_adjacent_button_tiny_overlap_is_snapped_instead_of_error():
 
     ok, reason = validate_hotspots_no_overlap(hotspots, 650)
     assert ok, reason
-    assert hotspots[0].x2 == hotspots[1].x1 == 198
+    # B2 回归：校验函数必须是纯函数，吸附时不得写回入参。
+    # 两个按钮原始坐标应保持不变（100-200 / 198-300），轻微压线被判定为无重叠、
+    # 但不修改调用方持有的 hotspots 列表。
+    assert hotspots[0].x2 == 200
+    assert hotspots[1].x1 == 198
+    assert hotspots[0].x2 != hotspots[1].x1
+    # 第三个按钮也未受影响
+    assert hotspots[2].x1 == 300 and hotspots[2].x2 == 420

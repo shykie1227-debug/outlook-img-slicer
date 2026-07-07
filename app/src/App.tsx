@@ -474,6 +474,7 @@ export function App(): JSX.Element {
                   <button
                     data-testid="copy-clipboard"
                     onClick={onCopyClipboard}
+                    title="复制为自包含 HTML，适用于 Gmail / 网页邮箱；Outlook 桌面版不支持 base64 图片，请改用『创建 Outlook 草稿』"
                     className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
                   >
                     <span aria-hidden="true" className="mr-1">📋</span>

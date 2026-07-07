@@ -42,9 +42,12 @@ def test_hotspot_rows_do_not_share_or_nest_table_columns(tmp_path):
     prepared = _prepared_hotspot_items(tmp_path)
     html = assemble_html(prepared, 648)
 
-    assert html.count("<table") == 1
-    assert html.count("<div") == len(_group_by_source(prepared))
-    assert "<tr height=" not in html
+    # Fix 1-A: 所有行放入「1 个内层 table」+ 外层 wrapper table = 2 个 table；
+    # 不再有每行独立 table（消除表间 1px 缝），也不再使用 <div>。
+    assert html.count("<table") == 2
+    assert html.count("<div") == 0
+    # 单表内每行一个 <tr height>，且 <tr height> 与 <td height> 一致（修复纵向错位）
+    assert "<tr height=" in html
 
 
 def test_hotspot_links_are_inline_while_images_remain_block(tmp_path):
@@ -53,5 +56,10 @@ def test_hotspot_links_are_inline_while_images_remain_block(tmp_path):
 
     assert "https://top.example" in html
     assert "https://bottom.example" in html
-    assert 'style="display: inline-block;' in html
-    assert "<img" in html and "display: block;" in html
+    # Fix 1-A / Fix 2-C: 不再使用 inline-block <span>（_build_inline_segment 已删除），
+    # 链接 <a> 与图片 <img> 都用 display: block（Outlook Word 引擎稳定零缝）。
+    assert "<a " in html
+    assert "<img" in html
+    assert "display: block" in html
+    # 确认废弃的 inline-block 方案已彻底移除
+    assert "display: inline-block" not in html

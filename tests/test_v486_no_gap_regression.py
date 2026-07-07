@@ -8,14 +8,14 @@ V4.8.6 普通纵向切片无 1px 缝隙回归测试
   - 奇数 actual_h 通过"白底画布 + 顶部 paste"补齐到偶数，视觉无损
   - 偶数 actual_h 不变
   - 多组（多 hotspot 横向拼接）不受影响，仍走统一 row_height
-  - 显式 _even_pixel_up 行为正确
+  - 显式 _even_pixel_4x 行为正确
 
 V4.8.5 缝隙问题根因：
   旧逻辑 _compute_group_height 对单组走 row_height = _even_pixel(row_h * display_w / total_w)，
   对 actual_h=833, total_w=display_w=650 的场景算出 832，
   materialize 内部 LANCZOS resize 把 PNG 从 833px 缩到 832px，丢 1px 且产生插值伪影。
   3 张普通切片各缩 1px 累计产生肉眼可见的"每片切图衔接处有缝"。
-  修复后：单组走 _even_pixel_up(actual_h) = 向上偶数化，materialize 白底补齐。
+  修复后（B6 收敛）：全仓统一走 _even_pixel_4x(actual_h) = 向上 4 倍数化，materialize 白底补齐。
 """
 import re
 import sys
@@ -30,8 +30,7 @@ sys.path.insert(0, str(ROOT))
 from html_assembler import (
     SliceItem,
     _compute_group_height,
-    _even_pixel,
-    _even_pixel_up,
+    _even_pixel_4x,
     _group_by_source,
     _normalize_display_width,
     assemble_html,
@@ -52,25 +51,25 @@ def _img_heights(html: str):
     return [int(x) for x in re.findall(r'<img\s+[^>]*height="(\d+)"', html)]
 
 
-# ── 1. _even_pixel_up 单元测试 ──────────────────────────────────────
+# ── 1. _even_pixel_4x 单元测试（B6 收敛后的唯一偶数化策略）──────────────
 
 
-def test_even_pixel_up_returns_even_ceiling():
-    """奇数向上偶数化（833→834），偶数不变；n<=1 时保底 1。"""
-    assert _even_pixel_up(1) == 1
-    assert _even_pixel_up(2) == 2
-    assert _even_pixel_up(833) == 834
-    assert _even_pixel_up(834) == 834
-    assert _even_pixel_up(100) == 100
-    assert _even_pixel_up(0) == 1
-    assert _even_pixel_up(-5) == 1
+def test_even_pixel_4x_returns_4x_ceiling():
+    """向上取 4 的倍数（833→836），已是 4 倍数不变；n<=1 时保底 4。"""
+    assert _even_pixel_4x(1) == 4
+    assert _even_pixel_4x(2) == 4
+    assert _even_pixel_4x(833) == 836
+    assert _even_pixel_4x(834) == 836
+    assert _even_pixel_4x(100) == 100
+    assert _even_pixel_4x(0) == 4
+    assert _even_pixel_4x(-5) == 4
 
 
-def test_even_pixel_still_rounds_down():
-    """V4.7.8 旧行为保留：奇数向下偶数化（833→832）。多组场景仍依赖此函数。"""
-    assert _even_pixel(1) == 1
-    assert _even_pixel(833) == 832
-    assert _even_pixel(834) == 834
+def test_even_pixel_4x_consistent_with_image_slicer():
+    """与 image_slicer._even_ceil 行为一致（4 倍数对齐，单一真相源）。"""
+    from image_slicer import _even_ceil
+    for n in [1, 2, 4, 100, 833, 834, 836, 1000, 1200]:
+        assert _even_pixel_4x(n) == _even_ceil(n), f"分歧: n={n}"
 
 
 # ── 2. 单组：声明 height 必须等于 materialize 后 PNG 高度 ─────────────
@@ -173,7 +172,7 @@ def test_send_pipeline_total_height_no_drift(tmp_path):
 
 
 def test_multi_group_hotspot_slices_unaffected(tmp_path):
-    """多组场景仍走原 _even_pixel 逻辑，row_height = 统一高度。"""
+    """多组场景走统一 row_height（4 倍数化），横向总宽严格 == display_w。"""
     from clickable_map import Hotspot
     from hotspot_slicer import slice_paths_by_hotspots
 

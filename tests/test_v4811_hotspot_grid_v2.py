@@ -58,11 +58,11 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
 
     assert "https://top.example" in html
     assert "https://bottom.example" in html
-    # V6.0.3: 每行独立 <table><tr> 替代 <div>，消除 Outlook 行间距。
-    # 5 行 = 5 个内层 table + 1 个外层 table = 6 个 table。
-    assert html.count("<table") == 6
+    # Fix 1-A: 全部 5 行放进「1 个内层 table」+ 1 个外层 wrapper table = 2 个 table。
+    # 表间 1px 缝消失（单表结构），横向/纵向错位消除（_allocate_group_widths / _compute_group_height）。
+    assert html.count("<table") == 2
     assert html.count("<div") == 0
-    # 每行有独立的 <tr>
+    # 5 个内层 <tr>（每行一个）+ 1 个外层 <tr>
     assert html.count("<tr") == 6  # 5 内层 + 1 外层
 
     # 所有预渲染 PNG 边缘不得出现默认黑/白异常色。

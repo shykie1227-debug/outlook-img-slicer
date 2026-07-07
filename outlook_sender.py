@@ -45,6 +45,42 @@ def _is_new_outlook_automation_error(exc: Exception) -> bool:
     return any(marker in text for marker in markers)
 
 
+def copy_cf_html_to_clipboard(raw: bytes) -> None:
+    """将 CF_HTML 字节写入系统剪贴板（Windows 专用）。
+
+    Fix 2-B: 补齐 V6 sidecar 缺失的剪贴板写入函数。
+    之前 sidecar_server.py 在 outlook.copyClipboard 分支 `from outlook_sender
+    import copy_cf_html_to_clipboard` 会直接 ImportError（该函数从未定义），
+    导致 V6「复制 HTML」在 Windows 上剪贴板从未被写入（相对 V5 的回归）。
+
+    `raw` 来自 clipboard_html.build_windows_clipboard_html，格式与
+    win32clipboard.CF_HTML 内置常量（值为 "HTML Format"）一致。
+
+    Args:
+        raw: 已按 CF_HTML 规范编码的字节（含 Version/StartHTML/... 头）。
+
+    Raises:
+        RuntimeError: 非 Windows 平台（pywin32 不可用）时直接抛出，
+            让调用方给出明确的"仅支持 Windows"提示，而非静默失败。
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("剪贴板写入仅支持 Windows。")
+
+    import win32clipboard
+    import win32con
+
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        # 兼容纯文本：部分邮箱/富文本编辑器需要 Unicode 文本回退
+        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, "")
+        # CF_HTML 是 win32clipboard 内置常量（"HTML Format"），与
+        # clipboard_html.build_windows_clipboard_html 产出的字节格式一致
+        win32clipboard.SetClipboardData(win32clipboard.CF_HTML, raw)
+    finally:
+        win32clipboard.CloseClipboard()
+
+
 def create_email_with_images(html_content: str, subject: str = "", to: str = "",
                             image_paths=None, save_dir: str = "",
                             slices=None):
