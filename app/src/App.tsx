@@ -6,7 +6,7 @@
  * - 按钮统一胶丸形（border-radius: 999px），Primary/Secondary 44px，Ghost 34px
  * - 所有 emoji 替换为 icons/ 目录下的 Lucide 风格 SVG
  *
- * 业务逻辑不变：onCopyClipboard / onCreateDraft / onAssemble / onSaveHtml / CutEditor / HotspotEditor
+ * 业务逻辑：onCopyClipboard / onCreateDraft / onSaveClick → onExportConfirm / doSaveHtml / CutEditor / HotspotEditor
  */
 import { useEffect, useState } from "react";
 
@@ -109,6 +109,12 @@ export function App(): JSX.Element {
   const [emailSubject, setEmailSubject] = useState("");
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
+
+  // 导出弹窗状态
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportCompress, setExportCompress] = useState(false);
+  const [exportQuality, setExportQuality] = useState(80);
+  const [exportFormat, setExportFormat] = useState<"JPEG" | "PNG">("JPEG");
 
   // ─────────────────────────────────────
   // Sidecar 状态订阅
@@ -225,15 +231,9 @@ export function App(): JSX.Element {
   const onCopyClipboard = async (): Promise<void> => {
     try {
       let html = assembledHtml;
-      // 压缩开启时强制重新拼装
-      if (settings.compressImage) {
-        html = null;
-        setAssembledHtml(null);
-      }
       if (!html) {
-        const compressedSlices = await maybeCompressSlices(slices);
         const r = await window.api.htmlAssemble({
-          slices: compressedSlices.map((s) => ({
+          slices: slices.map((s) => ({
             path: s.path,
             width: s.width,
             height: s.height,
@@ -255,9 +255,8 @@ export function App(): JSX.Element {
 
   const onCreateDraft = async (): Promise<void> => {
     try {
-      const compressedSlices = await maybeCompressSlices(slices);
       const r = await window.api.htmlAssemble({
-        slices: compressedSlices.map((s) => ({
+        slices: slices.map((s) => ({
           path: s.path,
           width: s.width,
           height: s.height,
@@ -277,18 +276,59 @@ export function App(): JSX.Element {
     }
   };
 
-  const onSaveHtml = async (): Promise<void> => {
+  /** 点击"保存切图" → 打开导出弹窗 */
+  const onSaveClick = (): void => {
+    setExportCompress(settings.compressImage);
+    setExportQuality(settings.compressQuality);
+    setExportFormat(settings.compressFormat);
+    setShowExportDialog(true);
+  };
+
+  /** 导出弹窗确认 → 执行保存（按弹窗中的压缩设置） */
+  const onExportConfirm = async (): Promise<void> => {
+    setShowExportDialog(false);
+    // 持久化弹窗中的压缩设置
+    setSettings({
+      ...settings,
+      compressImage: exportCompress,
+      compressQuality: exportQuality,
+      compressFormat: exportFormat,
+    });
+    // 压缩开启时需要重新拼装，清掉缓存
+    if (exportCompress) {
+      setAssembledHtml(null);
+    }
+    await doSaveHtml(exportCompress, exportQuality, exportFormat);
+  };
+
+  /** 实际保存逻辑（compress/quality/format 由弹窗传入） */
+  const doSaveHtml = async (
+    compress: boolean,
+    quality: number,
+    format: "JPEG" | "PNG"
+  ): Promise<void> => {
     try {
       let html: string = assembledHtml ?? "";
-      // 压缩开启时强制重新拼装
-      if (settings.compressImage) {
-        html = "";
-        setAssembledHtml(null);
-      }
       if (!html) {
-        const compressedSlices = await maybeCompressSlices(slices);
+        let slicesToUse = slices;
+        if (compress) {
+          const cr = await window.api.imageCompress({
+            slices: slices.map((s) => ({
+              path: s.path,
+              width: s.width,
+              height: s.height,
+              index: s.index,
+            })),
+            format,
+            quality,
+          });
+          slicesToUse = slices.map((s, i) => ({
+            ...s,
+            path: cr.slices[i]?.path ?? s.path,
+          }));
+        }
         const r = await window.api.htmlAssemble({
-          slices: compressedSlices.map((s) => ({
+          slices: slicesToUse.map((s) => ({
             path: s.path,
             width: s.width,
             height: s.height,
@@ -322,20 +362,6 @@ export function App(): JSX.Element {
     setEmailSubject("");
     setHotspots([]);
     setSelectedHotspotId(null);
-  };
-
-  /** 导出前按设置压缩切片（返回压缩后的 slice 数组，未开启则原样返回） */
-  const maybeCompressSlices = async <T extends { path: string; width: number; height: number; index: number }>(
-    origSlices: T[]
-  ): Promise<T[]> => {
-    if (!settings.compressImage || origSlices.length === 0) return origSlices;
-    const r = await window.api.imageCompress({
-      slices: origSlices.map((s) => ({ path: s.path, width: s.width, height: s.height, index: s.index })),
-      format: settings.compressFormat,
-      quality: settings.compressQuality,
-    });
-    // 保留原 index，替换 path
-    return origSlices.map((s, i) => ({ ...s, path: r.slices[i]?.path ?? s.path }));
   };
 
   // ─────────────────────────────────────
@@ -559,62 +585,6 @@ export function App(): JSX.Element {
             </span>
           </label>
 
-          <span className="doubao-sep">│</span>
-
-          {/* 复选框：压缩图片 */}
-          <label className="doubao-checkbox">
-            <img src={Icon.compress} alt="" className="w-[18px] h-[18px]" />
-            <span className="text-xs font-medium">压缩图片</span>
-            <input
-              type="checkbox"
-              checked={settings.compressImage}
-              onChange={(e) => setSettings({ ...settings, compressImage: e.target.checked })}
-            />
-            <span className="doubao-checkbox-box">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-            </span>
-          </label>
-
-          {/* 压缩设置（开启时显示） */}
-          {settings.compressImage && (
-            <>
-              <select
-                value={settings.compressFormat}
-                onChange={(e) => setSettings({ ...settings, compressFormat: e.target.value as "JPEG" | "PNG" })}
-                className="text-xs outline-none"
-                style={{
-                  height: "34px",
-                  background: "var(--color-card)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "8px",
-                  color: "var(--color-text)",
-                  padding: "0 8px",
-                  fontFamily: "inherit",
-                }}
-              >
-                <option value="JPEG">JPEG</option>
-                <option value="PNG">PNG</option>
-              </select>
-              <span className="text-xs" style={{ color: "var(--color-text-weak)" }}>质量</span>
-              <input
-                type="range"
-                min={10}
-                max={100}
-                step={5}
-                value={settings.compressQuality}
-                onChange={(e) => setSettings({ ...settings, compressQuality: parseInt(e.target.value, 10) })}
-                className="doubao-slider"
-                style={{ width: "80px" }}
-              />
-              <span
-                className="text-xs font-medium"
-                style={{ color: "var(--color-text-secondary)", minWidth: "28px" }}
-              >
-                {settings.compressQuality}%
-              </span>
-            </>
-          )}
-
           {/* 高级 */}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -734,7 +704,7 @@ export function App(): JSX.Element {
             </button>
             <button
               data-testid="save-html"
-              onClick={onSaveHtml}
+              onClick={onSaveClick}
               className="flex-1 inline-flex items-center justify-center gap-1.5 font-medium text-sm transition-colors"
               style={{
                 height: "44px",
@@ -771,6 +741,130 @@ export function App(): JSX.Element {
       >
         V6.1.0 xiaoming
       </footer>
+
+      {/* 导出弹窗 */}
+      {showExportDialog && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.35)", zIndex: 9999 }}
+          onClick={() => setShowExportDialog(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-[420px] max-w-[90vw] p-6"
+            style={{
+              background: "var(--color-bg)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "16px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+            }}
+          >
+            {/* 标题 */}
+            <div className="flex items-center gap-2 mb-5">
+              <img src={Icon.arrowDownToLine} alt="" className="w-5 h-5" />
+              <h3 className="text-base font-bold" style={{ color: "var(--color-text)" }}>
+                导出设置
+              </h3>
+            </div>
+
+            {/* 压缩选项 */}
+            <label className="doubao-checkbox mb-3" style={{ display: "flex" }}>
+              <img src={Icon.compress} alt="" className="w-[18px] h-[18px]" />
+              <span className="text-sm font-medium">压缩图片</span>
+              <input
+                type="checkbox"
+                checked={exportCompress}
+                onChange={(e) => setExportCompress(e.target.checked)}
+              />
+              <span className="doubao-checkbox-box">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </span>
+            </label>
+
+            {/* 压缩参数（开启时显示） */}
+            {exportCompress && (
+              <div className="space-y-3 mb-5 pl-1">
+                {/* 格式选择 */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs" style={{ color: "var(--color-text-secondary)", minWidth: "40px" }}>格式</span>
+                  <select
+                    value={exportFormat}
+                    onChange={(e) => setExportFormat(e.target.value as "JPEG" | "PNG")}
+                    className="text-xs outline-none flex-1"
+                    style={{
+                      height: "34px",
+                      background: "var(--color-card)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "8px",
+                      color: "var(--color-text)",
+                      padding: "0 8px",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <option value="JPEG">JPEG（有损 / 文件小）</option>
+                    <option value="PNG">PNG（无损 / 文件大）</option>
+                  </select>
+                </div>
+
+                {/* 质量滑块 */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs" style={{ color: "var(--color-text-secondary)", minWidth: "40px" }}>质量</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={exportQuality}
+                    onChange={(e) => setExportQuality(parseInt(e.target.value, 10))}
+                    className="doubao-slider flex-1"
+                  />
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: "var(--color-text-secondary)", minWidth: "32px", textAlign: "right" }}
+                  >
+                    {exportQuality}%
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {!exportCompress && <div className="mb-5" />}
+
+            {/* 按钮行 */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowExportDialog(false)}
+                className="flex-1 text-sm font-medium transition-colors"
+                style={{
+                  height: "40px",
+                  background: "var(--color-muted)",
+                  border: "none",
+                  borderRadius: "999px",
+                  color: "var(--color-text)",
+                  fontFamily: "inherit",
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={onExportConfirm}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 text-sm font-bold transition-colors"
+                style={{
+                  height: "40px",
+                  background: "var(--color-primary)",
+                  border: "none",
+                  borderRadius: "999px",
+                  color: "#fff",
+                  fontFamily: "inherit",
+                }}
+              >
+                <img src={Icon.arrowDownToLine} alt="" className="w-[18px] h-[18px]" />
+                导出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
