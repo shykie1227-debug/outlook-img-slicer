@@ -1,5 +1,5 @@
 /**
- * ImagePreview 组件（V6.0.0 Phase 4）
+ * ImagePreview 组件（V6.1.0 — 豆包风格）
  *
  * 用 safe-file:// 自定义协议显示本地图片。
  * - 仅显示已批准的图片扩展名
@@ -48,7 +48,13 @@ export function ImagePreview({
       <div
         data-testid="image-preview-error"
         role="alert"
-        className="w-full rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-300 text-sm"
+        className="w-full p-4 text-sm"
+        style={{
+          border: "1px solid #fecaca",
+          background: "#fef2f2",
+          color: "var(--color-error)",
+          borderRadius: "12px",
+        }}
       >
         图片加载失败：{error}
       </div>
@@ -58,8 +64,14 @@ export function ImagePreview({
   return (
     <div
       data-testid="image-preview"
-      className="relative w-full rounded-lg border border-slate-700 bg-slate-800/40 overflow-hidden"
-      style={{ maxHeight, aspectRatio: width && height ? `${width} / ${height}` : undefined }}
+      className="relative w-full overflow-hidden"
+      style={{
+        maxHeight,
+        aspectRatio: width && height ? `${width} / ${height}` : undefined,
+        border: "1px solid var(--color-border)",
+        background: "var(--color-card)",
+        borderRadius: "12px",
+      }}
     >
       <img
         src={url}
@@ -78,7 +90,8 @@ export function ImagePreview({
       {!loaded && (
         <div
           aria-hidden="true"
-          className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm"
+          className="absolute inset-0 flex items-center justify-center text-sm"
+          style={{ color: "var(--color-text-weak)" }}
         >
           加载中…
         </div>

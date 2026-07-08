@@ -228,6 +228,50 @@ def _dispatch(req: dict) -> dict:
                 out.append({"path": fp, "width": img.width, "height": img.height, "source_index": i})
             return {"ok": True, "result": {"pages": out}}
 
+        # ── 图片压缩（导出时用） ──
+        if cmd == "image.compress":
+            from PIL import Image as _PILImage
+            import tempfile as _tf
+            slices_in = params.get("slices", [])
+            if not slices_in:
+                return {"ok": False, "error": "slices 不能为空"}
+            fmt = params.get("format", "JPEG").upper()
+            quality = int(params.get("quality", 85))
+            quality = max(10, min(100, quality))
+            work_dir = Path(_track_temp_dir(_tf.mkdtemp(prefix="sidecar_compress_")))
+            out = []
+            for i, s in enumerate(slices_in, start=1):
+                src = s["path"]
+                if not os.path.isfile(src):
+                    return {"ok": False, "error": f"文件不存在: {src}"}
+                with _PILImage.open(src) as img:
+                    w, h = img.size
+                    if fmt == "JPEG":
+                        # JPEG 不支持 alpha，转 RGB + 白底
+                        if img.mode in ("RGBA", "LA", "P"):
+                            bg = _PILImage.new("RGB", img.size, (255, 255, 255))
+                            if img.mode == "P":
+                                img = img.convert("RGBA")
+                            bg.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+                            img = bg
+                        else:
+                            img = img.convert("RGB")
+                        ext = ".jpg"
+                    else:
+                        ext = ".png"
+                    out_path = str(work_dir / f"slice_{i:03d}{ext}")
+                    if fmt == "JPEG":
+                        img.save(out_path, format="JPEG", quality=quality, optimize=True)
+                    else:
+                        img.save(out_path, format="PNG", optimize=True)
+                out.append({
+                    "path": out_path,
+                    "width": w,
+                    "height": h,
+                    "source_index": i,
+                })
+            return {"ok": True, "result": {"slices": out}}
+
         # ── HTML 组装（V5 验证算法） ──
         if cmd == "html.assemble":
             from html_assembler import SliceItem, generate_plain_html, assemble_html

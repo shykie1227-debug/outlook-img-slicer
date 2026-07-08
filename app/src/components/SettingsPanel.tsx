@@ -1,5 +1,5 @@
 /**
- * SettingsPanel 组件（V6.0.3 — V5 浅色还原版）
+ * SettingsPanel 组件（V6.1.0 — 豆包风格）
  *
  * Settings 接口新增 exportImage / avoidTextCut 字段。
  * 默认 emailWidth=650（匹配 V5/图一）。
@@ -14,6 +14,9 @@ export interface Settings {
   theme: "light" | "dark" | "system";
   exportImage: boolean;
   avoidTextCut: boolean;
+  compressImage: boolean;
+  compressQuality: number;
+  compressFormat: "JPEG" | "PNG";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +27,9 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
   exportImage: false,
   avoidTextCut: true,
+  compressImage: false,
+  compressQuality: 80,
+  compressFormat: "JPEG",
 };
 
 const STORAGE_KEY = "outlook-img-slicer-settings";
@@ -88,17 +94,41 @@ export function SettingsPanel({
     if (persist) saveToStorage(DEFAULT_SETTINGS);
   };
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    height: "34px",
+    background: "var(--color-card)",
+    border: "1px solid var(--color-border)",
+    borderRadius: "8px",
+    color: "var(--color-text)",
+    fontSize: "12px",
+    padding: "0 8px",
+    outline: "none",
+    fontFamily: "inherit",
+  };
+
   return (
     <div
       data-testid="settings-panel"
-      className="w-full max-w-md mx-auto p-4 rounded-lg border border-slate-200 bg-white space-y-4 shadow-sm"
+      className="w-full max-w-md mx-auto p-4 space-y-4"
+      style={{
+        background: "#fff",
+        border: "1px solid var(--color-border)",
+        borderRadius: "12px",
+      }}
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">高级设置</h3>
+        <h3
+          className="text-sm font-semibold"
+          style={{ color: "var(--color-text)" }}
+        >
+          高级设置
+        </h3>
         <button
           data-testid="reset-settings"
           onClick={reset}
-          className="text-xs text-slate-400 hover:text-rose-500"
+          className="text-xs"
+          style={{ color: "var(--color-text-weak)" }}
         >
           恢复默认
         </button>
@@ -115,7 +145,7 @@ export function SettingsPanel({
           max={6000}
           value={value.maxSliceHeight}
           onChange={onMaxHeight}
-          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          style={inputStyle}
         />
       </Field>
 
@@ -125,7 +155,7 @@ export function SettingsPanel({
           name="outputFormat"
           value={value.outputFormat}
           onChange={onFormat}
-          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          style={inputStyle}
         >
           <option value="PNG">PNG（无损 / 文件大）</option>
           <option value="JPEG">JPEG（有损 / 文件小）</option>
@@ -144,7 +174,7 @@ export function SettingsPanel({
           value={value.jpegQuality}
           onChange={onJpegQuality}
           disabled={value.outputFormat !== "JPEG"}
-          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          style={{ ...inputStyle, opacity: value.outputFormat !== "JPEG" ? 0.5 : 1 }}
         />
       </Field>
 
@@ -154,7 +184,7 @@ export function SettingsPanel({
           name="theme"
           value={value.theme}
           onChange={onTheme}
-          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          style={inputStyle}
         >
           <option value="light">浅色</option>
           <option value="dark">深色</option>
@@ -162,24 +192,28 @@ export function SettingsPanel({
         </select>
       </Field>
 
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="doubao-checkbox">
+        <span className="text-xs font-medium">导出图片</span>
         <input
           type="checkbox"
           checked={value.exportImage}
           onChange={onExportImage}
-          className="w-4 h-4 accent-sky-600"
         />
-        <span className="text-sm text-slate-700">导出图片</span>
+        <span className="doubao-checkbox-box">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </span>
       </label>
 
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="doubao-checkbox">
+        <span className="text-xs font-medium">避开文字切图（推荐）</span>
         <input
           type="checkbox"
           checked={value.avoidTextCut}
           onChange={onAvoidTextCut}
-          className="w-4 h-4 accent-sky-600"
         />
-        <span className="text-sm text-slate-700">避开文字切图（推荐）</span>
+        <span className="doubao-checkbox-box">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </span>
       </label>
     </div>
   );
@@ -197,8 +231,8 @@ function Field({
   return (
     <label className="block space-y-1">
       <div className="flex items-baseline justify-between text-xs">
-        <span className="text-slate-500">{label}</span>
-        {hint && <span className="text-slate-400">{hint}</span>}
+        <span style={{ color: "var(--color-text-secondary)" }}>{label}</span>
+        {hint && <span style={{ color: "var(--color-text-weak)" }}>{hint}</span>}
       </div>
       {children}
     </label>

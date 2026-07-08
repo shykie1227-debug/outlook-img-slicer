@@ -1,5 +1,10 @@
 /**
- * DropZone 组件（V6.0.3 — V5 浅色还原版）
+ * DropZone 组件（V6.1.0 — 豆包风格）
+ *
+ * 视觉规范：
+ * - 虚线边框 2px，默认 #e7eaef
+ * - hover/拖放态：边框 #0065fd + 背景 #e5e9ff
+ * - 使用 icons/folder-color.svg 彩色文件夹图标
  */
 import {
   useRef,
@@ -8,6 +13,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
+import { Icon } from "./icons";
 
 const SUPPORTED_EXTS = [
   "png", "jpg", "jpeg", "bmp", "webp", "gif", "svg",
@@ -42,9 +48,14 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       <div
         data-testid="dropzone"
         data-state="disabled"
-        className="w-full max-w-2xl rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center gap-4 text-center opacity-50 cursor-not-allowed p-12"
+        className="w-full max-w-2xl flex flex-col items-center justify-center gap-4 text-center opacity-50 cursor-not-allowed p-12"
+        style={{
+          border: "2px dashed var(--color-border)",
+          borderRadius: "12px",
+          background: "var(--color-card)",
+        }}
       >
-        <p className="text-slate-400">处理中…</p>
+        <p style={{ color: "var(--color-text-weak)" }}>处理中…</p>
       </div>
     );
   }
@@ -124,10 +135,20 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
     e.target.value = "";
   };
 
-  const stateClasses: Record<string, string> = {
-    idle: "border-slate-300 bg-white hover:border-sky-400 hover:bg-sky-50/50",
-    hover: "border-sky-500 bg-sky-50 scale-[1.01]",
-    rejected: "border-rose-400 bg-rose-50",
+  // 豆包风格状态样式：虚线 2px，hover 变蓝 + 浅蓝底
+  const stateStyle: Record<string, React.CSSProperties> = {
+    idle: {
+      borderColor: "var(--color-border)",
+      background: "var(--color-card)",
+    },
+    hover: {
+      borderColor: "var(--color-primary)",
+      background: "#e5e9ff",
+    },
+    rejected: {
+      borderColor: "var(--color-error)",
+      background: "#fef2f2",
+    },
   };
 
   return (
@@ -143,20 +164,29 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       role="button"
       tabIndex={0}
       aria-label="拖拽或选择长图文件"
-      className={`w-full max-w-2xl rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-3 text-center cursor-pointer transition-[border-color,background-color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 p-12 ${stateClasses[state] ?? stateClasses.idle}`}
+      className="w-full max-w-2xl flex flex-col items-center justify-center gap-2.5 text-center cursor-pointer p-12 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2"
+      style={{
+        minHeight: "180px",
+        border: "2px dashed var(--color-border)",
+        borderRadius: "12px",
+        ...stateStyle[state],
+      }}
     >
-      {/* 黄色文件夹图标 */}
-      <div aria-hidden="true" className="w-20 h-20 flex items-center justify-center mb-2">
-        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M8 16C8 13.7909 9.79086 12 12 12H24L30 18H52C54.2091 18 56 19.7909 56 22V46C56 48.2091 54.2091 50 52 50H12C9.79086 50 8 48.2091 8 46V16Z" fill="#FFD75E"/>
-          <path d="M8 22C8 19.7909 9.79086 18 12 18H52C54.2091 18 56 19.7909 56 22V46C56 48.2091 54.2091 50 52 50H12C9.79086 50 8 48.2091 8 46V22Z" fill="#FFC331"/>
-        </svg>
-      </div>
+      {/* 彩色文件夹图标 */}
+      <img src={Icon.folderColor} alt="" className="w-11 h-11" />
+
       <div className="space-y-1">
-        <p className="text-lg font-bold text-slate-700">
+        <p
+          className="text-sm font-bold"
+          style={{ color: "var(--color-text)" }}
+        >
           {state === "rejected" ? "不支持的文件格式" : "拖拽图片到此处"}
         </p>
-        <p data-testid="dropzone-formats" className="text-sm text-slate-400">
+        <p
+          data-testid="dropzone-formats"
+          className="text-xs"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
           支持 {FORMAT_LABELS}，点击上传
         </p>
       </div>

@@ -78,6 +78,27 @@ export interface PsdToImageResult {
   height: number;
 }
 
+/** image.compress 命令（导出压缩） */
+export interface CompressSlice {
+  path: string;
+  width?: number;
+  height?: number;
+  index?: number;
+}
+export interface CompressParams {
+  slices: CompressSlice[];
+  format?: "JPEG" | "PNG";
+  quality?: number;
+}
+export interface CompressResult {
+  slices: Array<{
+    path: string;
+    width: number;
+    height: number;
+    source_index: number;
+  }>;
+}
+
 /** html.assemble 命令 */
 export interface AssembleSlice {
   path: string;
@@ -142,6 +163,7 @@ export interface CommandMap {
   "image.info": { params: ImageInfoParams; result: ImageInfoResult };
   "image.safetyCheck": { params: SafetyCheckParams; result: SafetyCheckResult };
   "image.slice": { params: SliceParams; result: SliceResult };
+  "image.compress": { params: CompressParams; result: CompressResult };
   "image.smartSlice": { params: SliceParams; result: SliceResult };
   "pdf.toImages": { params: { path: string; dpi?: number }; result: ToImagesResult };
   "pptx.toImages": { params: { path: string }; result: ToImagesResult };

@@ -35,6 +35,8 @@ const api = {
     invoke("image.info", params),
   imageSlice: (params: CommandMap["image.slice"]["params"]) =>
     invoke("image.slice", params),
+  imageCompress: (params: CommandMap["image.compress"]["params"]) =>
+    invoke("image.compress", params),
 
   // ─── 文档 ───
   pdfToImages: (params: CommandMap["pdf.toImages"]["params"]) =>

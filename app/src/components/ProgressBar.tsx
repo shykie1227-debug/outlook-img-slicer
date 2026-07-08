@@ -1,11 +1,13 @@
 /**
- * ProgressBar 组件（V6.0.0 Phase 3.5）
+ * ProgressBar 组件（V6.1.0 — 豆包风格）
  *
  * 多任务进度条 + 状态消息 + 错误态 + 取消
  *
  * 计算逻辑：
  * - 整体进度 = 所有任务 progress 的平均值
  * - 当前任务 = currentTaskId 指定，否则取 progress 最小且未 done 的
+ *
+ * 视觉：浅色卡片 + 豆包状态色（成功 #10b981 / 错误 #ef4444 / 进行中 #0065fd）
  */
 export interface ProgressTask {
   id: string;
@@ -56,11 +58,18 @@ export function ProgressBar({
     ? "progress-done"
     : "progress-active";
 
+  // 豆包状态色
   const barColor = hasError
-    ? "bg-rose-500"
+    ? "var(--color-error)"
     : allDone
-    ? "bg-emerald-500"
-    : "bg-sky-500";
+    ? "var(--color-success)"
+    : "var(--color-primary)";
+
+  const stateColor = hasError
+    ? "var(--color-error)"
+    : allDone
+    ? "var(--color-success)"
+    : "var(--color-primary)";
 
   return (
     <div
@@ -71,40 +80,45 @@ export function ProgressBar({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-label={label}
-      className="w-full max-w-2xl mx-auto p-4 rounded-lg border border-slate-800 bg-slate-900/80 space-y-2"
+      className="w-full max-w-2xl mx-auto p-4 space-y-2"
+      style={{
+        background: "#fff",
+        border: "1px solid var(--color-border)",
+        borderRadius: "12px",
+      }}
     >
       <div className="flex items-center justify-between text-sm">
         <div data-testid={stateTestId} className="flex items-center gap-2">
           {hasError ? (
-            <>
-              <span aria-hidden="true" className="text-rose-400">⚠</span>
-              <span className="text-rose-400">错误</span>
-            </>
+            <span style={{ color: stateColor }}>⚠</span>
           ) : allDone ? (
-            <>
-              <span aria-hidden="true" className="text-emerald-400">✓</span>
-              <span className="text-emerald-400">已完成</span>
-            </>
+            <span style={{ color: stateColor }}>✓</span>
           ) : (
-            <>
-              <span aria-hidden="true" className="text-sky-400 animate-pulse">●</span>
-              <span className="text-sky-400">进行中</span>
-            </>
+            <span style={{ color: stateColor }} className="animate-pulse">●</span>
           )}
-          <span className="text-slate-300">{label}</span>
+          <span style={{ color: stateColor }}>
+            {hasError ? "错误" : allDone ? "已完成" : "进行中"}
+          </span>
+          <span style={{ color: "var(--color-text-secondary)" }}>{label}</span>
           {current?.error && (
-            <span className="text-rose-300 text-xs">· {current.error}</span>
+            <span style={{ color: "var(--color-error)" }} className="text-xs">
+              · {current.error}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-slate-400 text-xs">
+          <span style={{ color: "var(--color-text-weak)" }} className="text-xs">
             {current ? `${currentPct}%` : `${overallPct}%`}
           </span>
           {cancellable && onCancel && !allDone && (
             <button
               data-testid="cancel-btn"
               onClick={onCancel}
-              className="px-2 py-0.5 text-xs rounded bg-rose-600/30 text-rose-300 hover:bg-rose-600/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+              className="px-2 py-0.5 text-xs rounded"
+              style={{
+                background: "#fef2f2",
+                color: "var(--color-error)",
+              }}
             >
               取消
             </button>
@@ -112,10 +126,16 @@ export function ProgressBar({
         </div>
       </div>
 
-      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+      <div
+        className="w-full h-2 rounded-full overflow-hidden"
+        style={{ background: "var(--color-muted)" }}
+      >
         <div
-          className={`h-full ${barColor} transition-[width] duration-300`}
-          style={{ width: `${current ? currentPct : overallPct}%` }}
+          className="h-full transition-[width] duration-300"
+          style={{
+            width: `${current ? currentPct : overallPct}%`,
+            background: barColor,
+          }}
         />
       </div>
 
@@ -123,13 +143,23 @@ export function ProgressBar({
         <div className="space-y-1 pt-1">
           {tasks.map((t) => (
             <div key={t.id} className="flex items-center justify-between text-xs">
-              <span className={t.error ? "text-rose-300" : t.done ? "text-emerald-300" : "text-slate-400"}>
+              <span
+                style={{
+                  color: t.error
+                    ? "var(--color-error)"
+                    : t.done
+                    ? "var(--color-success)"
+                    : "var(--color-text-weak)",
+                }}
+              >
                 <span aria-hidden="true">
                   {t.error ? "✗" : t.done ? "✓" : "○"}
                 </span>{" "}
                 {t.name}
               </span>
-              <span className="text-slate-500">{Math.round(t.progress * 100)}%</span>
+              <span style={{ color: "var(--color-text-weak)" }}>
+                {Math.round(t.progress * 100)}%
+              </span>
             </div>
           ))}
         </div>

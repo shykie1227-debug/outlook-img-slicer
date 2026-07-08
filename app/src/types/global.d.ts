@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 /**
  * 渲染进程 API 类型声明（V6.0.0）
  *

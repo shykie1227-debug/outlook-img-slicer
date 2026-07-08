@@ -1,8 +1,10 @@
 /**
- * App 根组件（V6.0.3 — V5 浅色还原版）
+ * App 根组件（V6.1.0 — 豆包风格设计系统）
  *
- * 还原 V5 浅色完整布局：
- * 标题 + 副标题 → 步骤条 → DropZone → 设置行 → 操作按钮 → 邮件标题 → 提示 → 底部按钮 → 页脚
+ * 视觉层按豆包设计规范重写：
+ * - 配色 token 统一走 CSS 变量（var(--color-xxx)）
+ * - 按钮统一胶丸形（border-radius: 999px），Primary/Secondary 44px，Ghost 34px
+ * - 所有 emoji 替换为 icons/ 目录下的 Lucide 风格 SVG
  *
  * 业务逻辑不变：onCopyClipboard / onCreateDraft / onAssemble / onSaveHtml / CutEditor / HotspotEditor
  */
@@ -14,6 +16,7 @@ import { HotspotEditor, type Hotspot } from "./components/HotspotEditor";
 import { ProgressBar, type ProgressTask } from "./components/ProgressBar";
 import { SettingsPanel, type Settings } from "./components/SettingsPanel";
 import { ImagePreview } from "./components/ImagePreview";
+import { Icon } from "./components/icons";
 
 import { useAppStore, type Step, type SidecarStatus } from "./store";
 
@@ -222,9 +225,15 @@ export function App(): JSX.Element {
   const onCopyClipboard = async (): Promise<void> => {
     try {
       let html = assembledHtml;
+      // 压缩开启时强制重新拼装
+      if (settings.compressImage) {
+        html = null;
+        setAssembledHtml(null);
+      }
       if (!html) {
+        const compressedSlices = await maybeCompressSlices(slices);
         const r = await window.api.htmlAssemble({
-          slices: slices.map((s) => ({
+          slices: compressedSlices.map((s) => ({
             path: s.path,
             width: s.width,
             height: s.height,
@@ -246,8 +255,9 @@ export function App(): JSX.Element {
 
   const onCreateDraft = async (): Promise<void> => {
     try {
+      const compressedSlices = await maybeCompressSlices(slices);
       const r = await window.api.htmlAssemble({
-        slices: slices.map((s) => ({
+        slices: compressedSlices.map((s) => ({
           path: s.path,
           width: s.width,
           height: s.height,
@@ -270,9 +280,15 @@ export function App(): JSX.Element {
   const onSaveHtml = async (): Promise<void> => {
     try {
       let html: string = assembledHtml ?? "";
+      // 压缩开启时强制重新拼装
+      if (settings.compressImage) {
+        html = "";
+        setAssembledHtml(null);
+      }
       if (!html) {
+        const compressedSlices = await maybeCompressSlices(slices);
         const r = await window.api.htmlAssemble({
-          slices: slices.map((s) => ({
+          slices: compressedSlices.map((s) => ({
             path: s.path,
             width: s.width,
             height: s.height,
@@ -308,32 +324,61 @@ export function App(): JSX.Element {
     setSelectedHotspotId(null);
   };
 
+  /** 导出前按设置压缩切片（返回压缩后的 slice 数组，未开启则原样返回） */
+  const maybeCompressSlices = async <T extends { path: string; width: number; height: number; index: number }>(
+    origSlices: T[]
+  ): Promise<T[]> => {
+    if (!settings.compressImage || origSlices.length === 0) return origSlices;
+    const r = await window.api.imageCompress({
+      slices: origSlices.map((s) => ({ path: s.path, width: s.width, height: s.height, index: s.index })),
+      format: settings.compressFormat,
+      quality: settings.compressQuality,
+    });
+    // 保留原 index，替换 path
+    return origSlices.map((s, i) => ({ ...s, path: r.slices[i]?.path ?? s.path }));
+  };
+
   // ─────────────────────────────────────
   // 渲染
   // ─────────────────────────────────────
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "#F8F9FA", color: "#24292E" }}>
+    <div
+      className="min-h-screen flex flex-col"
+      style={{ background: "var(--color-bg)", color: "var(--color-text)" }}
+    >
       {/* 顶部标题区 */}
-      <header className="text-center pt-8 pb-4">
-        <h1 className="text-2xl font-bold" style={{ color: "#24292E" }}>
-          Outlook 长图助手 V6.0.3
+      <header className="text-center pt-8 pb-3">
+        <h1
+          className="text-2xl font-bold"
+          style={{ color: "var(--color-text)" }}
+        >
+          Outlook 长图助手 V6.1.0
         </h1>
-        <p className="text-sm mt-1" style={{ color: "#586069" }}>
+        <p
+          className="text-xs mt-1"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
           长图/PDF/PPT切片后插入Outlook邮件，保持原始清晰度
         </p>
       </header>
 
-      {/* 步骤条 */}
+      {/* 步骤条（胶丸形） */}
       <div className="flex justify-center pb-4">
         <div
-          className="inline-flex items-center gap-3 px-5 py-2 rounded-full text-sm"
-          style={{ background: "#F1F3F5", color: "#586069" }}
+          className="inline-flex items-center gap-3 px-5 py-2 text-xs font-medium"
+          style={{
+            background: "var(--color-muted)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "999px",
+            color: "var(--color-text-secondary)",
+            letterSpacing: "0.3px",
+          }}
         >
-          <span className="font-medium">1 放入文件</span>
-          <span style={{ color: "#D1D5DB" }}>→</span>
-          <span className="font-medium">2 调整切线 / 添加链接</span>
-          <span style={{ color: "#D1D5DB" }}>→</span>
-          <span className="font-medium">3 创建邮件</span>
+          <span>1 放入文件</span>
+          <span style={{ color: "var(--color-border-hover)" }}>→</span>
+          <span>2 调整切线 / 添加链接</span>
+          <span style={{ color: "var(--color-border-hover)" }}>→</span>
+          <span>3 创建邮件</span>
         </div>
       </div>
 
@@ -342,10 +387,16 @@ export function App(): JSX.Element {
         {/* 错误提示 */}
         {error && (
           <div
-            className="w-full p-3 rounded-md text-sm mb-4"
-            style={{ background: "#FFF0F0", border: "1px solid #FFD0D0", color: "#CB2431" }}
+            className="w-full p-3 mb-4 flex items-center gap-2 text-sm"
+            style={{
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "8px",
+              color: "var(--color-error)",
+            }}
           >
-            错误：{error}
+            <img src={Icon.alertTriangle} alt="" className="w-4 h-4 flex-shrink-0" />
+            <span>错误：{error}</span>
           </div>
         )}
 
@@ -372,7 +423,7 @@ export function App(): JSX.Element {
 
         {/* 文件已加载后的编辑区 */}
         {step !== "idle" && sourceInfo && sourcePath && (
-          <div className="w-full space-y-4">
+          <div className="w-full space-y-3">
             {/* 图片预览 */}
             <ImagePreview
               path={sourcePath}
@@ -382,7 +433,10 @@ export function App(): JSX.Element {
             />
 
             {/* 文件信息 */}
-            <div className="text-xs text-center" style={{ color: "#586069" }}>
+            <div
+              className="text-xs text-center"
+              style={{ color: "var(--color-text-weak)" }}
+            >
               原图 {sourceInfo.width}×{sourceInfo.height} · {sourceInfo.format} ·{" "}
               {(sourceInfo.size_bytes / 1024).toFixed(1)} KB · {slices.length} 个切片
             </div>
@@ -414,16 +468,30 @@ export function App(): JSX.Element {
         )}
 
         {/* 设置行 */}
-        <div className="w-full flex items-center gap-3 flex-wrap py-3">
+        <div className="w-full flex items-center gap-2.5 flex-wrap py-3 justify-center">
+          {/* 重置（Ghost 34px） */}
           <button
             onClick={onReset}
-            className="px-3 py-1.5 text-sm rounded-md transition-colors"
-            style={{ background: "#F1F3F5", color: "#586069" }}
+            className="inline-flex items-center gap-1 px-3.5 text-xs transition-colors"
+            style={{
+              height: "34px",
+              background: "var(--color-muted)",
+              border: "none",
+              borderRadius: "999px",
+              color: "var(--color-text)",
+              fontFamily: "inherit",
+            }}
           >
-            ↺ 重置
+            <img src={Icon.rotateCcw} alt="" className="w-[18px] h-[18px]" />
+            重置
           </button>
 
-          <span className="text-sm" style={{ color: "#586069" }}>邮件宽度：</span>
+          <span
+            className="text-xs"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            邮件宽度：
+          </span>
           <input
             type="number"
             min={400}
@@ -433,10 +501,22 @@ export function App(): JSX.Element {
               const v = Math.max(400, Math.min(1200, parseInt(e.target.value, 10) || 650));
               setSettings({ ...settings, emailWidth: v });
             }}
-            className="w-16 px-2 py-1 text-sm rounded border text-center"
-            style={{ borderColor: "#E1E4E8", background: "#FFF", color: "#24292E" }}
+            className="w-[80px] text-center text-xs outline-none"
+            style={{
+              height: "34px",
+              background: "var(--color-card)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "8px",
+              color: "var(--color-text)",
+              fontFamily: "inherit",
+            }}
           />
-          <span className="text-sm" style={{ color: "#586069" }}>px</span>
+          <span
+            className="text-xs"
+            style={{ color: "var(--color-text-weak)" }}
+          >
+            px
+          </span>
 
           {/* 蓝色滑块 */}
           <input
@@ -446,65 +526,150 @@ export function App(): JSX.Element {
             step={10}
             value={settings.emailWidth}
             onChange={(e) => setSettings({ ...settings, emailWidth: parseInt(e.target.value, 10) })}
-            className="flex-1 min-w-[120px] accent-sky-600"
+            className="doubao-slider"
+            style={{ width: "140px" }}
           />
 
-          <label className="flex items-center gap-1.5 cursor-pointer">
+          {/* 复选框：导出图片 */}
+          <label className="doubao-checkbox">
+            <img src={Icon.image} alt="" className="w-[18px] h-[18px]" />
+            <span className="text-xs font-medium">导出图片</span>
             <input
               type="checkbox"
               checked={settings.exportImage}
               onChange={(e) => setSettings({ ...settings, exportImage: e.target.checked })}
-              className="w-4 h-4 accent-sky-600"
             />
-            <span className="text-sm" style={{ color: "#586069" }}>导出图片</span>
+            <span className="doubao-checkbox-box">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
           </label>
 
-          <label className="flex items-center gap-1.5 cursor-pointer">
+          <span className="doubao-sep">│</span>
+
+          {/* 复选框：避开文字切图 */}
+          <label className="doubao-checkbox">
+            <span className="text-xs font-medium">避开文字切图（推荐）</span>
             <input
               type="checkbox"
               checked={settings.avoidTextCut}
               onChange={(e) => setSettings({ ...settings, avoidTextCut: e.target.checked })}
-              className="w-4 h-4 accent-sky-600"
             />
-            <span className="text-sm" style={{ color: "#586069" }}>避开文字切图（推荐）</span>
+            <span className="doubao-checkbox-box">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
           </label>
 
+          <span className="doubao-sep">│</span>
+
+          {/* 复选框：压缩图片 */}
+          <label className="doubao-checkbox">
+            <img src={Icon.compress} alt="" className="w-[18px] h-[18px]" />
+            <span className="text-xs font-medium">压缩图片</span>
+            <input
+              type="checkbox"
+              checked={settings.compressImage}
+              onChange={(e) => setSettings({ ...settings, compressImage: e.target.checked })}
+            />
+            <span className="doubao-checkbox-box">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
+          </label>
+
+          {/* 压缩设置（开启时显示） */}
+          {settings.compressImage && (
+            <>
+              <select
+                value={settings.compressFormat}
+                onChange={(e) => setSettings({ ...settings, compressFormat: e.target.value as "JPEG" | "PNG" })}
+                className="text-xs outline-none"
+                style={{
+                  height: "34px",
+                  background: "var(--color-card)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "8px",
+                  color: "var(--color-text)",
+                  padding: "0 8px",
+                  fontFamily: "inherit",
+                }}
+              >
+                <option value="JPEG">JPEG</option>
+                <option value="PNG">PNG</option>
+              </select>
+              <span className="text-xs" style={{ color: "var(--color-text-weak)" }}>质量</span>
+              <input
+                type="range"
+                min={10}
+                max={100}
+                step={5}
+                value={settings.compressQuality}
+                onChange={(e) => setSettings({ ...settings, compressQuality: parseInt(e.target.value, 10) })}
+                className="doubao-slider"
+                style={{ width: "80px" }}
+              />
+              <span
+                className="text-xs font-medium"
+                style={{ color: "var(--color-text-secondary)", minWidth: "28px" }}
+              >
+                {settings.compressQuality}%
+              </span>
+            </>
+          )}
+
+          {/* 高级 */}
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="ml-auto px-2 py-1 text-xs rounded transition-colors"
-            style={{ color: "#586069" }}
+            className="inline-flex items-center gap-1 px-3 text-xs transition-colors ml-auto"
+            style={{
+              height: "34px",
+              background: "transparent",
+              border: "none",
+              borderRadius: "999px",
+              color: "var(--color-text-weak)",
+              fontFamily: "inherit",
+            }}
           >
-            ⚙ 高级
+            <img src={Icon.palette} alt="" className="w-[18px] h-[18px]" />
+            高级
           </button>
         </div>
 
-        {/* 操作按钮行 */}
+        {/* 操作按钮行（Ghost 34px） */}
         {step !== "idle" && (
-          <div className="w-full flex items-center gap-2 flex-wrap py-2">
+          <div className="w-full flex items-center gap-2.5 flex-wrap py-2 justify-center">
             <button
               data-testid="copy-clipboard"
               onClick={onCopyClipboard}
               title="复制为自包含 HTML，适用于 Gmail / 网页邮箱；Outlook 桌面版不支持 base64 图片，请改用「创建邮件」"
-              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
-              style={{ background: "#F1F3F5", color: "#24292E", border: "1px solid #E1E4E8" }}
+              className="doubao-ghost-btn"
             >
-              📋 复制到 Outlook
+              <img src={Icon.clipboardCopy} alt="" className="w-[18px] h-[18px]" />
+              复制到 Outlook
             </button>
 
             <button
               onClick={() => { setShowCutEditor(!showCutEditor); }}
-              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
-              style={{ background: showCutEditor ? "#0078D4" : "#F1F3F5", color: showCutEditor ? "#FFF" : "#24292E", border: "1px solid #E1E4E8" }}
+              className="doubao-ghost-btn"
+              style={
+                showCutEditor
+                  ? { background: "var(--color-primary)", color: "#fff" }
+                  : undefined
+              }
             >
-              ✂ 调整切图位置
+              <img src={Icon.scissors} alt="" className="w-[18px] h-[18px]" />
+              调整切图位置
             </button>
 
             <button
               onClick={() => { setShowHotspotEditor(!showHotspotEditor); }}
-              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
-              style={{ background: showHotspotEditor ? "#0078D4" : "#F1F3F5", color: showHotspotEditor ? "#FFF" : "#24292E", border: "1px solid #E1E4E8" }}
+              className="doubao-ghost-btn"
+              style={
+                showHotspotEditor
+                  ? { background: "var(--color-primary)", color: "#fff" }
+                  : undefined
+              }
             >
-              🔗 添加可点击按钮
+              <img src={Icon.mousePointerClick} alt="" className="w-[18px] h-[18px]" />
+              添加可点击按钮
             </button>
           </div>
         )}
@@ -512,7 +677,10 @@ export function App(): JSX.Element {
         {/* 邮件标题 */}
         {step !== "idle" && (
           <div className="w-full py-2">
-            <label className="text-sm font-medium block mb-1" style={{ color: "#24292E" }}>
+            <label
+              className="text-xs font-medium block mb-1 text-center"
+              style={{ color: "var(--color-text)" }}
+            >
               邮件标题（可选）
             </label>
             <input
@@ -520,44 +688,74 @@ export function App(): JSX.Element {
               value={emailSubject}
               onChange={(e) => setEmailSubject(e.target.value)}
               placeholder="在此输入邮件标题，留空则使用默认标题"
-              className="w-full px-3 py-2 text-sm rounded-md border"
-              style={{ borderColor: "#E1E4E8", background: "#FFF", color: "#24292E" }}
+              className="w-full text-sm outline-none"
+              style={{
+                height: "40px",
+                background: "var(--color-card)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "8px",
+                color: "var(--color-text)",
+                padding: "0 12px",
+                fontFamily: "inherit",
+              }}
             />
           </div>
         )}
 
         {/* 提示信息 */}
         {step !== "idle" && (
-          <div className="w-full py-2 flex items-center gap-2 text-sm" style={{ color: "#586069" }}>
-            <span>ℹ️</span>
+          <div
+            className="w-full py-2 flex items-center justify-center gap-2 text-xs"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            <img src={Icon.info} alt="" className="w-4 h-4" />
             <span>拖入文件后自动切图，再检查切线并在经典 Outlook 中创建邮件</span>
           </div>
         )}
 
         {/* 底部按钮 */}
         {step !== "idle" && (
-          <div className="w-full flex items-center gap-3 pt-4 pb-4">
+          <div className="w-full flex items-center gap-3 pt-3 pb-4">
             <button
               data-testid="create-draft"
               onClick={onCreateDraft}
-              className="flex-1 px-5 py-2.5 rounded-md font-medium text-sm transition-colors"
-              style={{ background: "#0078D4", color: "#FFF" }}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 font-bold text-sm transition-colors"
+              style={{
+                height: "44px",
+                background: "var(--color-primary)",
+                color: "#fff",
+                border: "none",
+                borderRadius: "999px",
+                fontFamily: "inherit",
+              }}
             >
-              ✉ 在 Outlook 中创建邮件
+              <img src={Icon.mail} alt="" className="w-5 h-5" />
+              在 Outlook 中创建邮件
             </button>
             <button
               data-testid="save-html"
               onClick={onSaveHtml}
-              className="px-5 py-2.5 rounded-md font-medium text-sm transition-colors"
-              style={{ background: "#FFF", color: "#24292E", border: "1px solid #E1E4E8" }}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 font-medium text-sm transition-colors"
+              style={{
+                height: "44px",
+                background: "#fff",
+                color: "var(--color-text)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "999px",
+                fontFamily: "inherit",
+              }}
             >
-              ↓ 保存切图
+              <img src={Icon.arrowDownToLine} alt="" className="w-[18px] h-[18px]" />
+              保存切图
             </button>
           </div>
         )}
 
         {/* Sidecar 状态（底部细微显示） */}
-        <div className="w-full text-center text-xs pt-2" style={{ color: "#B0B8C1" }}>
+        <div
+          className="w-full text-center text-xs pt-2"
+          style={{ color: "var(--color-text-weak)" }}
+        >
           {sidecarError
             ? `Sidecar 异常：${sidecarError}`
             : status?.is_alive
@@ -567,8 +765,11 @@ export function App(): JSX.Element {
       </main>
 
       {/* 页脚 */}
-      <footer className="text-center text-xs py-4" style={{ color: "#B0B8C1" }}>
-        V6.0.3 xiaoming
+      <footer
+        className="text-center text-xs py-4"
+        style={{ color: "var(--color-text-weak)" }}
+      >
+        V6.1.0 xiaoming
       </footer>
     </div>
   );
