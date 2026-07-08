@@ -1,5 +1,5 @@
 /**
- * 全局样式（V6.0.0）
+ * 全局样式（V6.0.3 — V5 浅色还原版）
  */
 @tailwind base;
 @tailwind components;
@@ -17,8 +17,7 @@ body,
 }
 
 html {
-  /* 修复 Windows 深色模式下滚动条、input 默认色 */
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
 html.dark {
@@ -26,6 +25,6 @@ html.dark {
 }
 
 body {
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #F8F9FA;
+  color: #24292E;
 }

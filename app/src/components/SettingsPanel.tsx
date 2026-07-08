@@ -1,16 +1,8 @@
 /**
- * SettingsPanel 组件（V6.0.0 Phase 3.6 简化版）
+ * SettingsPanel 组件（V6.0.3 — V5 浅色还原版）
  *
- * 设置面板：
- * - 邮件默认宽度 [400, 1200]
- * - 切片最大高度 [500, 6000]
- * - 输出格式 PNG / JPEG
- * - JPEG 质量 [50, 100]
- * - 主题 浅色 / 深色 / 跟随系统
- *
- * 加载策略（I5 修复）：
- * - 父组件（App.tsx）在 useState lazy init 阶段从 localStorage 读取
- * - SettingsPanel 只负责显示和回写，不做反向 setState（避免重复渲染）
+ * Settings 接口新增 exportImage / avoidTextCut 字段。
+ * 默认 emailWidth=650（匹配 V5/图一）。
  */
 import { type ChangeEvent } from "react";
 
@@ -20,14 +12,18 @@ export interface Settings {
   outputFormat: "PNG" | "JPEG";
   jpegQuality: number;
   theme: "light" | "dark" | "system";
+  exportImage: boolean;
+  avoidTextCut: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  emailWidth: 960,
+  emailWidth: 650,
   maxSliceHeight: 2000,
   outputFormat: "PNG",
   jpegQuality: 95,
-  theme: "dark",
+  theme: "light",
+  exportImage: false,
+  avoidTextCut: true,
 };
 
 const STORAGE_KEY = "outlook-img-slicer-settings";
@@ -61,11 +57,6 @@ export function SettingsPanel({
     if (persist) saveToStorage(next);
   };
 
-  const onEmailWidth = (e: ChangeEvent<HTMLInputElement>): void => {
-    const v = clamp(parseInt(e.target.value, 10) || 0, 400, 1200);
-    patch({ emailWidth: v });
-  };
-
   const onMaxHeight = (e: ChangeEvent<HTMLInputElement>): void => {
     const v = clamp(parseInt(e.target.value, 10) || 0, 500, 6000);
     patch({ maxSliceHeight: v });
@@ -84,6 +75,14 @@ export function SettingsPanel({
     patch({ theme: e.target.value as "light" | "dark" | "system" });
   };
 
+  const onExportImage = (e: ChangeEvent<HTMLInputElement>): void => {
+    patch({ exportImage: e.target.checked });
+  };
+
+  const onAvoidTextCut = (e: ChangeEvent<HTMLInputElement>): void => {
+    patch({ avoidTextCut: e.target.checked });
+  };
+
   const reset = (): void => {
     onChange(DEFAULT_SETTINGS);
     if (persist) saveToStorage(DEFAULT_SETTINGS);
@@ -92,33 +91,18 @@ export function SettingsPanel({
   return (
     <div
       data-testid="settings-panel"
-      className="w-full max-w-md mx-auto p-4 rounded-lg border border-slate-800 bg-slate-900/60 space-y-4"
+      className="w-full max-w-md mx-auto p-4 rounded-lg border border-slate-200 bg-white space-y-4 shadow-sm"
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-300">设置</h3>
+        <h3 className="text-sm font-semibold text-slate-700">高级设置</h3>
         <button
           data-testid="reset-settings"
           onClick={reset}
-          className="text-xs text-slate-500 hover:text-rose-400"
+          className="text-xs text-slate-400 hover:text-rose-500"
         >
           恢复默认
         </button>
       </div>
-
-      <Field label="邮件宽度（px）" hint="[400, 1200]">
-        <input
-          data-testid="setting-emailWidth"
-          type="number"
-          name="emailWidth"
-          inputMode="numeric"
-          autoComplete="off"
-          min={400}
-          max={1200}
-          value={value.emailWidth}
-          onChange={onEmailWidth}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-        />
-      </Field>
 
       <Field label="切片最大高度（px）" hint="[500, 6000]">
         <input
@@ -131,7 +115,7 @@ export function SettingsPanel({
           max={6000}
           value={value.maxSliceHeight}
           onChange={onMaxHeight}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
         />
       </Field>
 
@@ -141,7 +125,7 @@ export function SettingsPanel({
           name="outputFormat"
           value={value.outputFormat}
           onChange={onFormat}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
         >
           <option value="PNG">PNG（无损 / 文件大）</option>
           <option value="JPEG">JPEG（有损 / 文件小）</option>
@@ -160,7 +144,7 @@ export function SettingsPanel({
           value={value.jpegQuality}
           onChange={onJpegQuality}
           disabled={value.outputFormat !== "JPEG"}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
         />
       </Field>
 
@@ -170,13 +154,33 @@ export function SettingsPanel({
           name="theme"
           value={value.theme}
           onChange={onTheme}
-          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
         >
           <option value="light">浅色</option>
           <option value="dark">深色</option>
           <option value="system">跟随系统</option>
         </select>
       </Field>
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={value.exportImage}
+          onChange={onExportImage}
+          className="w-4 h-4 accent-sky-600"
+        />
+        <span className="text-sm text-slate-700">导出图片</span>
+      </label>
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={value.avoidTextCut}
+          onChange={onAvoidTextCut}
+          className="w-4 h-4 accent-sky-600"
+        />
+        <span className="text-sm text-slate-700">避开文字切图（推荐）</span>
+      </label>
     </div>
   );
 }
@@ -193,8 +197,8 @@ function Field({
   return (
     <label className="block space-y-1">
       <div className="flex items-baseline justify-between text-xs">
-        <span className="text-slate-400">{label}</span>
-        {hint && <span className="text-slate-600">{hint}</span>}
+        <span className="text-slate-500">{label}</span>
+        {hint && <span className="text-slate-400">{hint}</span>}
       </div>
       {children}
     </label>

@@ -88,7 +88,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     title: "Outlook 长图助手 V6.0.3",
-    backgroundColor: "#0f172a",
+    backgroundColor: "#F8F9FA",
     show: false,
     icon: iconPath,
     webPreferences: {
@@ -227,7 +227,8 @@ app.whenReady().then(async () => {
     return toWebResponse(r);
   });
 
-  Menu.setApplicationMenu(buildMenu());
+  // V5 还原：移除应用菜单栏（无菜单窗口）
+  Menu.setApplicationMenu(null);
   mainWindow = createMainWindow();
 
   sidecar = startSidecar();

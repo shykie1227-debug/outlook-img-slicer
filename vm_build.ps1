@@ -267,16 +267,22 @@ Write-Ok "npm deps installed"
 Write-Step "Step 5/8: Build renderer + main process"
 
 Write-Info "Building React renderer..."
-& $nodeExe $npmCli run build:renderer 2>&1 | Out-Null
+& $nodeExe $npmCli run build:renderer 2>&1 | Tee-Object -FilePath (Join-Path $SharedRoot "build_step.log") -Append
 if ($LASTEXITCODE -ne 0) {
-    Fail "React renderer build failed"
+    $tail = Get-Content (Join-Path $SharedRoot "build_step.log") -Tail 40 -ErrorAction SilentlyContinue
+    "FAILED: React renderer build failed`n--- last 40 lines ---`n$($tail -join "`n")" | Out-File -FilePath (Join-Path $SharedRoot "vm_build_status.txt") -Force -Encoding ascii
+    Stop-Transcript | Out-Null
+    exit 1
 }
 Write-Ok "React renderer built"
 
 Write-Info "Building Electron main..."
-& $nodeExe $npmCli run build:main 2>&1 | Out-Null
+& $nodeExe $npmCli run build:main 2>&1 | Tee-Object -FilePath (Join-Path $SharedRoot "build_step.log") -Append
 if ($LASTEXITCODE -ne 0) {
-    Fail "Electron main build failed"
+    $tail = Get-Content (Join-Path $SharedRoot "build_step.log") -Tail 40 -ErrorAction SilentlyContinue
+    "FAILED: Electron main build failed`n--- last 40 lines ---`n$($tail -join "`n")" | Out-File -FilePath (Join-Path $SharedRoot "vm_build_status.txt") -Force -Encoding ascii
+    Stop-Transcript | Out-Null
+    exit 1
 }
 Write-Ok "Electron main built"
 
@@ -314,9 +320,12 @@ Write-Step "Step 7/8: Build Electron Portable EXE"
 
 Write-Info "Running electron-builder (may take 3-5 minutes)..."
 
-& $nodeExe $npmCli run dist:win 2>&1 | Out-Null
+& $nodeExe $npmCli run dist:win 2>&1 | Tee-Object -FilePath (Join-Path $SharedRoot "build_step.log") -Append
 if ($LASTEXITCODE -ne 0) {
-    Fail "Electron build failed"
+    $tail = Get-Content (Join-Path $SharedRoot "build_step.log") -Tail 40 -ErrorAction SilentlyContinue
+    "FAILED: Electron build failed`n--- last 40 lines of build_step.log ---`n$($tail -join "`n")" | Out-File -FilePath (Join-Path $SharedRoot "vm_build_status.txt") -Force -Encoding ascii
+    Stop-Transcript | Out-Null
+    exit 1
 }
 
 # Verify output

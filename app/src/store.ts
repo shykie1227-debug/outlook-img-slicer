@@ -118,7 +118,7 @@ const INITIAL: Omit<AppState,
   tasks: [],
   showSettings: false,
   settings: DEFAULT_SETTINGS,
-  theme: "dark",
+  theme: "light",
   status: null,
   sidecarError: null,
 };

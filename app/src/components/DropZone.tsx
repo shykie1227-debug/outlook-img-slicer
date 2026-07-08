@@ -1,10 +1,5 @@
 /**
- * DropZone 组件（V6.0.0 Phase 3.1）
- *
- * 拖拽上传区，4 状态：idle / hover / rejected / disabled
- * 支持格式：PNG / JPG / JPEG / BMP / WebP / GIF / PDF / PPT / PPTX / PSD
- *
- * Phase 5 接入 Framer Motion 后会替换 CSS 过渡为弹性动效。
+ * DropZone 组件（V6.0.3 — V5 浅色还原版）
  */
 import {
   useRef,
@@ -19,17 +14,11 @@ const SUPPORTED_EXTS = [
   "pdf", "ppt", "pptx", "psd",
 ];
 
-const FORMAT_LABELS = "PNG · JPG · BMP · WebP · GIF · SVG · PDF · PPT · PSD";
+const FORMAT_LABELS = "JPG · PNG · PDF · PPT · PSD/PSB";
 
 export interface DropZoneProps {
-  /** 合法文件被放下时调用 */
   onFile: (file: File) => void;
-  /** 禁用状态（处理中） */
   disabled?: boolean;
-  /**
-   * 可选：点击后调用系统级文件对话框（window.api.openImage）。
-   * 不传则不渲染"选择文件"按钮。
-   */
   onPick?: () => void;
 }
 
@@ -53,9 +42,9 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       <div
         data-testid="dropzone"
         data-state="disabled"
-        className="w-full max-w-2xl aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-800 bg-slate-900/60 flex flex-col items-center justify-center gap-4 text-center opacity-50 cursor-not-allowed"
+        className="w-full max-w-2xl rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center gap-4 text-center opacity-50 cursor-not-allowed p-12"
       >
-        <p className="text-slate-500">处理中…</p>
+        <p className="text-slate-400">处理中…</p>
       </div>
     );
   }
@@ -109,7 +98,6 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
   };
 
   const onClick = (): void => {
-    // 优先用 onPick（系统级对话框），否则回退到 HTML input
     if (onPick) {
       onPick();
       return;
@@ -133,14 +121,13 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       setState("rejected");
       setTimeout(() => setState("idle"), 2000);
     }
-    // 清空 input，允许同文件再次选择
     e.target.value = "";
   };
 
   const stateClasses: Record<string, string> = {
-    idle: "border-slate-700 bg-slate-800/40 hover:border-sky-500/50",
-    hover: "border-sky-400 bg-sky-500/10 scale-[1.01]",
-    rejected: "border-rose-500 bg-rose-500/10",
+    idle: "border-slate-300 bg-white hover:border-sky-400 hover:bg-sky-50/50",
+    hover: "border-sky-500 bg-sky-50 scale-[1.01]",
+    rejected: "border-rose-400 bg-rose-50",
   };
 
   return (
@@ -156,22 +143,23 @@ export function DropZone({ onFile, disabled = false, onPick }: DropZoneProps): J
       role="button"
       tabIndex={0}
       aria-label="拖拽或选择长图文件"
-      className={`w-full max-w-2xl aspect-[3/4] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 text-center cursor-pointer transition-[border-color,background-color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${stateClasses[state] ?? stateClasses.idle}`}
+      className={`w-full max-w-2xl rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-3 text-center cursor-pointer transition-[border-color,background-color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 p-12 ${stateClasses[state] ?? stateClasses.idle}`}
     >
-      <div aria-hidden="true" className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center">
-        <img src="../../../icons/folder-color.svg" alt="" className="w-10 h-10" />
+      {/* 黄色文件夹图标 */}
+      <div aria-hidden="true" className="w-20 h-20 flex items-center justify-center mb-2">
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 16C8 13.7909 9.79086 12 12 12H24L30 18H52C54.2091 18 56 19.7909 56 22V46C56 48.2091 54.2091 50 52 50H12C9.79086 50 8 48.2091 8 46V16Z" fill="#FFD75E"/>
+          <path d="M8 22C8 19.7909 9.79086 18 12 18H52C54.2091 18 56 19.7909 56 22V46C56 48.2091 54.2091 50 52 50H12C9.79086 50 8 48.2091 8 46V22Z" fill="#FFC331"/>
+        </svg>
       </div>
       <div className="space-y-1">
-        <p className="text-lg font-medium">
+        <p className="text-lg font-bold text-slate-700">
           {state === "rejected" ? "不支持的文件格式" : "拖拽图片到此处"}
         </p>
         <p data-testid="dropzone-formats" className="text-sm text-slate-400">
-          支持 {FORMAT_LABELS}
+          支持 {FORMAT_LABELS}，点击上传
         </p>
       </div>
-      <p className="text-xs text-slate-500 mt-4">
-        也可点击此处选择文件
-      </p>
       <input
         ref={inputRef}
         type="file"

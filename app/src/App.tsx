@@ -1,26 +1,19 @@
 /**
- * App 根组件（V6.0.3 Phase 5）
+ * App 根组件（V6.0.3 — V5 浅色还原版）
  *
- * 工作流：
- * 1. idle → 点击 DropZone 触发 window.api.openImage() 真实选择图片
- * 2. slicing → 调用 image.info / image.slice（带进度）
- * 3. edit-cuts → 切线编辑器（CutEditor）+ 实时 safe-file 预览
- * 4. assemble → 调用 html.assemble
- * 5. done → 复制 / 创建草稿 / 保存 HTML
+ * 还原 V5 浅色完整布局：
+ * 标题 + 副标题 → 步骤条 → DropZone → 设置行 → 操作按钮 → 邮件标题 → 提示 → 底部按钮 → 页脚
  *
- * 状态管理：useAppStore（Zustand）
- * 主题：ThemeSwitcher 同步 <html> class="dark"
- * 动画：Framer Motion AnimatePresence 切换 step
+ * 业务逻辑不变：onCopyClipboard / onCreateDraft / onAssemble / onSaveHtml / CutEditor / HotspotEditor
  */
-import { useEffect } from "react";
-import { AnimatePresence, motion, MotionConfig } from "framer-motion";
+import { useEffect, useState } from "react";
 
 import { DropZone } from "./components/DropZone";
 import { CutEditor, type CutLine } from "./components/CutEditor";
+import { HotspotEditor, type Hotspot } from "./components/HotspotEditor";
 import { ProgressBar, type ProgressTask } from "./components/ProgressBar";
 import { SettingsPanel, type Settings } from "./components/SettingsPanel";
 import { ImagePreview } from "./components/ImagePreview";
-import { ThemeSwitcher } from "./components/ThemeSwitcher";
 
 import { useAppStore, type Step, type SidecarStatus } from "./store";
 
@@ -40,12 +33,8 @@ const DEFAULT_CUT_OPTIONS = {
   snapThresholdPx: 5,
 };
 
-/** 步骤转场动画配置：reducedMotion 时退化为 0 持续 */
-const STEP_TRANSITION = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -10 },
-  transition: { duration: 0.2 },
+const DEFAULT_HOTSPOT_OPTIONS = {
+  minSizePx: 20,
 };
 
 export function App(): JSX.Element {
@@ -111,6 +100,13 @@ export function App(): JSX.Element {
     reset: s.reset,
   }));
 
+  // V5 本地 UI 状态
+  const [showCutEditor, setShowCutEditor] = useState(false);
+  const [showHotspotEditor, setShowHotspotEditor] = useState(false);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
+
   // ─────────────────────────────────────
   // Sidecar 状态订阅
   // ─────────────────────────────────────
@@ -172,11 +168,10 @@ export function App(): JSX.Element {
   const onPickFile = async (): Promise<void> => {
     setError(null);
     const r = await window.api.openImage();
-    if (!r.path) return; // 用户取消
+    if (!r.path) return;
     void onPathReady(r.path);
   };
 
-  /** DropZone 拖拽时也能用（拿 File 对象） */
   const onDropFile = async (file: File): Promise<void> => {
     setError(null);
     let filePath = "";
@@ -224,34 +219,6 @@ export function App(): JSX.Element {
     setCuts(newCuts);
   };
 
-  const onAssemble = async (): Promise<void> => {
-    setStep("assemble");
-    setTasks([{ id: "assemble", name: "拼装 HTML", progress: 0.2 }]);
-    try {
-      const r = await window.api.htmlAssemble({
-        slices: slices.map((s) => ({
-          path: s.path,
-          width: s.width,
-          height: s.height,
-          sort_key: s.index + 1,
-          original_width: sourceInfo?.width ?? 0,
-        })),
-        display_w: settings.emailWidth,
-      });
-      setAssembledHtml(r.html);
-      setAssembledCids(r.cid_files);
-      const finalTasks: ProgressTask[] = useAppStore
-        .getState()
-        .tasks.map((x) =>
-          x.id === "assemble" ? { ...x, progress: 1, done: true } : x
-        );
-      setTasks(finalTasks);
-      setStep("done");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
   const onCopyClipboard = async (): Promise<void> => {
     try {
       let html = assembledHtml;
@@ -279,8 +246,6 @@ export function App(): JSX.Element {
 
   const onCreateDraft = async (): Promise<void> => {
     try {
-      // Outlook Word 引擎不支持 base64 图片，必须用 CID 附件模式
-      // 不复用 assembledHtml 缓存（那是 base64 模式），始终重新生成 CID 模式
       const r = await window.api.htmlAssemble({
         slices: slices.map((s) => ({
           path: s.path,
@@ -294,7 +259,7 @@ export function App(): JSX.Element {
       });
       await window.api.outlookCreateDraft({
         html: r.html,
-        subject: sourceInfo ? `${sourceInfo.width}×${sourceInfo.height} 长图` : "长图",
+        subject: emailSubject || (sourceInfo ? `${sourceInfo.width}×${sourceInfo.height} 长图` : "长图"),
         cid_files: r.cid_files,
       });
     } catch (e) {
@@ -336,110 +301,94 @@ export function App(): JSX.Element {
 
   const onReset = (): void => {
     reset();
+    setShowCutEditor(false);
+    setShowHotspotEditor(false);
+    setEmailSubject("");
+    setHotspots([]);
+    setSelectedHotspotId(null);
   };
 
   // ─────────────────────────────────────
   // 渲染
   // ─────────────────────────────────────
   return (
-    <MotionConfig reducedMotion="user">
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 flex flex-col transition-colors duration-200">
-      <header className="border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            aria-hidden="true"
-            className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-white font-bold"
-          >
-            ✂
-          </div>
-          <h1 className="text-xl font-semibold">Outlook 长图助手</h1>
-          <span
-            aria-hidden="true"
-            className="px-2 py-0.5 text-xs rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/30"
-          >
-            V6.0.3
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {sourceInfo && (
-            <button
-              onClick={onReset}
-              className="px-3 py-1.5 text-sm rounded-md text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >
-              重新开始
-            </button>
-          )}
-          <button
-            data-testid="open-settings"
-            onClick={() => setShowSettings(!showSettings)}
-            aria-expanded={showSettings}
-            className="px-3 py-1.5 text-sm rounded-md text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-          >
-            <span aria-hidden="true" className="mr-1">⚙</span>
-            设置
-          </button>
-          <ThemeSwitcher />
-          <SidecarStatusBadge status={status} error={sidecarError} />
-        </div>
+    <div className="min-h-screen flex flex-col" style={{ background: "#F8F9FA", color: "#24292E" }}>
+      {/* 顶部标题区 */}
+      <header className="text-center pt-8 pb-4">
+        <h1 className="text-2xl font-bold" style={{ color: "#24292E" }}>
+          Outlook 长图助手 V6.0.3
+        </h1>
+        <p className="text-sm mt-1" style={{ color: "#586069" }}>
+          长图/PDF/PPT切片后插入Outlook邮件，保持原始清晰度
+        </p>
       </header>
 
-      <main className="flex-1 overflow-auto p-6 space-y-4">
-        <AnimatePresence mode="wait">
-          {error && (
-            <motion.div
-              key="error"
-              {...STEP_TRANSITION}
-              role="status"
-              aria-live="polite"
-              className="max-w-2xl mx-auto p-3 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-sm"
-            >
-              错误：{error}
-            </motion.div>
-          )}
+      {/* 步骤条 */}
+      <div className="flex justify-center pb-4">
+        <div
+          className="inline-flex items-center gap-3 px-5 py-2 rounded-full text-sm"
+          style={{ background: "#F1F3F5", color: "#586069" }}
+        >
+          <span className="font-medium">1 放入文件</span>
+          <span style={{ color: "#D1D5DB" }}>→</span>
+          <span className="font-medium">2 调整切线 / 添加链接</span>
+          <span style={{ color: "#D1D5DB" }}>→</span>
+          <span className="font-medium">3 创建邮件</span>
+        </div>
+      </div>
 
-          {showSettings && (
-            <motion.div key="settings" {...STEP_TRANSITION}>
-              <SettingsPanel value={settings} onChange={setSettings} />
-            </motion.div>
-          )}
+      {/* 主内容区 */}
+      <main className="flex-1 flex flex-col items-center px-6 pb-4 max-w-3xl mx-auto w-full">
+        {/* 错误提示 */}
+        {error && (
+          <div
+            className="w-full p-3 rounded-md text-sm mb-4"
+            style={{ background: "#FFF0F0", border: "1px solid #FFD0D0", color: "#CB2431" }}
+          >
+            错误：{error}
+          </div>
+        )}
 
-          {tasks.length > 0 && (
-            <motion.div key="progress" {...STEP_TRANSITION}>
-              <ProgressBar visible tasks={tasks} />
-            </motion.div>
-          )}
+        {/* 进度条 */}
+        {tasks.length > 0 && (
+          <div className="w-full mb-4">
+            <ProgressBar visible tasks={tasks} />
+          </div>
+        )}
 
-          {step === "idle" && (
-            <motion.div
-              key="idle"
-              {...STEP_TRANSITION}
-              className="flex items-center justify-center min-h-[60vh]"
-            >
-              <DropZone onFile={onDropFile} onPick={onPickFile} />
-            </motion.div>
-          )}
+        {/* 高级设置（可折叠） */}
+        {showSettings && (
+          <div className="w-full mb-4">
+            <SettingsPanel value={settings} onChange={setSettings} />
+          </div>
+        )}
 
-          {step !== "idle" && sourceInfo && sourcePath && (
-            <motion.div
-              key="edit"
-              {...STEP_TRANSITION}
-              className="max-w-4xl mx-auto space-y-4"
-            >
-              <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
-                <span>
-                  原图 {sourceInfo.width}×{sourceInfo.height} · {sourceInfo.format} ·{" "}
-                  {(sourceInfo.size_bytes / 1024).toFixed(1)} KB
-                </span>
-                <span>{slices.length} 个切片</span>
-              </div>
+        {/* DropZone（idle 状态） */}
+        {step === "idle" && (
+          <div className="w-full flex flex-col items-center">
+            <DropZone onFile={onDropFile} onPick={onPickFile} />
+          </div>
+        )}
 
-              <ImagePreview
-                path={sourcePath}
-                width={sourceInfo.width}
-                height={sourceInfo.height}
-                maxHeight={400}
-              />
+        {/* 文件已加载后的编辑区 */}
+        {step !== "idle" && sourceInfo && sourcePath && (
+          <div className="w-full space-y-4">
+            {/* 图片预览 */}
+            <ImagePreview
+              path={sourcePath}
+              width={sourceInfo.width}
+              height={sourceInfo.height}
+              maxHeight={300}
+            />
 
+            {/* 文件信息 */}
+            <div className="text-xs text-center" style={{ color: "#586069" }}>
+              原图 {sourceInfo.width}×{sourceInfo.height} · {sourceInfo.format} ·{" "}
+              {(sourceInfo.size_bytes / 1024).toFixed(1)} KB · {slices.length} 个切片
+            </div>
+
+            {/* 切线编辑器 */}
+            {showCutEditor && (
               <CutEditor
                 image={{ width: sourceInfo.width, height: sourceInfo.height }}
                 cuts={cuts}
@@ -448,108 +397,179 @@ export function App(): JSX.Element {
                 onChange={onCutsChange}
                 onSelect={setSelectedCutId}
               />
+            )}
 
-              {step === "edit-cuts" && (
-                <div className="flex justify-end gap-2">
-                  <button
-                    data-testid="assemble-html"
-                    onClick={onAssemble}
-                    className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
-                  >
-                    拼装 HTML <span aria-hidden="true">→</span>
-                  </button>
-                </div>
-              )}
+            {/* 热区编辑器 */}
+            {showHotspotEditor && slices.length > 0 && (
+              <HotspotEditor
+                slice={{ width: sourceInfo.width, height: sourceInfo.height }}
+                hotspots={hotspots}
+                selectedId={selectedHotspotId}
+                options={DEFAULT_HOTSPOT_OPTIONS}
+                onChange={setHotspots}
+                onSelect={setSelectedHotspotId}
+              />
+            )}
+          </div>
+        )}
 
-              {(step === "edit-cuts" || step === "done") && (
-                <div className="flex flex-wrap justify-end gap-2 p-4 rounded-md border border-emerald-500/30 bg-emerald-500/10">
-                  <button
-                    data-testid="save-html"
-                    onClick={onSaveHtml}
-                    className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
-                  >
-                    <span aria-hidden="true" className="mr-1">💾</span>
-                    保存 HTML
-                  </button>
-                  <button
-                    data-testid="copy-clipboard"
-                    onClick={onCopyClipboard}
-                    title="复制为自包含 HTML，适用于 Gmail / 网页邮箱；Outlook 桌面版不支持 base64 图片，请改用『创建 Outlook 草稿』"
-                    className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-                  >
-                    <span aria-hidden="true" className="mr-1">📋</span>
-                    复制到剪贴板
-                  </button>
-                  <button
-                    data-testid="create-draft"
-                    onClick={onCreateDraft}
-                    className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
-                  >
-                    <span aria-hidden="true" className="mr-1">✉</span>
-                    创建 Outlook 草稿
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* 设置行 */}
+        <div className="w-full flex items-center gap-3 flex-wrap py-3">
+          <button
+            onClick={onReset}
+            className="px-3 py-1.5 text-sm rounded-md transition-colors"
+            style={{ background: "#F1F3F5", color: "#586069" }}
+          >
+            ↺ 重置
+          </button>
+
+          <span className="text-sm" style={{ color: "#586069" }}>邮件宽度：</span>
+          <input
+            type="number"
+            min={400}
+            max={1200}
+            value={settings.emailWidth}
+            onChange={(e) => {
+              const v = Math.max(400, Math.min(1200, parseInt(e.target.value, 10) || 650));
+              setSettings({ ...settings, emailWidth: v });
+            }}
+            className="w-16 px-2 py-1 text-sm rounded border text-center"
+            style={{ borderColor: "#E1E4E8", background: "#FFF", color: "#24292E" }}
+          />
+          <span className="text-sm" style={{ color: "#586069" }}>px</span>
+
+          {/* 蓝色滑块 */}
+          <input
+            type="range"
+            min={400}
+            max={1200}
+            step={10}
+            value={settings.emailWidth}
+            onChange={(e) => setSettings({ ...settings, emailWidth: parseInt(e.target.value, 10) })}
+            className="flex-1 min-w-[120px] accent-sky-600"
+          />
+
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.exportImage}
+              onChange={(e) => setSettings({ ...settings, exportImage: e.target.checked })}
+              className="w-4 h-4 accent-sky-600"
+            />
+            <span className="text-sm" style={{ color: "#586069" }}>导出图片</span>
+          </label>
+
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.avoidTextCut}
+              onChange={(e) => setSettings({ ...settings, avoidTextCut: e.target.checked })}
+              className="w-4 h-4 accent-sky-600"
+            />
+            <span className="text-sm" style={{ color: "#586069" }}>避开文字切图（推荐）</span>
+          </label>
+
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="ml-auto px-2 py-1 text-xs rounded transition-colors"
+            style={{ color: "#586069" }}
+          >
+            ⚙ 高级
+          </button>
+        </div>
+
+        {/* 操作按钮行 */}
+        {step !== "idle" && (
+          <div className="w-full flex items-center gap-2 flex-wrap py-2">
+            <button
+              data-testid="copy-clipboard"
+              onClick={onCopyClipboard}
+              title="复制为自包含 HTML，适用于 Gmail / 网页邮箱；Outlook 桌面版不支持 base64 图片，请改用「创建邮件」"
+              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+              style={{ background: "#F1F3F5", color: "#24292E", border: "1px solid #E1E4E8" }}
+            >
+              📋 复制到 Outlook
+            </button>
+
+            <button
+              onClick={() => { setShowCutEditor(!showCutEditor); }}
+              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+              style={{ background: showCutEditor ? "#0078D4" : "#F1F3F5", color: showCutEditor ? "#FFF" : "#24292E", border: "1px solid #E1E4E8" }}
+            >
+              ✂ 调整切图位置
+            </button>
+
+            <button
+              onClick={() => { setShowHotspotEditor(!showHotspotEditor); }}
+              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+              style={{ background: showHotspotEditor ? "#0078D4" : "#F1F3F5", color: showHotspotEditor ? "#FFF" : "#24292E", border: "1px solid #E1E4E8" }}
+            >
+              🔗 添加可点击按钮
+            </button>
+          </div>
+        )}
+
+        {/* 邮件标题 */}
+        {step !== "idle" && (
+          <div className="w-full py-2">
+            <label className="text-sm font-medium block mb-1" style={{ color: "#24292E" }}>
+              邮件标题（可选）
+            </label>
+            <input
+              type="text"
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              placeholder="在此输入邮件标题，留空则使用默认标题"
+              className="w-full px-3 py-2 text-sm rounded-md border"
+              style={{ borderColor: "#E1E4E8", background: "#FFF", color: "#24292E" }}
+            />
+          </div>
+        )}
+
+        {/* 提示信息 */}
+        {step !== "idle" && (
+          <div className="w-full py-2 flex items-center gap-2 text-sm" style={{ color: "#586069" }}>
+            <span>ℹ️</span>
+            <span>拖入文件后自动切图，再检查切线并在经典 Outlook 中创建邮件</span>
+          </div>
+        )}
+
+        {/* 底部按钮 */}
+        {step !== "idle" && (
+          <div className="w-full flex items-center gap-3 pt-4 pb-4">
+            <button
+              data-testid="create-draft"
+              onClick={onCreateDraft}
+              className="flex-1 px-5 py-2.5 rounded-md font-medium text-sm transition-colors"
+              style={{ background: "#0078D4", color: "#FFF" }}
+            >
+              ✉ 在 Outlook 中创建邮件
+            </button>
+            <button
+              data-testid="save-html"
+              onClick={onSaveHtml}
+              className="px-5 py-2.5 rounded-md font-medium text-sm transition-colors"
+              style={{ background: "#FFF", color: "#24292E", border: "1px solid #E1E4E8" }}
+            >
+              ↓ 保存切图
+            </button>
+          </div>
+        )}
+
+        {/* Sidecar 状态（底部细微显示） */}
+        <div className="w-full text-center text-xs pt-2" style={{ color: "#B0B8C1" }}>
+          {sidecarError
+            ? `Sidecar 异常：${sidecarError}`
+            : status?.is_alive
+            ? `Sidecar 在线 · PID ${status.pid}`
+            : "Sidecar 连接中…"}
+        </div>
       </main>
 
-      <footer className="border-t border-slate-200 dark:border-slate-800 px-6 py-3 text-xs text-slate-500 flex justify-between">
-        <span>
-          Outlook 长图助手 V6.0.3 · Electron {window.api.versions.electron} · Chrome {window.api.versions.chrome} · Node{" "}
-          {window.api.versions.node}
-        </span>
-        <span>本地运行 · 不联网 · 不上传</span>
+      {/* 页脚 */}
+      <footer className="text-center text-xs py-4" style={{ color: "#B0B8C1" }}>
+        V6.0.3 xiaoming
       </footer>
-    </div>
-    </MotionConfig>
-  );
-}
-
-function SidecarStatusBadge({
-  status,
-  error,
-}: {
-  status: { pid: number; platform: string } | null;
-  error: string | null;
-}): JSX.Element {
-  if (error) {
-    return (
-      <div
-        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm"
-        data-testid="sidecar-error"
-        role="status"
-        aria-live="polite"
-      >
-        <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
-        Sidecar 异常：{error}
-      </div>
-    );
-  }
-  if (!status) {
-    return (
-      <div
-        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-800 text-slate-400 text-sm"
-        role="status"
-        aria-live="polite"
-      >
-        <span aria-hidden="true" className="w-2 h-2 rounded-full bg-slate-500 animate-pulse" />
-        Sidecar 连接中…
-      </div>
-    );
-  }
-  return (
-    <div
-      className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm"
-      role="status"
-    >
-      <span aria-hidden="true" className="w-2 h-2 rounded-full bg-emerald-400" />
-      <span data-testid="sidecar-status-text">在线</span>
-      <span aria-hidden="true" className="text-slate-400">·</span>
-      <span data-testid="sidecar-pid">PID {status.pid}</span>
-      <span aria-hidden="true" className="text-slate-400">·</span>
-      <span>{status.platform}</span>
     </div>
   );
 }
