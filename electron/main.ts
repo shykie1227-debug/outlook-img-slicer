@@ -150,7 +150,7 @@ function startSidecar(): SidecarManager {
   const manager = new SidecarManager(defaultSpawner, {
     command: cmd,
     args: sidecarArgs,
-    heartbeatTimeoutMs: 10_000,
+    heartbeatTimeoutMs: 30_000,
     maxRestartAttempts: 5,
   });
 

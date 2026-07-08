@@ -298,14 +298,34 @@ if (Test-Path $sidecarDist) {
 
 Write-Info "Running PyInstaller (may take 1-2 minutes)..."
 
-& $pythonExe -m PyInstaller --onefile --name sidecar_server `
-    --distpath $sidecarDist `
-    --workpath (Join-Path $sidecarDir "build") `
-    --specpath $sidecarDir `
-    --noconfirm --clean `
-    --collect-all PIL --collect-all fitz --collect-all win32com `
-    --hidden-import pythoncom --hidden-import win32com.client `
-    (Join-Path $sidecarDir "sidecar_server.py") 2>&1 | Out-Null
+# V5 模块列表（需要打包进 sidecar）
+$v5Modules = @(
+    "image_slicer.py", "image_safety.py", "hotspot_slicer.py",
+    "html_assembler.py", "clipboard_html.py", "outlook_sender.py",
+    "pdf_slicer.py", "ppt_slicer.py", "psd_slicer.py", "clickable_map.py"
+)
+
+$pyiArgs = @(
+    "--onefile", "--name", "sidecar_server",
+    "--distpath", $sidecarDist,
+    "--workpath", (Join-Path $sidecarDir "build"),
+    "--specpath", $sidecarDir,
+    "--noconfirm", "--clean",
+    "--collect-all", "PIL", "--collect-all", "fitz", "--collect-all", "win32com",
+    "--hidden-import", "pythoncom", "--hidden-import", "win32com.client"
+)
+
+# 添加 V5 模块作为数据文件
+foreach ($mod in $v5Modules) {
+    $srcPath = Join-Path $LocalRoot $mod
+    if (Test-Path $srcPath) {
+        $pyiArgs += @("--add-data", "$srcPath;.")
+    }
+}
+
+$pyiArgs += (Join-Path $sidecarDir "sidecar_server.py")
+
+& $pythonExe -m PyInstaller @pyiArgs 2>&1 | Out-Null
 
 $sidecarExe = Join-Path $sidecarDist "sidecar_server.exe"
 if (-not (Test-Path $sidecarExe)) {

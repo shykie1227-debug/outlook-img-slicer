@@ -32,7 +32,11 @@ from pathlib import Path
 # ─────────────────────────────────────
 # Path Setup: 让 sidecar 能 import V5 模块
 # ─────────────────────────────────────
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+if getattr(sys, "frozen", False):
+    # PyInstaller 打包后：V5 模块通过 --add-data 打包到 _MEIPASS
+    PROJECT_ROOT = Path(sys._MEIPASS) if hasattr(sys, "_MEIPASS") else Path(sys.executable).parent
+else:
+    PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

@@ -53,8 +53,6 @@ export function App(): JSX.Element {
     showSettings,
     settings,
     assembledHtml,
-    status,
-    sidecarError,
     setStep,
     setError,
     setSourcePath,
@@ -83,8 +81,6 @@ export function App(): JSX.Element {
     showSettings: s.showSettings,
     settings: s.settings,
     assembledHtml: s.assembledHtml,
-    status: s.status,
-    sidecarError: s.sidecarError,
     setStep: s.setStep,
     setError: s.setError,
     setSourcePath: s.setSourcePath,
@@ -720,18 +716,6 @@ export function App(): JSX.Element {
             </button>
           </div>
         )}
-
-        {/* Sidecar 状态（底部细微显示） */}
-        <div
-          className="w-full text-center text-xs pt-2"
-          style={{ color: "var(--color-text-weak)" }}
-        >
-          {sidecarError
-            ? `Sidecar 异常：${sidecarError}`
-            : status?.is_alive
-            ? `Sidecar 在线 · PID ${status.pid}`
-            : "Sidecar 连接中…"}
-        </div>
       </main>
 
       {/* 页脚 */}
