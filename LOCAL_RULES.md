@@ -63,7 +63,7 @@
 
 - ✅ `pip install` 安装依赖（联网拉 PyPI 包正常）
 - ✅ `git push` 推送代码到 GitHub（构建后 release 也正常）
-- ✅ `npm install` 安装前端依赖
+- ✅ 如检查历史版本，允许读取旧前端资料；当前发布架构不再依赖 Node/npm
 - ✅ `curl` / `wget` 下载构建工具（Node.js / Rust / 7zip 等）
 - ✅ 开发本机手动运行 exe 调试（仅测试）
 - ✅ Outlook 本地测试发邮件（开发者本机操作）

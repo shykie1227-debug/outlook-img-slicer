@@ -50,9 +50,10 @@ jobs:
       - name: Compress EXE
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/Outlook长图插入工具.exe" -DestinationPath "dist/${{ steps.asset_names.outputs.zip_name }}" -Force
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          Compress-Archive -Path "desktop/dist/OutlookImgSlicer.exe" -DestinationPath "dist/${{ steps.asset_names.outputs.zip_name }}" -Force
           Write-Host "EXE size MB:"
-          (Get-Item "dist/Outlook长图插入工具.exe").Length / 1MB
+          (Get-Item "desktop/dist/OutlookImgSlicer.exe").Length / 1MB
           Write-Host "ZIP size MB:"
           (Get-Item "dist/${{ steps.asset_names.outputs.zip_name }}").Length / 1MB
 
@@ -61,7 +62,7 @@ jobs:
         with:
           name: OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}
           path: |
-            dist/Outlook长图插入工具.exe
+            desktop/dist/OutlookImgSlicer.exe
             dist/${{ steps.asset_names.outputs.zip_name }}
           retention-days: 5
 
@@ -92,7 +93,7 @@ jobs:
       - name: Upload Release assets
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            "Outlook长图插入工具.exe#Outlook.exe" \
+            "desktop/dist/OutlookImgSlicer.exe#OutlookImgSlicer.exe" \
             "${{ steps.asset_names.outputs.zip_name }}" \
             --repo "${{ github.repository }}" \
             --clobber

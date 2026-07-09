@@ -22,12 +22,13 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+DESKTOP_ROOT = ROOT / "desktop"
+sys.path.insert(0, str(DESKTOP_ROOT))
 
 
 def test_build_py_no_hardcoded_pywin32_version():
     """V4.7.7 R3: build.py 不应有 pywin32==XXX 硬编码版本号"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     # 去除 docstring 和注释（以 # 或三引号 开头的行）
     code_lines = []
     in_docstring = False
@@ -49,7 +50,7 @@ def test_build_py_no_hardcoded_pywin32_version():
 
 def test_build_py_import_to_pip_includes_python_pptx():
     """V4.7.7 R3: import_to_pip 应包含 python-pptx（V4.6.1 漏了）"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     # 找 import_to_pip 字典
     m = re.search(
         r'import_to_pip\s*=\s*\{(.*?)\}',
@@ -64,7 +65,7 @@ def test_build_py_import_to_pip_includes_python_pptx():
 
 def test_build_py_import_to_pip_includes_lxml():
     """V4.7.7 R3: import_to_pip 应包含 lxml（V4.6.1 漏了）"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     m = re.search(
         r'import_to_pip\s*=\s*\{(.*?)\}',
         build_src,
@@ -77,7 +78,7 @@ def test_build_py_import_to_pip_includes_lxml():
 
 def test_build_py_pip_installs_pywin32_unpinned():
     """V4.7.7 R3: pip install 应使用 'pywin32'（不锁版本）"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     # 找 pip install 行的 pywin32 段
     m = re.search(r'pip_pkgs\s*=\s*.*?pywin32["\']?', build_src)
     assert m, "找不到 pip_pkgs 中的 pywin32"
@@ -103,7 +104,7 @@ def test_requirements_txt_and_build_py_consistent():
     # 排除 UPX（不是 pip 包）
     req_names.discard('upx')
 
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     m = re.search(
         r'import_to_pip\s*=\s*\{(.*?)\}',
         build_src,
@@ -124,7 +125,7 @@ def test_requirements_txt_and_build_py_consistent():
 
 def test_pyinstaller_spec_disables_strip_on_windows():
     """Windows 默认没有 strip 工具，开启会产生大量 FileNotFoundError 警告。"""
-    spec_src = (ROOT / "outlook_img_slicer.spec").read_text(encoding="utf-8")
+    spec_src = (DESKTOP_ROOT / "outlook_img_slicer.spec").read_text(encoding="utf-8")
 
     assert "strip=False" in spec_src
     assert "strip=True" not in spec_src
@@ -136,7 +137,7 @@ def test_pyinstaller_spec_disables_strip_on_windows():
 
 def test_build_py_has_print_change_log():
     """R3.1: build.py 必须在 main() 调用 print_change_log()"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     assert "def print_change_log" in build_src, "缺 print_change_log() 函数"
     # 必须从 main() 调用
     assert "print_change_log()" in build_src, "main() 未调用 print_change_log()"
@@ -144,7 +145,7 @@ def test_build_py_has_print_change_log():
 
 def test_build_py_history_file_in_dist():
     """R3.1: 历史记录文件应在 dist/ 下（被 .gitignore 排除）"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     # HISTORY_FILE 路径应在 dist/.build_history.json
     assert "HISTORY_FILE" in build_src
     assert "dist" in build_src
@@ -162,7 +163,7 @@ def test_gitignore_excludes_build_history():
 def test_print_change_log_handles_no_history():
     """R3.1: 首次运行（无历史记录）不应崩"""
     # 验证 print_change_log() 有 try-except 保护
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     m = re.search(
         r'def print_change_log\(.*?\):(.*?)(?=\ndef )',
         build_src,
@@ -178,7 +179,7 @@ def test_print_change_log_handles_no_history():
 
 def test_print_change_log_shows_warn_on_write_fail():
     """R3.1: 写历史记录失败时，应警告而不是静默"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     # 保存历史记录的 try-except 块不应是裸 pass
     m = re.search(
         r'# 保存本次记录(.*?)\n    try:',
@@ -197,7 +198,7 @@ def test_print_change_log_actually_writes_history(tmp_path):
     """R3.1: print_change_log() 实际能写入历史文件并能再次读取"""
     import json
     import sys
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(DESKTOP_ROOT))
     from build import print_change_log, DIST_DIR
     # 用 monkey-patch 重定向 DIST_DIR 到 tmp_path
     import build as build_mod
@@ -225,7 +226,7 @@ def test_print_change_log_actually_writes_history(tmp_path):
 
 def test_get_declared_deps_uses_utf8_encoding():
     """R3.2: _get_declared_deps() 必须用 utf-8 encoding（防 Windows GBK UnicodeDecodeError）"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     # 找 _get_declared_deps 函数体
     m = re.search(
         r'def _get_declared_deps\(.*?\):(.*?)(?=\ndef )',
@@ -244,7 +245,7 @@ def test_get_declared_deps_uses_utf8_encoding():
 
 def test_get_git_sha_uses_utf8_encoding():
     """R3.2: _get_git_sha() 必须用 utf-8 encoding"""
-    build_src = (ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text()
     m = re.search(
         r'def _get_git_sha\(.*?\):(.*?)(?=\ndef )',
         build_src,
@@ -259,7 +260,7 @@ def test_get_git_sha_uses_utf8_encoding():
 def test_get_declared_deps_handles_gbk_invalid_bytes(tmp_path):
     """R3.2 集成测试: requirements.txt 含 GBK 无效字节时不应崩"""
     import sys
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(DESKTOP_ROOT))
     import build as build_mod
     # 造一个含 0xAC 的“中文 + GBK 异常字节”混合文件
     bad_req = tmp_path / "requirements.txt"

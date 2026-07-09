@@ -1,1 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0065fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- 文件夹后背板 -->
+  <path d="M2 7C2 6.45 2.45 6 3 6H9L11 4H15L16.5 6H21C21.55 6 22 6.45 22 7V15C22 15.55 21.55 16 21 16H3C2.45 16 2 15.55 2 15V7Z" fill="#f6c744"/>
+  <!-- 翻盖标签 -->
+  <path d="M9 6L11 4H15L16.5 6H9Z" fill="#e5a800"/>
+  <!-- 前面板（打开状态） -->
+  <path d="M1 10H23L21.5 19H2.5L1 10Z" fill="#f6c744"/>
+  <!-- 前面板底部边线 -->
+  <path d="M2.5 19H21.5" stroke="#e5a800" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

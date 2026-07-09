@@ -48,10 +48,9 @@ def _is_new_outlook_automation_error(exc: Exception) -> bool:
 def copy_cf_html_to_clipboard(raw: bytes) -> None:
     """将 CF_HTML 字节写入系统剪贴板（Windows 专用）。
 
-    Fix 2-B: 补齐 V6 sidecar 缺失的剪贴板写入函数。
-    之前 sidecar_server.py 在 outlook.copyClipboard 分支 `from outlook_sender
-    import copy_cf_html_to_clipboard` 会直接 ImportError（该函数从未定义），
-    导致 V6「复制 HTML」在 Windows 上剪贴板从未被写入（相对 V5 的回归）。
+    这是“复制 HTML 到 Outlook/网页邮箱”的底层能力。Windows 剪贴板需要
+    CF_HTML 专用格式，不能只写普通文本；否则经典 Outlook 粘贴时容易丢样式、
+    错位或只得到纯文本。
 
     `raw` 来自 clipboard_html.build_windows_clipboard_html，格式与
     win32clipboard.CF_HTML 内置常量（值为 "HTML Format"）一致。

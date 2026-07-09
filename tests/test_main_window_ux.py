@@ -19,7 +19,7 @@ def qapp():
 def test_classic_outlook_defaults_are_clear(qapp):
     win = MainWindow()
     try:
-        assert win.edit_width.text() == "650"
+        assert win.edit_width.text() == "960"
         assert win.chk_smart.text() == "避开文字切图（推荐）"
         assert win.btn_send.text() == " 在 Outlook 中创建邮件"
     finally:

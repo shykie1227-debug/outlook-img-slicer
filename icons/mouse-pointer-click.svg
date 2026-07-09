@@ -1,1 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0065fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 9 5 12 1.773-3.594L19.414 12z"/><path d="M16.071 16.071 21 21"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- 鼠标指针箭头 -->
+  <path d="M5 3L5 16L8.5 12.5L13.5 19L15.5 17.5L10.5 11L15 10Z" fill="#8b5cf6"/>
+  <!-- 点击涟漪圆 -->
+  <circle cx="5" cy="3" r="1.5" fill="none" stroke="#8b5cf6" stroke-width="1.5"/>
+</svg>

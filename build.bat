@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 >nul
-title Build - Outlook Image Slicer v6
+title Build - Outlook Image Slicer Stable
 color 0A
 
 echo.
 echo ============================================
-echo   Outlook Image Slicer v6 - Build Tool
+echo   Outlook Image Slicer Stable - Build Tool
 echo ============================================
 echo.
 
@@ -31,6 +31,6 @@ echo ============================================
 echo   BUILD SUCCESS!
 echo ============================================
 echo.
-echo Output: dist\
+echo Output: dist\OutlookImgSlicer-V6.1.1.exe
 echo.
 pause

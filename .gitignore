@@ -21,6 +21,7 @@ venv/
 
 # PyInstaller
 *.spec
+!desktop/outlook_img_slicer.spec
 build/
 sidecar/build/
 sidecar/dist/
