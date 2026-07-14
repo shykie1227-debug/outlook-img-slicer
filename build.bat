@@ -31,6 +31,6 @@ echo ============================================
 echo   BUILD SUCCESS!
 echo ============================================
 echo.
-echo Output: dist\OutlookImgSlicer-V6.1.1.exe
+echo Output path and SHA-256 are listed above.
 echo.
 pause

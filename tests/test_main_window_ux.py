@@ -21,7 +21,7 @@ def test_classic_outlook_defaults_are_clear(qapp):
     try:
         assert win.edit_width.text() == "960"
         assert win.chk_smart.text() == "避开文字切图（推荐）"
-        assert win.btn_send.text() == " 在 Outlook 中创建邮件"
+        assert win.btn_send.text() == "在 Outlook 中创建邮件"
     finally:
         win.close()
 
@@ -50,7 +50,7 @@ def test_feature_guide_and_manual_cut_button_are_discoverable(qapp):
         assert "1  放入文件" in win.guide_label.text()
         assert "2  调整切线 / 添加链接" in win.guide_label.text()
         assert "3  创建邮件" in win.guide_label.text()
-        assert win.btn_adjust_cuts.text() == " 调整切图位置"
+        assert win.btn_adjust_cuts.text() == "调整切图位置"
         assert not win.btn_adjust_cuts.isEnabled()
     finally:
         win.close()
@@ -68,6 +68,8 @@ def test_processed_view_compacts_drop_zone_and_keeps_preview_labels_visible(qapp
         win._on_processed(paths)
         assert win.drop_zone.maximumHeight() <= 80
         assert win.drop_zone.icon_label.isHidden()
+        assert win.drop_zone.tip_label.isHidden()
+        assert win.drop_zone.title_label.text() == "处理完成；可重新拖入文件替换"
         assert win.preview_area.height() >= 155
     finally:
         win.close()

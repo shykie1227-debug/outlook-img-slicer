@@ -1,119 +1,77 @@
-# 测试计划 - Outlook 长图无损插入工具
+# 测试计划 - Outlook 长图助手 V6.2.2
 
-## 1. 测试范围与目标
+## 1. 目标与底线
 
-### 1.1 测试范围
-- `image_slicer.py` - 图像切片模块
-- `html_assembler.py` - HTML 组装模块
-- `clipboard_html.py` - Windows CF_HTML 字节偏移
-- `cut_editor.py` - 手动切线与防呆
-- `hotspot_slicer.py` - 可点击按钮最小物理切片
-- `pdf_slicer.py` - PDF 解析模块
-- `outlook_sender.py` - Outlook 发送模块
+本计划验证从导入、切片、热区编辑到 Outlook 草稿和 Windows EXE 的完整链路。
+发布底线如下：
 
-### 1.2 测试目标
-- 核心模块覆盖率 ≥ 80%
-- 边界条件全覆盖
-- 错误路径全覆盖
+- 普通长图与热区长图必须保持顺序、居中和像素连续，不得出现可见缝隙。
+- 单切片可添加多个互不重叠的有效链接，保存后可编辑和删除。
+- Outlook 路径只创建并显示草稿；运行时代码不得包含 `mail.Send()`、联网、上传、遥测或自动更新。
+- 构建清单、文件名、窗口版本和 Windows 文件属性必须一致为 V6.2.2。
 
----
+## 2. 自动化范围
 
-## 2. 测试策略
+| 范围 | 重点 |
+|------|------|
+| 图片与文档输入 | JPG/PNG/BMP/WebP/GIF、PDF、PPT/PPTX、PSD/PSB 的解析与错误提示 |
+| 切片 | 智能切线、手工切线、边缘像素连续、每片 80–1200px、临时目录隔离 |
+| 热区 | 单/多链接、贴边、奇偶像素、越界、重叠、空链接、协议校验、再次编辑 |
+| 邮件渲染 | 普通直接 `<img>` 路径、热区物理切片、CID 数量、链接映射、零间距表格 |
+| Outlook 与剪贴板 | 草稿 `Display(False)`、CF_HTML 字节偏移、异常恢复、禁止自动发送 |
+| 主界面 | 三步流程、按钮状态、620px 窄窗口、响应式重排、压缩/品质、错误恢复 |
+| 发布 | 版本同步、构建清单、SHA-256、ASCII 文件名、运行时本地安全契约 |
 
-### 2.1 黑盒测试
-| 模块 | 测试重点 |
-|------|----------|
-| `image_slicer` | JPG/PNG/BMP/WebP/GIF 格式支持、切片数量计算、边界尺寸处理 |
-| `html_assembler` | HTML 结构生成、CSS 内联样式、表格无缝拼接 |
-| `pdf_slicer` | 多页 PDF 转换、图像质量、DPI 设置 |
-| `outlook_sender` | 邮件创建参数、HTML 格式、附件处理 |
+测试数据由 pytest fixture 或临时目录动态生成，不依赖用户文件，不保留隐私数据。
 
-### 2.2 白盒测试
-| 模块 | 测试重点 |
-|------|----------|
-| `image_slicer` | `detect_and_slice` 逻辑分支、`get_image_info` 返回值 |
-| `html_assembler` | CSS 双花括号转义、表格行生成 |
-| `pdf_slicer` | PyMuPDF 异常处理、io.BytesIO 流处理 |
-| `outlook_sender` | pywin32 ImportError 处理、COM 调用异常 |
-
----
-
-## 3. 测试环境要求
-
-### 3.1 依赖环境
-```
-pytest>=7.0.0
-Pillow>=10.0.0
-pytest-cov>=4.0.0
-PyMuPDF>=1.23.0
-```
-
-### 3.2 测试数据
-- 测试图片：通过 `conftest.py` 中的 fixtures 动态生成
-- 临时文件：使用 `tempfile` 模块，测试后自动清理
-
----
-
-## 4. 测试用例清单
-
-### 4.1 `test_image_slicer.py`
-| 用例ID | 描述 | 预期结果 |
-|--------|------|----------|
-| `test_jpg_slice` | JPG 图片高度 > 1500px | 正确切片，生成 2 片 |
-| `test_png_transparency` | PNG 带透明通道 | 保留 RGBA 模式和透明背景 |
-| `test_small_image_no_slice` | 图片高度 ≤ 1500px | 返回原路径，不切片 |
-| `test_invalid_file` | 传入无效文件 | 抛出异常 |
-| `test_exact_boundary_no_slice` | 图片高度恰好 1500px | 不切片，直接返回 |
-| `test_multi_slice_count` | 高度 4000px 图片 | 切成 3 片 (1500+1500+1000) |
-| `test_different_formats` | 测试 BMP/WebP/GIF | 各格式均能正确切片 |
-| `test_get_info_jpg` | 获取 JPG 元信息 | 返回 width/height/format |
-| `test_get_info_png` | 获取 PNG 元信息 | 返回 RGBA 模式信息 |
-| `test_get_info_invalid` | 无效文件信息获取 | 抛出异常 |
-
-### 4.2 `test_html_assembler.py`
-| 用例ID | 描述 | 预期结果 |
-|--------|------|----------|
-| `test_gapless_table_generation` | 表格行无缝拼接 | 每行一个 `<td><img>` |
-| `test_css_inline_styles` | CSS 内联到 HTML | `<style>` 标签存在且正确 |
-| `test_empty_image_list` | 空图片列表 | 生成空表格 |
-| `test_single_image` | 单张图片 | 表格仅一行 |
-| `test_cid_replacement` | CID 方式图片引用 | `src="cid:image_N"` 格式 |
-| `test_multiple_images` | 多张图片 CID | 正确生成多个 CID 引用 |
-
-### 4.3 `test_pdf_slicer.py`
-| 用例ID | 描述 | 预期结果 |
-|--------|------|----------|
-| `test_import_module` | 模块可导入 | PyMuPDF 可用 |
-| `test_pdf_page_count_missing_file` | 不存在的 PDF | 抛出异常 |
-| `test_pdf_to_images_missing_file` | 转换不存在的 PDF | 抛出异常 |
-| `test_pdf_dpi_parameter` | DPI 参数存在 | 函数签名包含 dpi |
-| `test_module_structure` | 模块结构完整 | 函数可调用 |
-
----
-
-## 5. 执行计划
+## 3. 本机回归门槛
 
 ```bash
-# 安装依赖
-pip install pytest pytest-cov Pillow PyMuPDF
-
-# 运行所有测试
-pytest tests/ -v --cov=. --cov-report=term-missing
-
-# 生成覆盖率报告
-pytest tests/ --cov=. --cov-report=html
+QT_QPA_PLATFORM=offscreen python3 -m pytest tests/ -q
+python3 -m py_compile *.py desktop/*.py tests/*.py
+git diff --check
 ```
 
----
+重点回归文件包括：
 
-## 6. 验收标准
+- `tests/test_outlook_hotspot_layout.py`
+- `tests/test_v486_no_gap_regression.py`
+- `tests/test_v620_hotspot_preflight.py`
+- `tests/test_v622_reliability_refactor.py`
+- `tests/test_main_window_ux.py`
+- `tests/test_runtime_safety_contract.py`
+- `tests/test_release_consistency.py`
+- `tests/test_documentation_release_contract.py`
 
-- [x] 自动化回归测试通过（V5.0 当前 93 项）
-- [x] 中文 CF_HTML 片段起止字节准确
-- [x] 两个上下错开的按钮由 25 个片段降为 9 个
-- [x] 手动切线保持像素完整，并限制每片 80–1200px
-- [x] 同名文件、多实例临时工作区互相隔离
-- [x] HTML 浏览器检查：9 张图片、2 个链接、5 个视觉行、1 个外层表格、0 张破图
-- [x] 错误路径测试覆盖 ImportError、IOError、ValueError
-- [x] Linux/macOS 环境可完整运行测试（跳过 Windows 特定部分）
-- [ ] Windows 经典 Outlook 实机发送与 EXE 构建由用户本地完成
+当前发布不把覆盖率百分比作为阻断门槛；若生成覆盖率报告，结果仅用于发现缺口，
+不能代替行为回归、Windows 启动或经典 Outlook 验收。
+
+## 4. Windows VM 自动验收
+
+1. 从共享目录复制源码到 Windows 本地目录，避免共享文件锁导致清理失败。
+2. 运行全量 pytest，再执行 PyInstaller onefile 构建。
+3. 校验 `build-manifest.json` 中的版本、产物类型、大小和 SHA-256。
+4. 复制为 `dist/OutlookImgSlicer-V6.2.2.exe`。
+5. 读取 PE `FileVersion` / `ProductVersion`，启动 EXE，等待主窗口进程稳定后关闭。
+6. 检查运行期无网络请求，且 Outlook 自动化路径不存在 `mail.Send()`。
+
+自动化通过只证明 EXE 可构建、版本正确且可启动，不等同于 Outlook Word 渲染验收。
+
+## 5. 经典 Outlook 人工矩阵
+
+| 场景 | 验收内容 |
+|------|----------|
+| 普通长图 | 草稿完整、居中、上下无缝、保存并重开后顺序不变 |
+| 单热区 | 链接区域位置正确、可点击、目标 URL 正确 |
+| 多热区 | 同片多个按钮均可点击，左右和上下错位场景不产生横纵缝隙 |
+| 超长图/多源切片 | 邮件中连续拼接，无缺片、重复片或宽度漂移 |
+| 显示缩放 | Windows 100%、125%、150%、175%、200% 下控件无截断、重叠或失效 |
+| 实际发送 | 收件端重新打开后图片仍完整、链接仍可点击；发送动作始终由用户手动完成 |
+
+任一 Outlook 无缝或链接用例失败时，不发布该版本。
+
+## 6. 完成证据
+
+发布记录必须包含：pytest 实际通过数、编译与差异检查结果、Windows 构建日志、
+EXE 绝对路径、文件大小、SHA-256、PE 版本和启动冒烟结果。未执行的经典 Outlook
+实际发送测试必须明确标记为“未验证”，不能用自动化结果替代。

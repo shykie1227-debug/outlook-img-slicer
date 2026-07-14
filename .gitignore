@@ -70,6 +70,10 @@ release-artifacts/electron/
 .cursor/
 .copilot/
 .aider*
+.workbuddy/
+
+# Local build evidence (release EXE is uploaded as a GitHub Release asset)
+build-manifest.json
 
 # Local scratch
 *.local.md

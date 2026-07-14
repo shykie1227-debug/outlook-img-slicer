@@ -15,6 +15,9 @@ import shutil
 import json
 import stat
 import time
+import hashlib
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
@@ -28,6 +31,43 @@ DIST_DIR = APP_DIR / "dist"
 # 实现：在 DIST_DIR/.build_history.json 记录每次运行的依赖列表 + git SHA
 # ═════════════════════════════════════════════
 HISTORY_FILE = DIST_DIR / ".build_history.json"
+MANIFEST_FILE = PROJECT_ROOT / "build-manifest.json"
+
+
+def _read_app_version() -> str:
+    source = (APP_DIR / "main.py").read_text(encoding="utf-8")
+    match = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', source, re.MULTILINE)
+    if not match:
+        raise RuntimeError("无法从 desktop/main.py 读取 VERSION")
+    return match.group(1)
+
+
+def write_build_manifest(artifact: Path, artifact_kind: str) -> Path:
+    """Publish the exact artifact produced by this build for wrapper scripts."""
+    if not artifact.is_file() or artifact.stat().st_size <= 0:
+        raise RuntimeError(f"构建产物不存在或为空: {artifact}")
+    digest = hashlib.sha256()
+    with artifact.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    version = _read_app_version()
+    manifest = {
+        "schema_version": 1,
+        "app_version": version,
+        "release_filename": f"OutlookImgSlicer-V{version}.exe",
+        "artifact_kind": artifact_kind,
+        "artifact_path": str(artifact.resolve()),
+        "size_bytes": artifact.stat().st_size,
+        "sha256": digest.hexdigest(),
+        "git_sha": _get_git_sha(),
+        "built_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    MANIFEST_FILE.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"构建清单: {MANIFEST_FILE}")
+    print(f"SHA-256: {manifest['sha256']}")
+    return MANIFEST_FILE
 
 
 def _get_git_sha() -> str:
@@ -321,20 +361,31 @@ def main():
     exe_path = dist_dir / "OutlookImgSlicer.exe"
     onedir_exe = dist_dir / "OutlookImgSlicer" / "OutlookImgSlicer.exe"
 
+    artifact = None
+    artifact_kind = None
     if exe_path.exists():
         size_mb = exe_path.stat().st_size / (1024 * 1024)
         print(f"\n✅ 单文件 EXE 生成成功: {exe_path}")
         print(f"   文件大小: {size_mb:.1f} MB")
+        artifact, artifact_kind = exe_path, "onefile"
     elif exe_candidates := sorted(dist_dir.glob("*.exe"), key=lambda p: p.stat().st_size, reverse=True):
         exe_candidates[0].replace(exe_path)
         size_mb = exe_path.stat().st_size / (1024 * 1024)
         print(f"\n✅ 单文件 EXE 生成成功: {exe_path}")
         print(f"   文件大小: {size_mb:.1f} MB")
+        artifact, artifact_kind = exe_path, "onefile"
     elif onedir_exe.exists():
         print(f"\n✅ ONEDIR EXE 生成成功: {onedir_exe.parent}")
+        artifact, artifact_kind = onedir_exe, "onedir"
     else:
         print("\n⚠️ 未找到 EXE，尝试 --onedir 模式...")
         create_onedir_fallback(dist_dir=dist_dir, build_dir=build_dir)
+        if onedir_exe.exists():
+            artifact, artifact_kind = onedir_exe, "onedir"
+
+    if artifact is None:
+        raise RuntimeError(f"构建结束但未找到本次产物: {dist_dir}")
+    write_build_manifest(artifact, artifact_kind)
 
     print("\n打包完成！")
     print(f"产物目录: {dist_dir}")

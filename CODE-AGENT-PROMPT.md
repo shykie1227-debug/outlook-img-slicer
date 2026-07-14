@@ -29,7 +29,7 @@
 **代码规范：**
 - 所有色值走 `Theme.XXX` 常量，禁止硬编码
 - 新增色值/字号/圆角必须先更新 `Theme` 类 + `DESIGN.md`
-- QSS 对象名使用 `doubao-` 前缀
+- Qt/UIA 对象名使用稳定英文语义名（如 `resetButton`、`mailWidthInput`）
 - 构建产物使用英文 ASCII 文件名
 
 **图标规范（彩色填充风格）：**
@@ -43,7 +43,10 @@
 - Primary 按钮必须使用白色图标变体（`-white.svg`）
 - 不要添加未在代码中引用的 SVG 文件
 
-**按钮规范：**
+**按钮规范（全部 999px 胶丸形）：**
+- Primary：42px 高，13px/700 字号，18px 白色图标，`_btn_primary()`
+- Secondary：42px 高，12px/500 字号，16px 深色图标，`_btn_secondary()`
+- Ghost：32px 高，11px/400 字号，16px 深色图标，`_btn_ghost()`
 - Ghost disabled 态只用 `opacity: 0.5`，不改文字颜色
 - Toggle 按钮（切图/热区）默认 Ghost → 激活 Primary
 
@@ -78,7 +81,8 @@ Outlook 通信：outlook_sender.py
 - [ ] SVG 无 `currentColor`、无渐变、无滤镜
 - [ ] Ghost disabled 只用 opacity 0.5
 - [ ] `icons/` 无未引用文件
-- [ ] 版本号同步：`main.py` VERSION + `version_info.txt`
+- [ ] 版本源同步：`main.py` VERSION + `version_info.txt` + `ui-preview.html`
+- [ ] 发布一致性测试已核对文档、manifest 和最终发布文件名
 - [ ] Outlook 草稿只调用 `mail.Display(False)`
 - [ ] 构建产物英文 ASCII 文件名
 - [ ] `python3 -m pytest tests/ -q` 通过

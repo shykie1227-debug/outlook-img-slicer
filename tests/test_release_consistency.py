@@ -8,10 +8,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DESKTOP_ROOT = ROOT / "desktop"
 
 
-def test_release_version_is_synchronized_for_v6_1_1():
+def test_release_version_is_synchronized_for_v6_2_2():
     version_info = (DESKTOP_ROOT / "version_info.txt").read_text(encoding="utf-8")
 
-    assert main.VERSION == "6.1.1"
-    assert "6.1.1.20260709" in version_info
+    assert main.VERSION == "6.2.2"
+    assert "6.2.2.20260713" in version_info
     assert "OutlookImgSlicer.exe" in version_info
-    assert re.search(r"filevers=\(6,\s*1,\s*1,\s*20260709\)", version_info)
+    assert re.search(r"filevers=\(6,\s*2,\s*2,\s*2026\)", version_info)

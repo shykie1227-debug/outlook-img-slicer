@@ -2,7 +2,9 @@ name: Build & Release
 
 on:
   push:
-    branches: [v3-2026-05-09]
+    branches: [main]
+  pull_request:
+    branches: [main]
   release:
     types: [created]
 
@@ -29,10 +31,32 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Run tests and runtime safety audit
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest tests/ -q
+          python -m py_compile build.py desktop/*.py image_slicer.py html_assembler.py outlook_sender.py clipboard_html.py clickable_map.py hotspot_slicer.py image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py
+
       - name: Build EXE
         env:
           PYTHONIOENCODING: utf-8
         run: python build.py
+
+      - name: Verify build manifest
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -Raw -Encoding UTF8 build-manifest.json | ConvertFrom-Json
+          if ($manifest.artifact_kind -ne "onefile") { throw "Release requires onefile artifact" }
+          if (-not (Test-Path $manifest.artifact_path)) { throw "Manifest artifact missing" }
+          $hash = (Get-FileHash -Algorithm SHA256 $manifest.artifact_path).Hash.ToLowerInvariant()
+          if ($hash -ne $manifest.sha256) { throw "Manifest SHA-256 mismatch" }
+          if ("${{ github.event_name }}" -eq "release") {
+            $tagVersion = "${{ github.event.release.tag_name }}" -replace '^v', ''
+            if ($tagVersion -ne $manifest.app_version) { throw "Release tag does not match app version" }
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $manifest.artifact_path (Join-Path dist $manifest.release_filename) -Force
 
       - name: Compute release asset names
         id: asset_names
@@ -51,9 +75,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "dist" | Out-Null
-          Compress-Archive -Path "desktop/dist/OutlookImgSlicer.exe" -DestinationPath "dist/${{ steps.asset_names.outputs.zip_name }}" -Force
+          $exe = Get-ChildItem "dist/OutlookImgSlicer-V*.exe" | Select-Object -First 1
+          Compress-Archive -Path $exe.FullName -DestinationPath "dist/${{ steps.asset_names.outputs.zip_name }}" -Force
           Write-Host "EXE size MB:"
-          (Get-Item "desktop/dist/OutlookImgSlicer.exe").Length / 1MB
+          $exe.Length / 1MB
           Write-Host "ZIP size MB:"
           (Get-Item "dist/${{ steps.asset_names.outputs.zip_name }}").Length / 1MB
 
@@ -62,7 +87,8 @@ jobs:
         with:
           name: OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}
           path: |
-            desktop/dist/OutlookImgSlicer.exe
+            dist/OutlookImgSlicer-V*.exe
+            build-manifest.json
             dist/${{ steps.asset_names.outputs.zip_name }}
           retention-days: 5
 
@@ -93,7 +119,7 @@ jobs:
       - name: Upload Release assets
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            "desktop/dist/OutlookImgSlicer.exe#OutlookImgSlicer.exe" \
+            "dist/OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}.exe#OutlookImgSlicer.exe" \
             "${{ steps.asset_names.outputs.zip_name }}" \
             --repo "${{ github.repository }}" \
             --clobber

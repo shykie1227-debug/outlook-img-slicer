@@ -14,7 +14,7 @@ $SharedRoot = "\\Mac\Home\outlook-img-slicer"
 $LocalRoot = "C:\build\outlook-img-slicer"
 $LogFile = Join-Path $SharedRoot "vm_build.log"
 $StatusFile = Join-Path $SharedRoot "vm_build_status.txt"
-$FinalExeName = "OutlookImgSlicer-V6.1.1.exe"
+$buildStartedAt = [DateTime]::UtcNow
 
 Start-Transcript -Path $LogFile -Force | Out-Null
 
@@ -51,9 +51,20 @@ Write-Host "============================================" -ForegroundColor Magen
 
 Write-Step "Step 0/5: Copy project to local directory"
 
+# A previous onefile smoke test can leave its extracted child process alive and
+# lock C:\build. Never allow that lock to turn a stale EXE into a false success.
+Get-Process -Name "OutlookImgSlicer" -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Info "Stopping previous OutlookImgSlicer test process (PID $($_.Id))..."
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Milliseconds 500
+
 if (Test-Path $LocalRoot) {
     Write-Info "Cleaning old local build directory..."
     Remove-Item -Recurse -Force $LocalRoot -ErrorAction SilentlyContinue
+    if (Test-Path $LocalRoot) {
+        Fail "Unable to clean local build directory: $LocalRoot"
+    }
 }
 
 Write-Info "Copying source from shared folder..."
@@ -163,17 +174,22 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-$desktopDist = Join-Path $LocalRoot "desktop\dist"
-$resultExe = Join-Path $desktopDist "OutlookImgSlicer.exe"
-if (-not (Test-Path $resultExe)) {
-    $exeFiles = Get-ChildItem -Path $desktopDist -Filter "*.exe" -ErrorAction SilentlyContinue | Sort-Object Length -Descending
-    if (-not $exeFiles -or $exeFiles.Count -eq 0) {
-        Fail "Desktop EXE not found in $desktopDist"
-    }
-    $resultExe = $exeFiles[0].FullName
+$manifestPath = Join-Path $LocalRoot "build-manifest.json"
+if (-not (Test-Path $manifestPath)) { Fail "Build manifest not found: $manifestPath" }
+$manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
+if ($manifest.artifact_kind -ne "onefile") { Fail "Release requires a onefile EXE." }
+$resultExe = $manifest.artifact_path
+if (-not (Test-Path $resultExe)) { Fail "Manifest artifact not found: $resultExe" }
+$FinalExeName = $manifest.release_filename
+$actualHash = (Get-FileHash -Algorithm SHA256 $resultExe).Hash.ToLowerInvariant()
+if ($actualHash -ne $manifest.sha256) { Fail "Artifact hash does not match build manifest." }
+
+$resultInfo = Get-Item $resultExe
+if ($resultInfo.LastWriteTimeUtc -lt $buildStartedAt) {
+    Fail "Build output is stale: $resultExe"
 }
 
-$sizeMB = [math]::Round((Get-Item $resultExe).Length / 1MB, 1)
+$sizeMB = [math]::Round($resultInfo.Length / 1MB, 1)
 Write-Ok "Desktop EXE built ($sizeMB MB)"
 
 Write-Step "Step 4/5: Copy EXE to shared dist"
@@ -188,7 +204,9 @@ Get-ChildItem -Path $sharedDist -ErrorAction SilentlyContinue | ForEach-Object {
 }
 
 Copy-Item -Path $resultExe -Destination (Join-Path $sharedDist $FinalExeName) -Force
+Copy-Item -Path $manifestPath -Destination (Join-Path $SharedRoot "build-manifest.json") -Force
 Write-Ok "EXE copied to $sharedDist"
+Write-Ok "Build manifest copied to $SharedRoot"
 
 Write-Step "Step 5/5: Done"
 
@@ -200,6 +218,7 @@ Write-Host ""
 Write-Host "  File: $FinalExeName" -ForegroundColor Green
 Write-Host "  Size: $sizeMB MB" -ForegroundColor Green
 Write-Host "  Shared: $sharedDist\$FinalExeName" -ForegroundColor Green
+Write-Host "  SHA-256: $actualHash" -ForegroundColor Green
 Write-Host ""
 
 "SUCCESS: $FinalExeName ($sizeMB MB)" | Out-File -FilePath $StatusFile -Force -Encoding ascii

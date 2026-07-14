@@ -75,32 +75,34 @@ if ($LASTEXITCODE -ne 0) {
     Fail "Build failed. See the log above."
 }
 
-$exePath = Join-Path $projectRoot "desktop\dist\OutlookImgSlicer.exe"
-if (-not (Test-Path $exePath)) {
-    $desktopDist = Join-Path $projectRoot "desktop\dist"
-    $exeFiles = Get-ChildItem -Path $desktopDist -Filter "*.exe" -ErrorAction SilentlyContinue | Sort-Object Length -Descending
-    if (-not $exeFiles -or $exeFiles.Count -eq 0) {
-        Fail "EXE not found in $desktopDist"
-    }
-    $exePath = $exeFiles[0].FullName
-}
+$manifestPath = Join-Path $projectRoot "build-manifest.json"
+if (-not (Test-Path $manifestPath)) { Fail "Build manifest not found: $manifestPath" }
+$manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
+$exePath = $manifest.artifact_path
+if ($manifest.artifact_kind -ne "onefile") { Fail "Release requires a onefile EXE." }
+if (-not (Test-Path $exePath)) { Fail "Manifest artifact not found: $exePath" }
+$actualHash = (Get-FileHash -Algorithm SHA256 $exePath).Hash.ToLowerInvariant()
+if ($actualHash -ne $manifest.sha256) { Fail "Artifact hash does not match build manifest." }
 
 $distDir = Join-Path $projectRoot "dist"
 if (-not (Test-Path $distDir)) {
     New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 }
-Copy-Item -Path $exePath -Destination (Join-Path $distDir "OutlookImgSlicer-V6.1.1.exe") -Force
+$releaseName = $manifest.release_filename
+$releasePath = Join-Path $distDir $releaseName
+Copy-Item -Path $exePath -Destination $releasePath -Force
 
-$sizeMB = [math]::Round((Get-Item (Join-Path $distDir "OutlookImgSlicer-V6.1.1.exe")).Length / 1MB, 1)
+$sizeMB = [math]::Round((Get-Item $releasePath).Length / 1MB, 1)
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  BUILD SUCCESS!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  File: OutlookImgSlicer-V6.1.1.exe" -ForegroundColor Green
+Write-Host "  File: $releaseName" -ForegroundColor Green
 Write-Host "  Size: $sizeMB MB" -ForegroundColor Green
-Write-Host "  Path: $distDir\OutlookImgSlicer-V6.1.1.exe" -ForegroundColor Green
+Write-Host "  Path: $releasePath" -ForegroundColor Green
+Write-Host "  SHA-256: $actualHash" -ForegroundColor Green
 Write-Host ""
 Write-Host "Press any key to exit..." -ForegroundColor Cyan
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

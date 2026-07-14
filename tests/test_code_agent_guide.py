@@ -47,7 +47,7 @@ def test_spec_matches_current_desktop_architecture():
     """SPEC 应作为当前产品规格，不应保留已废弃的目录结构。"""
     spec = (ROOT / "SPEC.md").read_text(encoding="utf-8")
 
-    assert "V6.1.1" in spec
+    assert "V6.2.2" in spec
     assert "稳定 V6/PySide" in spec
     assert "desktop/main.py" in spec
     assert "icon.ico" in spec

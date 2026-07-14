@@ -80,9 +80,23 @@ def copy_cf_html_to_clipboard(raw: bytes) -> None:
         win32clipboard.CloseClipboard()
 
 
+def resolve_attachment_manifest(render_plan=None, slices=None, image_paths=None):
+    """Return the exact ordered (path, CID) pairs used by Outlook attachments."""
+    if render_plan is not None:
+        return [(item.path, item.cid) for item in render_plan.items]
+    if slices is not None:
+        try:
+            paths = [item.path for item in sorted(slices, key=lambda item: item.sort_key)]
+        except AttributeError:
+            paths = list(slices)
+    else:
+        paths = list(image_paths or [])
+    return [(path, f"slice_{index:03d}") for index, path in enumerate(paths, start=1)]
+
+
 def create_email_with_images(html_content: str, subject: str = "", to: str = "",
                             image_paths=None, save_dir: str = "",
-                            slices=None):
+                            slices=None, render_plan=None):
     """
     创建 Outlook 邮件窗口并填充 HTML 内容（V3 CID 版）
 
@@ -102,18 +116,10 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
 
     # V4.6.7：从 slices 取按 sort_key 排序的 path 列表
     # image_paths 作为向后兼容，但 slices 优先
-    if slices is not None:
-        from html_assembler import SliceItem
-        try:
-            sorted_slices = sorted(slices, key=lambda s: s.sort_key)
-            sorted_paths = [s.path for s in sorted_slices]
-        except AttributeError:
-            # 兼容 image_paths 传 str 列表
-            sorted_paths = list(slices)
-    elif image_paths is not None:
-        sorted_paths = list(image_paths)
-    else:
-        sorted_paths = []
+    attachment_manifest = resolve_attachment_manifest(
+        render_plan=render_plan, slices=slices, image_paths=image_paths
+    )
+    sorted_paths = [path for path, _ in attachment_manifest]
 
     # 保存切图功能
     if save_dir and sorted_paths:
@@ -146,8 +152,7 @@ def create_email_with_images(html_content: str, subject: str = "", to: str = "",
 
         # V4.6.7：按 sort_key 排序后的路径与 html 里的 cid 一一对应
         # 不再调 get_cid_map，直接 enumerate 生成 cid
-        for i, path in enumerate(sorted_paths):
-            cid = f"slice_{i + 1:03d}"
+        for path, cid in attachment_manifest:
             try:
                 att = mail.Attachments.Add(path)
             except Exception as e:

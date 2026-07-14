@@ -49,6 +49,8 @@ from PySide6.QtGui import QFont, QIcon
 
 import os
 
+from theme import Theme, fit_window_to_screen
+
 def _resource_dir(name: str) -> str:
     bases = [
         getattr(__import__("sys"), "_MEIPASS", None),
@@ -93,10 +95,10 @@ class ExportFormatDialog(QDialog):
         self.jpg_quality: int = DEFAULT_JPG_QUALITY
         self.save_dir: Optional[str] = initial_save_dir if initial_save_dir else None
         self._build_ui()
+        fit_window_to_screen(self, (580, 620), (480, 340))
 
     def _build_ui(self):
         self.setWindowTitle("图片导出 - 选择格式")
-        self.setMinimumSize(540, 460)
         self.setModal(True)
 
         root = QVBoxLayout(self)
@@ -105,11 +107,11 @@ class ExportFormatDialog(QDialog):
 
         # ── 全局 QGroupBox 样式 ──
         self.setStyleSheet(
-            "QGroupBox { border: 1px solid #e7eaef; border-radius: 8px; "
+            f"QGroupBox {{ border: 1px solid {Theme.BORDER}; border-radius: 8px; "
             "margin-top: 14px; padding: 16px 14px 14px 14px; "
             "font-family: Microsoft YaHei, sans-serif; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 14px; "
-            "padding: 0 8px; color: #0e1115; font-size: 12px; font-weight: bold; }"
+            f"QGroupBox::title {{ subcontrol-origin: margin; left: 14px; "
+            f"padding: 0 8px; color: {Theme.TEXT_PRIMARY}; font-size: 12px; font-weight: bold; }}"
         )
 
         # ── 1. 文件信息（药丸标签） ──
@@ -118,8 +120,8 @@ class ExportFormatDialog(QDialog):
         info_lbl.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
         info_lbl.setAlignment(Qt.AlignCenter)
         info_lbl.setStyleSheet(
-            "color: #0e1115; background: #eff1f4; padding: 10px 16px; "
-            "border-radius: 999px; border: 1px solid #e7eaef; font-family: Microsoft YaHei, sans-serif;"
+            f"color: {Theme.TEXT_PRIMARY}; background: {Theme.GHOST_BG}; padding: 10px 16px; "
+            f"border-radius: 999px; border: 1px solid {Theme.BORDER}; font-family: Microsoft YaHei, sans-serif;"
         )
         info_lbl.setWordWrap(True)
         root.addWidget(info_lbl)
@@ -163,7 +165,7 @@ class ExportFormatDialog(QDialog):
 
         self.alpha_hint = QLabel("当前 PNG 格式，可选透明底")
         self.alpha_hint.setFont(QFont("Microsoft YaHei", 9))
-        self.alpha_hint.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif; padding-left: 26px;")
+        self.alpha_hint.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; font-family: Microsoft YaHei, sans-serif; padding-left: 26px;")
 
         alpha_layout.addWidget(self.chk_alpha)
         alpha_layout.addWidget(self.alpha_hint)
@@ -180,14 +182,14 @@ class ExportFormatDialog(QDialog):
 
         self.quality_label = QLabel("品质：")
         self.quality_label.setFont(QFont("Microsoft YaHei", 11))
-        self.quality_label.setStyleSheet("color: #333942;")
+        self.quality_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
 
         self.quality_value = QLabel(f"{self.jpg_quality}%")
         self.quality_value.setFont(QFont("Microsoft YaHei", 13, QFont.Bold))
         self.quality_value.setFixedWidth(44)
         self.quality_value.setAlignment(Qt.AlignCenter)
         self.quality_value.setStyleSheet(
-            "color: #0065fd; background: #eff1f4; border-radius: 6px; "
+            f"color: {Theme.PRIMARY}; background: {Theme.GHOST_BG}; border-radius: 6px; "
             "padding: 2px 0; font-family: Microsoft YaHei, sans-serif;"
         )
 
@@ -198,12 +200,12 @@ class ExportFormatDialog(QDialog):
         self.quality_slider.setTickInterval(10)
         self.quality_slider.setFixedHeight(28)
         self.quality_slider.setStyleSheet(
-            "QSlider::groove:horizontal { background: #e7eaef; height: 6px; border-radius: 3px; }"
-            "QSlider::sub-page:horizontal { background: #0065fd; border-radius: 3px; }"
-            "QSlider::handle:horizontal { background: #0065fd; width: 18px; height: 18px; "
+            f"QSlider::groove:horizontal {{ background: {Theme.BORDER}; height: 6px; border-radius: 3px; }}"
+            f"QSlider::sub-page:horizontal {{ background: {Theme.PRIMARY}; border-radius: 3px; }}"
+            f"QSlider::handle:horizontal {{ background: {Theme.PRIMARY}; width: 18px; height: 18px; "
             "margin: -6px 0; border-radius: 9px; }"
-            "QSlider::handle:horizontal:hover { background: #0057da; }"
-            "QSlider::tick-mark { width: 1px; height: 6px; background: #d0d5dd; }"
+            f"QSlider::handle:horizontal:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
+            f"QSlider::tick-mark {{ width: 1px; height: 6px; background: {Theme.BORDER_HOVER}; }}"
         )
         self.quality_slider.valueChanged.connect(self._on_quality_changed)
 
@@ -215,7 +217,7 @@ class ExportFormatDialog(QDialog):
         # 品质说明
         self.quality_hint = QLabel("品质越高文件越大，推荐 75-85%")
         self.quality_hint.setFont(QFont("Microsoft YaHei", 9))
-        self.quality_hint.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+        self.quality_hint.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
 
         quality_layout.addWidget(self.quality_hint)
         root.addWidget(quality_group)
@@ -233,9 +235,9 @@ class ExportFormatDialog(QDialog):
         self.input_save.setFont(QFont("Microsoft YaHei", 10))
         self.input_save.setMinimumHeight(34)
         self.input_save.setStyleSheet(
-            "QLineEdit { background: #f9f9fa; color: #0e1115; border: 1px solid #e7eaef; "
+            f"QLineEdit {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; border: 1px solid {Theme.BORDER}; "
             "border-radius: 8px; padding: 0 10px; font-family: Microsoft YaHei, sans-serif; }"
-            "QLineEdit:focus { border-color: #557fff; }"
+            f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         )
         if self.save_dir:
             self.input_save.setText(self.save_dir)
@@ -248,9 +250,9 @@ class ExportFormatDialog(QDialog):
         btn_browse.setIconSize(QSize(16, 16))
         btn_browse.setFixedHeight(34)
         btn_browse.setStyleSheet(
-            "QPushButton { background: #eff1f4; color: #0e1115; border: none; border-radius: 999px; "
+            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: none; border-radius: 999px; "
             "padding: 0 14px; font-family: Microsoft YaHei, sans-serif; }"
-            "QPushButton:hover { background: #dde1e8; }"
+            f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
         )
         btn_browse.clicked.connect(self._browse_save_dir)
         save_layout.addWidget(btn_browse)
@@ -266,9 +268,9 @@ class ExportFormatDialog(QDialog):
         btn_cancel.setFixedSize(90, 36)
         btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.setStyleSheet(
-            "QPushButton { background: #eff1f4; color: #0e1115; border: none; border-radius: 999px; "
+            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: none; border-radius: 999px; "
             "font-family: Microsoft YaHei, sans-serif; }"
-            "QPushButton:hover { background: #dde1e8; }"
+            f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
         )
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
@@ -280,9 +282,9 @@ class ExportFormatDialog(QDialog):
         btn_ok.setIcon(_icon("arrow-down-to-line-white", 18))
         btn_ok.setIconSize(QSize(18, 18))
         btn_ok.setStyleSheet(
-            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; "
+            f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; border: none; border-radius: 999px; "
             "font-family: Microsoft YaHei, sans-serif; }"
-            "QPushButton:hover { background: #0057da; }"
+            f"QPushButton:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
         )
         btn_ok.setDefault(True)
         btn_ok.clicked.connect(self._on_accept)
@@ -309,13 +311,13 @@ class ExportFormatDialog(QDialog):
             self.chk_alpha.setEnabled(False)
             self.chk_alpha.setChecked(False)
             self.alpha_hint.setText("JPG 格式强制白底，透明底选项已禁用")
-            self.alpha_hint.setStyleSheet("color: #ef4444; background: transparent; font-family: Microsoft YaHei, sans-serif; padding-left: 26px;")
+            self.alpha_hint.setStyleSheet(f"color: {Theme.ERROR}; background: transparent; font-family: Microsoft YaHei, sans-serif; padding-left: 26px;")
             self._set_quality_enabled(True)
         else:
             self.chk_alpha.setEnabled(True)
             self.chk_alpha.setChecked(True)
             self.alpha_hint.setText("当前 PNG 格式，可选透明底")
-            self.alpha_hint.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif; padding-left: 26px;")
+            self.alpha_hint.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; font-family: Microsoft YaHei, sans-serif; padding-left: 26px;")
             self._set_quality_enabled(False)
 
     def _set_quality_enabled(self, enabled: bool):
@@ -326,18 +328,18 @@ class ExportFormatDialog(QDialog):
         self.quality_hint.setEnabled(enabled)
         if not enabled:
             self.quality_value.setStyleSheet(
-                "color: #b0b8c4; background: #f9f9fa; border-radius: 6px; "
+                f"color: {Theme.TEXT_DISABLED}; background: {Theme.CARD}; border-radius: 6px; "
                 "padding: 2px 0; font-family: Microsoft YaHei, sans-serif;"
             )
             self.quality_hint.setText("选择 JPG 格式后可调整压缩品质")
-            self.quality_hint.setStyleSheet("color: #b0b8c4; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+            self.quality_hint.setStyleSheet(f"color: {Theme.TEXT_DISABLED}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         else:
             self.quality_value.setStyleSheet(
-                "color: #0065fd; background: #eff1f4; border-radius: 6px; "
+                f"color: {Theme.PRIMARY}; background: {Theme.GHOST_BG}; border-radius: 6px; "
                 "padding: 2px 0; font-family: Microsoft YaHei, sans-serif;"
             )
             self.quality_hint.setText("品质越高文件越大，推荐 75-85%")
-            self.quality_hint.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+            self.quality_hint.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
 
     def _on_quality_changed(self, value: int):
         self.jpg_quality = value

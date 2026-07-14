@@ -6,7 +6,7 @@
 
 ## 主要能力
 
-- 支持 JPG / PNG / WebP / GIF / BMP / SVG / PDF / PPT / PPTX / PSD / PSB。
+- 支持 JPG / PNG / WebP / GIF / BMP / PDF / PPT / PPTX / PSD / PSB。
 - 自动切图并尽量避开文字区域，默认单张切片最大高度 1200px。
 - 可手动调整切图位置，带最小/最大切片高度防呆。
 - 可在图片按钮区域添加 URL，发送到经典 Outlook 后区域可点击。
@@ -16,7 +16,7 @@
 
 ## 用户使用
 
-1. 打开 `OutlookImgSlicer-V6.1.1.exe`。
+1. 打开 `OutlookImgSlicer-V6.2.2.exe`。
 2. 拖入图片、PDF、PPT 或 PSD 文件。
 3. 按需调整邮件宽度、手动切线或添加可点击按钮。
 4. 点击“在 Outlook 中创建邮件”，在 Outlook 草稿窗口中检查后手动发送。
@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 输出：
 
 ```text
-dist/OutlookImgSlicer-V6.1.1.exe
+dist/OutlookImgSlicer-V6.2.2.exe
 ```
 
 本地 Parallels Windows VM 构建入口：

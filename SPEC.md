@@ -1,6 +1,6 @@
 # SPEC.md - Outlook 长图助手产品与技术规格
 
-> 当前版本：V6.1.1
+> 当前版本：V6.2.2
 > 当前架构：稳定 V6/PySide 桌面应用 + Python 图像处理 + 经典 Outlook COM
 > 目标平台：Windows / 经典 Outlook
 
@@ -24,7 +24,7 @@
 5. 用户可添加可点击按钮/热区链接。
 6. 用户选择输出方式：
    - `在 Outlook 中创建邮件`：生成 CID 附件和 HTMLBody，并调用 `mail.Display(False)` 打开草稿。
-   - `复制到 Outlook`：写入 Windows CF_HTML 剪贴板。
+   - `复制图片（兼容方式）`：写入 Windows CF_HTML 剪贴板，链接可靠性低于 CID 草稿路径。
    - `保存切图`：导出切片图片到本地。
 
 ## 3. 功能规格
@@ -129,7 +129,8 @@ Outlook 使用 Word 引擎，不等同于浏览器。必须遵守：
 - spec：`desktop/outlook_img_slicer.spec`
 - VM 构建入口：`vm_start_build.ps1`
 - VM 构建脚本：`vm_build.ps1`
-- 输出文件名：`OutlookImgSlicer-V6.1.1.exe`
+- 输出文件名：`OutlookImgSlicer-V6.2.2.exe`
+- 每次构建生成 `build-manifest.json`，包装脚本必须校验其中的产物路径与 SHA-256。
 - EXE 内部文件名：`OutlookImgSlicer.exe`
 - 图标来源：根目录 `icon.ico`，界面 SVG 来源为 `icons/`
 

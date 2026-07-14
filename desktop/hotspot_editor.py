@@ -42,6 +42,8 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QMouseEvent, QFont, Q
 
 from clickable_map import HotspotMap, Hotspot
 
+from theme import Theme, fit_window_to_screen
+
 import os
 
 def _resource_dir(name: str) -> str:
@@ -69,13 +71,16 @@ def _icon(name: str, size: int = 20, color: str | None = None) -> QIcon:
 
 
 # ── 颜色常量（独立出来便于复用） ──
-COLOR_BORDER_IDLE = QColor(5, 150, 105)         # 已有热区：绿色，表示已可点击
-COLOR_FILL_IDLE = QColor(16, 185, 129, 70)
-COLOR_BORDER_DRAW = QColor(0, 101, 253)         # 正在拖选：蓝色实线
-COLOR_FILL_DRAW = QColor(0, 101, 253, 40)
-COLOR_BORDER_EDIT = QColor(239, 68, 68)         # 改区域模式：红色实线
-COLOR_FILL_EDIT = QColor(239, 68, 68, 40)
-COLOR_BAD = QColor(239, 68, 68)                 # 错误态（区域过小/重复）
+COLOR_BORDER_IDLE = QColor(Theme.SUCCESS_DARK)         # 已有热区：绿色，表示已可点击
+COLOR_FILL_IDLE = QColor(Theme.SUCCESS)
+COLOR_FILL_IDLE.setAlpha(70)
+COLOR_BORDER_DRAW = QColor(Theme.PRIMARY)         # 正在拖选：蓝色实线
+COLOR_FILL_DRAW = QColor(Theme.PRIMARY)
+COLOR_FILL_DRAW.setAlpha(40)
+COLOR_BORDER_EDIT = QColor(Theme.ERROR)         # 改区域模式：红色实线
+COLOR_FILL_EDIT = QColor(Theme.ERROR)
+COLOR_FILL_EDIT.setAlpha(40)
+COLOR_BAD = QColor(Theme.ERROR)                 # 错误态（区域过小/重复）
 
 
 def _normalize_url(url: str) -> str:
@@ -141,7 +146,7 @@ class ImageCanvas(QLabel):
         # V4.6.8：删除 setFixedSize，改用 setMinimumSize，让画布能随父容器缩放
         # 注意：setMinimumSize.width 仍然是 display_w，缩小后画布会留空
         self.setMinimumSize(self.display_w, self.display_h)
-        self.setStyleSheet("border: 1px solid #e7eaef; background: #f9f9fa; border-radius: 8px;")
+        self.setStyleSheet(f"border: 1px solid {Theme.BORDER}; background: {Theme.CARD}; border-radius: 8px;")
 
         # 拖框选状态
         self._dragging = False
@@ -241,7 +246,9 @@ class ImageCanvas(QLabel):
             if badge_y == 0 and y1 < badge_h + 2:
                 badge_y = y1 + 2
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(5, 150, 105, 230))
+            badge_brush = QColor(Theme.SUCCESS_DARK)
+            badge_brush.setAlpha(230)
+            painter.setBrush(badge_brush)
             painter.drawRoundedRect(badge_x, badge_y, badge_w, badge_h, 4, 4)
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(badge_x + 6, badge_y + 16, badge_text)
@@ -265,13 +272,14 @@ class HotspotEditorDialog(QDialog):
         self.slice_path = slice_path
         self.slice_filename = Path(slice_path).name
         self.hotspot_map = hotspot_map
+        self._working_map = hotspot_map.clone()
         # V4.6.7 排序架构：标注时记录该切片的 source_index
         self.source_index = source_index
         # 当前切片热区副本（编辑期间操作副本，关闭时再回写）
         self._current: List[Hotspot] = [
             Hotspot(x1=h.x1, y1=h.y1, x2=h.x2, y2=h.y2,
                     url=h.url, text=h.text, source_index=h.source_index or source_index)
-            for h in hotspot_map.get(self.slice_filename)
+            for h in self._working_map.get(self.slice_filename)
         ]
 
         from PIL import Image
@@ -279,10 +287,8 @@ class HotspotEditorDialog(QDialog):
             self.actual_w, self.actual_h = im.size
 
         self.setWindowTitle(f"热区编辑：{self.slice_filename}")
-        # V4.6.8：最小尺寸改为 640x480，原 900x720 在 1366x768 屏上下都超出
-        self.setMinimumSize(640, 480)
-        self.resize(880, 640)  # 默认尺寸，窗口可继续拖大变小
         self._build_ui()
+        fit_window_to_screen(self, (880, 640), (520, 340))
         # V4.6.8：初始 fit 一次画布宽度（处理小窗口打开场景）
         self._refit_canvas_to_size()
         self._refresh()
@@ -295,8 +301,9 @@ class HotspotEditorDialog(QDialog):
 
         # ── 顶部新手引导（3 步图示 + 实时状态） ──
         guide = QFrame()
+        self.guide_panel = guide
         guide.setStyleSheet(
-            "QFrame { background: #eff1f4; border: 1px solid #e7eaef; "
+            f"QFrame {{ background: {Theme.GHOST_BG}; border: 1px solid {Theme.BORDER}; "
             "border-radius: 8px; padding: 10px; font-family: Microsoft YaHei, sans-serif; }"
         )
         guide_layout = QVBoxLayout(guide)
@@ -305,7 +312,7 @@ class HotspotEditorDialog(QDialog):
 
         guide_title = QLabel("3 步添加可点击按钮")
         guide_title.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
-        guide_title.setStyleSheet("color: #0e1115; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+        guide_title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         guide_layout.addWidget(guide_title)
 
         guide_steps = QLabel(
@@ -314,7 +321,7 @@ class HotspotEditorDialog(QDialog):
             "  ③ 点 <b>✓ 添加</b> 按钮，重复 ①②③ 可添加多个"
         )
         guide_steps.setFont(QFont("Microsoft YaHei", 10))
-        guide_steps.setStyleSheet("color: #333942; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+        guide_steps.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         guide_steps.setWordWrap(True)
         guide_layout.addWidget(guide_steps)
 
@@ -322,7 +329,7 @@ class HotspotEditorDialog(QDialog):
         self.status_label = QLabel("提示：框选区域会自动激活 URL 输入框")
         self.status_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
         self.status_label.setStyleSheet(
-            "color: #333942; background: #eff1f4; padding: 6px 10px; "
+            f"color: {Theme.TEXT_SECONDARY}; background: {Theme.GHOST_BG}; padding: 6px 10px; "
             "border-radius: 6px;"
         )
         guide_layout.addWidget(self.status_label)
@@ -330,12 +337,13 @@ class HotspotEditorDialog(QDialog):
 
         # 图片画布（V4.6.8：高度自适应，不写死）
         scroll = QScrollArea()
+        self.canvas_scroll = scroll
         scroll.setWidgetResizable(True)  # 改为 True，让画布随滚动区域大小变化
-        scroll.setMinimumHeight(220)  # 最小高度，防止窗体拖太小时画布消失
+        scroll.setMinimumHeight(100)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #e7eaef; border-radius: 10px; background: #f9f9fa; }"
+            f"QScrollArea {{ border: 1px solid {Theme.BORDER}; border-radius: 10px; background: {Theme.CARD}; }}"
         )
         # V4.6.8：画布接受“期望宽度”参数，会按这个宽度等比缩放图片
         # 默认为 800（小窗口也能显示完整），画布有 scroll 可在原图超出时滚动
@@ -354,15 +362,15 @@ class HotspotEditorDialog(QDialog):
 
         url_lbl = QLabel("URL:")
         url_lbl.setFont(QFont("Microsoft YaHei", 11))
-        url_lbl.setStyleSheet("color: #0e1115; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+        url_lbl.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         input_row.addWidget(url_lbl)
 
         self.input_url = QLineEdit()
         self.input_url.setPlaceholderText("https://example.com  (留空协议时自动加 https://)")
         self.input_url.setFixedHeight(34)
         self.input_url.setStyleSheet(
-            "QLineEdit { background: white; border: 1px solid #e7eaef; border-radius: 8px; padding: 0 8px; font-family: Microsoft YaHei, sans-serif; }"
-            "QLineEdit:focus { border-color: #557fff; }"
+            f"QLineEdit {{ background: {Theme.BG}; border: 1px solid {Theme.BORDER}; border-radius: 8px; padding: 0 8px; font-family: Microsoft YaHei, sans-serif; }}"
+            f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         )
         self.input_url.returnPressed.connect(self._add_or_update_hotspot)
         input_row.addWidget(self.input_url, 1)
@@ -373,9 +381,9 @@ class HotspotEditorDialog(QDialog):
         self.btn_add.setIcon(_icon("check-white", 18))
         self.btn_add.setIconSize(QSize(18, 18))
         self.btn_add.setStyleSheet(
-            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-weight: bold; }"
-            "QPushButton:hover { background: #0057da; }"
-            "QPushButton:disabled { background: #e5e9ff; color: #7f8d9f; }"
+            f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; border: none; border-radius: 999px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
+            f"QPushButton:disabled {{ background: {Theme.PRIMARY_DISABLED}; color: {Theme.TEXT_PLACEHOLDER}; }}"
         )
         self.btn_add.clicked.connect(self._add_or_update_hotspot)
         input_row.addWidget(self.btn_add)
@@ -384,9 +392,9 @@ class HotspotEditorDialog(QDialog):
         self.btn_cancel_sel.setFixedSize(90, 34)
         self.btn_cancel_sel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel_sel.setStyleSheet(
-            "QPushButton { background: #eff1f4; color: #0e1115; border: 1px solid #e7eaef; border-radius: 999px; }"
-            "QPushButton:hover { background: #dde1e8; }"
-            "QPushButton:disabled { color: #b0b8c4; background: #f9f9fa; }"
+            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: 1px solid {Theme.BORDER}; border-radius: 999px; }}"
+            f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
+            f"QPushButton:disabled {{ color: {Theme.TEXT_DISABLED}; background: {Theme.CARD}; }}"
         )
         self.btn_cancel_sel.clicked.connect(self._clear_pending)
         input_row.addWidget(self.btn_cancel_sel)
@@ -396,24 +404,24 @@ class HotspotEditorDialog(QDialog):
         # 选区信息
         self.selection_label = QLabel("当前未选择区域")
         self.selection_label.setFont(QFont("Microsoft YaHei", 10))
-        self.selection_label.setStyleSheet("color: #7f8d9f; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+        self.selection_label.setStyleSheet(f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         root.addWidget(self.selection_label)
 
         # 已添加列表
         list_lbl = QLabel(f"已添加热区（{len(self._current)} 个）:")
         list_lbl.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
-        list_lbl.setStyleSheet("color: #0e1115; background: transparent; font-family: Microsoft YaHei, sans-serif;")
+        list_lbl.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; font-family: Microsoft YaHei, sans-serif;")
         self.list_label = list_lbl  # 保存引用以便更新计数
         root.addWidget(list_lbl)
 
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet(
-            "QListWidget { border: 1px solid #e7eaef; border-radius: 8px; background: #f9f9fa; }"
-            "QListWidget::item { padding: 6px; border-bottom: 1px solid #eff1f4; }"
-            "QListWidget::item:selected { background: #e5e9ff; color: #00266b; }"
+            f"QListWidget {{ border: 1px solid {Theme.BORDER}; border-radius: 8px; background: {Theme.CARD}; }}"
+            f"QListWidget::item {{ padding: 6px; border-bottom: 1px solid {Theme.GHOST_BG}; }}"
+            f"QListWidget::item:selected {{ background: {Theme.PRIMARY_DISABLED}; color: {Theme.TEXT_SELECTED}; }}"
         )
         # V4.6.8：删除 setFixedHeight(160)，改为最小高度 + 拉伸比例
-        self.list_widget.setMinimumHeight(120)
+        self.list_widget.setMinimumHeight(60)
         # 双击 → 编辑 URL
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         # stretch=1 让列表在窗口 resize 时与画布争抢空间（默认 1:1 分配）
@@ -553,21 +561,23 @@ class HotspotEditorDialog(QDialog):
         if self.canvas.mode == ImageCanvas.MODE_EDIT:
             # 改区域模式
             idx = self.canvas._editing_index
-            ok, reason = self.hotspot_map.update(self.slice_filename, idx, candidate)
+            ok, reason = self._working_map.update(self.slice_filename, idx, candidate)
             if not ok:
                 QMessageBox.warning(self, "无法更新", reason)
                 return
-            self._current = self.hotspot_map.get(self.slice_filename)
+            self._current = self._working_map.get(self.slice_filename)
             self._after_change(edit_mode_done=True)
             # V4.6.4：状态条反馈（不再弹模态对话框）
             self._set_status(f"✅ 热区 #{idx + 1} 已更新（{len(self._current)} 个）", "success")
         else:
             # 添加模式
-            ok, reason = self.hotspot_map.add(self.slice_filename, candidate)
+            ok, reason = self._working_map.add(
+                self.slice_filename, candidate, source_index=self.source_index
+            )
             if not ok:
                 QMessageBox.warning(self, "无法添加", reason)
                 return
-            self._current = self.hotspot_map.get(self.slice_filename)
+            self._current = self._working_map.get(self.slice_filename)
             self._after_change(edit_mode_done=False)
             # V4.6.4：状态条反馈 + 标记最新热区 + 滚动到列表底部
             new_idx = len(self._current) - 1
@@ -613,11 +623,11 @@ class HotspotEditorDialog(QDialog):
         candidate = Hotspot(x1=h.x1, y1=h.y1, x2=h.x2, y2=h.y2,
                             url=new_url, text=h.text,
                             source_index=h.source_index or self.source_index)
-        ok, reason = self.hotspot_map.update(self.slice_filename, idx, candidate)
+        ok, reason = self._working_map.update(self.slice_filename, idx, candidate)
         if not ok:
             QMessageBox.warning(self, "无法更新", reason)
             return
-        self._current = self.hotspot_map.get(self.slice_filename)
+        self._current = self._working_map.get(self.slice_filename)
         self._refresh()
 
     def _enter_edit_area_mode(self, idx: int):
@@ -649,8 +659,8 @@ class HotspotEditorDialog(QDialog):
         )
         if reply != QMessageBox.Yes:
             return
-        self.hotspot_map.remove(self.slice_filename, idx)
-        self._current = self.hotspot_map.get(self.slice_filename)
+        self._working_map.remove(self.slice_filename, idx)
+        self._current = self._working_map.get(self.slice_filename)
         self.canvas.clear_pending()
         self.canvas.set_mode(ImageCanvas.MODE_DRAW)
         self._refresh()
@@ -698,11 +708,8 @@ class HotspotEditorDialog(QDialog):
         elif chosen == act_del:
             self._delete_at(idx)
 
-    # ── 关闭时回写（其实 self._current 已经是 HotspotMap 的引用对象，直接保存即可） ──
+    # ── 关闭时提交工作副本 ──
     def _save_and_close(self):
-        # 编辑过程中 add/update 已经直接写入了 hotspot_map，self._current 只是其引用
-        # 但为了防止顺序问题，最后再从 map 同步一次
-        self._current = self.hotspot_map.get(self.slice_filename)
         # 如果还有未保存的待选区，提示
         if self.canvas.pending_rect() is not None:
             reply = QMessageBox.question(
@@ -712,4 +719,8 @@ class HotspotEditorDialog(QDialog):
             )
             if reply != QMessageBox.Yes:
                 return
+        ok, reason = self.hotspot_map.replace_slice(self.slice_filename, self._current)
+        if not ok:
+            QMessageBox.warning(self, "无法保存", reason)
+            return
         self.accept()

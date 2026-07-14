@@ -74,25 +74,26 @@ PySide6 (Python) 桌面应用
 
 | 用途 | 字号 | 字重 | 代码示例 |
 |------|------|------|----------|
-| 应用标题 | 20px | 700 | `_font(size=20, weight=QFont.Bold)` |
-| Primary 按钮文字 | 14px | 700 | `_btn_primary()` 内置 |
-| Secondary 按钮文字 | 13px | 500 | `_btn_secondary()` 内置 |
-| Ghost 按钮文字 | 12px | 400 | `_btn_ghost()` 内置 |
-| 输入框文字 | 12-13px | 400 | QLineEdit 样式 |
-| 标签/副标题 | 12px | 400 | QLabel 样式 |
-| 步骤引导条 | 11px | 500 | pill 标签 |
-| 弹窗提示 | 10px | 400 | 小字说明 |
+| 应用标题 | 18px | 700 | `_font("Microsoft YaHei", 18, QFont.Bold)` |
+| Primary 按钮文字 | 13px | 700 | `_font("Microsoft YaHei", 13, QFont.Bold)` |
+| Secondary 按钮文字 | 12px | 500 | `_font("Microsoft YaHei", 12, QFont.Medium)` |
+| Ghost 按钮文字 | 11px | 400 | `_font("Microsoft YaHei", 11)` |
+| 邮件标题输入框 | 12px | 400 | `_font("Microsoft YaHei", 12)` |
+| 标签/副标题 | 11px | 400 | `_font("Microsoft YaHei", 11)` |
+| 步骤引导条 | 10px | 500 | `_font("Microsoft YaHei", 10, QFont.Medium)` |
+| 邮件品质下拉 | 10px | 400 | `_font("Microsoft YaHei", 10)` |
 
 ---
 
 ### 按钮规范（全部 999px 胶丸形）
 
-| 类型 | 高度 | 字号 | 图标要求 | QSS 函数 |
+| 类型 | 高度 | 字号 | 图标尺寸 | QSS 函数 |
 |------|------|------|----------|----------|
-| Primary | 44px | 14px 700 | **必须白色图标** | `_btn_primary()` |
-| Secondary | 44px | 13px 500 | 深色图标 | `_btn_secondary()` |
-| Ghost | 34px | 12px 400 | 深色图标 | `_btn_ghost()` |
-| 弹窗 Primary | 36px | 14px 700 | **必须白色图标** | 同 `_btn_primary()` |
+| Primary | 42px | 13px 700 | 18px **必须白色图标** | `_btn_primary()` |
+| Secondary | 42px | 12px 500 | 16px 深色图标 | `_btn_secondary()` |
+| Ghost | 32px | 11px 400 | 16px 深色图标 | `_btn_ghost()` |
+| 输入框 | 32px | 11px 400 | -- | `_input_style()` |
+| 邮件标题输入 | 36px | 12px 400 | -- | `_input_style()` |
 
 ## 4. CRITICAL 图标规则和禁止事项
 
@@ -129,7 +130,7 @@ PySide6 (Python) 桌面应用
 | `mouse-pointer-click.svg` | 添加可点击按钮 | 深色 |
 | `mail-white.svg` | 创建邮件 Primary 按钮 | 白色 |
 | `arrow-down-to-line.svg` | 保存切图 / 压缩按钮 | 深色 |
-| `clipboard-copy.svg` | 复制到 Outlook | 深色 |
+| `clipboard-copy.svg` | 复制图片（兼容方式） | 深色 |
 | `image.svg` | 导出图片复选框 | 深色 |
 | `check.svg` | 状态切换图标 / 导出弹窗复选框 | 深色 |
 | `check-white.svg` | 热区编辑器确认按钮 | 白色 |
@@ -139,9 +140,10 @@ PySide6 (Python) 桌面应用
 
 ### 图标风格：彩色填充
 
-- 24x24 viewBox，Qt 缩放到实际尺寸（18-44px）
+- 24x24 viewBox，Qt 缩放到实际尺寸（16-56px）
 - 直接彩色路径（无圆形底座），stroke-width: 2，stroke-linecap: round，stroke-linejoin: round
 - 每个图标独立主题色：teal、orange、violet、green、indigo、purple、pink
+- 拖放区文件夹图标渲染尺寸 56px，Ghost/Secondary 按钮图标 16px，Primary 按钮图标 18px
 - 深色图标：彩色 stroke/fill（如 `stroke="#14b8a6"`）
 - 白色变体：`stroke="#ffffff"` 或 `fill="#ffffff"`（用于 Primary 蓝底按钮）
 - 文件夹类图标（upload-cloud、folder-open）：黄色拟物风格（`#f6c744` 主体 + `#e5a800` 翻盖）
@@ -190,7 +192,7 @@ outlook-img-slicer/
 ├── pdf_slicer.py                    # PDF 解析
 ├── ppt_slicer.py                    # PPT 解析
 ├── psd_slicer.py                    # PSD/PSB 解析（懒加载）
-├── icons/                           # 13 个 Lucide 风格 SVG 图标
+├── icons/                           # 13 个彩色填充风格 SVG 图标（24x24 viewBox）
 ├── icon.ico                         # Windows 窗口图标
 ├── tests/                           # 自动化测试
 ├── build.py                         # 根构建入口
@@ -206,7 +208,7 @@ outlook-img-slicer/
 
 ## 6. CSS 类命名约定
 
-- **QSS 对象名**：`doubao-` 前缀（`doubao-primary-button`、`doubao-toolbar`、`doubao-input`）
+- **Qt/UIA 对象名**：使用稳定英文语义名（如 `resetButton`、`mailWidthInput`），供自动化测试定位
 - **Python 常量**：`Theme.XXX` 大写语义名
 - **邮件 HTML**：内联样式 `outlook-` 前缀（如有 class）
 - **不新增无来源的色值/字号/圆角**——先更新 `DESIGN.md`，再实现
@@ -237,9 +239,55 @@ outlook-img-slicer/
 - [ ] SVG 无 `currentColor`、无渐变、无滤镜
 - [ ] Ghost disabled 只用 opacity 0.5
 - [ ] `icons/` 目录无未引用的 SVG 文件
-- [ ] 版本号同步：`main.py` VERSION + `version_info.txt`
+- [ ] 版本源同步：`main.py` VERSION + `version_info.txt` + `ui-preview.html`
+- [ ] 发布一致性测试已核对 README、SPEC、HANDOFF、TEST_PLAN、CHANGELOG、manifest 和发布文件名
 - [ ] Outlook 草稿只调用 `mail.Display(False)`
 - [ ] 构建产物英文 ASCII 文件名
 - [ ] `python3 -m pytest tests/ -q` 通过
 - [ ] `python3 -m py_compile build.py desktop/*.py image_slicer.py html_assembler.py outlook_sender.py clipboard_html.py clickable_map.py hotspot_slicer.py image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py` 通过
 - [ ] `git diff --check` 无空白错误
+
+---
+
+## 8. 布局结构（3 步分区）
+
+```
+[标题栏 40px — Outlook 长图助手 V6.2.2]
+[应用标题 18px + 副标题 11px]
+[引导药丸 10px：1 放入文件 → 2 调整切线/添加链接 → 3 创建邮件]
+
+[Step 1: 放入文件]
+  ├─ 拖放区（56px 文件夹图标 + 标题 14px + 提示 11px）
+  └─ 工具栏行：重置(32px) | 邮件宽度输入(32px) px │ 导出图片 │ 避开文字切图
+
+[Step 2: 编辑切片与链接]
+  └─ 工具栏行：复制图片（兼容方式） | 调整切图位置 | 添加可点击按钮
+
+[Step 3: 检查并输出]
+  ├─ 邮件标题输入框(36px)
+  ├─ 邮件品质下拉(30px)
+  ├─ 状态提示(11px)
+  └─ 底部按钮行：在 Outlook 中创建邮件(Primary 42px) | 保存切图(Secondary 42px)
+
+[版本号 V6.2.2 + 作者]
+```
+
+### 快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| Ctrl+O | 选择文件 |
+| Ctrl+V | 粘贴图片 |
+| Ctrl+Enter | 创建 Outlook 邮件（按钮启用时） |
+| Esc | 重置（有切片时弹确认对话框） |
+
+### 复选框
+
+| 复选框 | 默认 | 图标 | 功能 |
+|--------|------|------|------|
+| 导出图片 | 关闭 | image.svg 16px | 切图模式 ↔ 导出模式切换 |
+| 避开文字切图（推荐） | 开启 | 无 | 智能避开文字区域切图 |
+
+### ui-preview.html 同步
+
+`desktop/ui-preview.html` 是浏览器 1:1 预览，修改 main.py 布局时必须同步更新。尺寸规范见 `DESIGN.md` 第 8 节。

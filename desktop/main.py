@@ -12,15 +12,23 @@ import traceback
 from pathlib import Path
 from typing import Optional, List, Dict
 
+# Direct source launches use desktop/ as sys.path[0]. Add the project root so
+# the documented `python desktop/main.py` entrypoint can import core modules.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
     QFrame, QGridLayout, QScrollArea,
-    QLineEdit, QCheckBox, QDialog, QSizePolicy
+    QLineEdit, QCheckBox, QDialog, QSizePolicy, QComboBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator, QIcon
+
+from theme import Theme, fit_window_to_screen
 
 from image_slicer import (
     detect_and_slice,
@@ -37,7 +45,7 @@ from clickable_map import HotspotMap, Hotspot
 from hotspot_editor import HotspotEditorDialog
 from html_assembler import (
     assemble_html, generate_plain_html, materialize_display_slices_strict,
-    SliceItem, cleanup_temp_slices,
+    SliceItem, cleanup_temp_slices, build_render_plan,
     _group_by_source, _is_plain_vertical_stack,
 )
 from hotspot_slicer import slice_paths_by_hotspots
@@ -82,6 +90,13 @@ def _resource_file(name: str) -> str:
         if os.path.isfile(candidate):
             return candidate
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+
+
+def _set_test_id(widget, name: str, description: str = ""):
+    widget.setObjectName(name)
+    widget.setAccessibleName(name)
+    if description:
+        widget.setAccessibleDescription(description)
 
 
 _ICONS_DIR = _resource_dir("icons")
@@ -142,7 +157,7 @@ def _tinted_icon(svg_path: str, color: str) -> QIcon:
         return QIcon(svg_path)
 
 
-VERSION = "6.1.1"
+VERSION = "6.2.2"
 VERSION_BY = "xiaoming"
 # 桌面版：PySide6 + 本地图像处理 + Outlook COM。
 HOTSPOT_FEATURE_ENABLED = True
@@ -162,37 +177,6 @@ class Config:
         ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif",
         ".pdf", ".pptx", ".ppt", ".psd", ".psb"
     )
-
-
-class Theme:
-    PRIMARY = "#0065fd"
-    PRIMARY_HOVER = "#0057da"
-    PRIMARY_ACTIVE = "#0043ad"
-    PRIMARY_DISABLED = "#e5e9ff"
-    PRIMARY_TEXT = "#ffffff"
-    SECONDARY_BG = "#ffffff"
-    SECONDARY_HOVER = "#eff1f4"
-    SECONDARY_BORDER = "#e7eaef"
-    SECONDARY_TEXT = "#0e1115"
-    GHOST_BG = "#eff1f4"
-    GHOST_HOVER = "#dde1e8"
-    GHOST_TEXT = "#0e1115"
-    SUCCESS = "#10b981"
-    ERROR = "#ef4444"
-    WARNING = "#f59e0b"
-    BG = "#ffffff"
-    CARD = "#f9f9fa"
-    CARD_SHADOW = "rgba(0, 0, 0, 0.04)"
-    BORDER = "#e7eaef"
-    BORDER_HOVER = "#d0d5dd"
-    BORDER_FOCUS = "#557fff"
-    TEXT_PRIMARY = "#0e1115"
-    TEXT_SECONDARY = "#333942"
-    TEXT_PLACEHOLDER = "#7f8d9f"
-    TEXT_DISABLED = "#b0b8c4"
-    DROPZONE_IDLE_BORDER = "#e7eaef"
-    DROPZONE_HOVER_BG = "#e5e9ff"
-    DROPZONE_HOVER_BORDER = "#0065fd"
 
 
 def _load_psd_images(psd_path: str):
@@ -228,6 +212,29 @@ def _font(family: str = "Microsoft YaHei", size: int = 12, weight: int = QFont.N
     return QFont(family, size, weight)
 
 
+class WorkflowStep(QFrame):
+    """A responsive section in the single-page three-step workflow."""
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.title = title
+        self.setObjectName("workflowStep")
+        self.setStyleSheet(
+            f"QFrame#workflowStep {{ background: {Theme.BG}; border: 1px solid {Theme.BORDER}; "
+            "border-radius: 12px; }"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(8)
+        label = QLabel(title)
+        label.setFont(_font("Microsoft YaHei", 11, QFont.Bold))
+        label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; border: 0; background: transparent;")
+        layout.addWidget(label)
+        self.body = QVBoxLayout()
+        self.body.setSpacing(8)
+        layout.addLayout(self.body)
+
+
 def _btn_size(text: str, font_size: int = 13, extra_w: int = 36, height: int = 38) -> QSize:
     fm = QFontMetrics(QFont("Microsoft YaHei", font_size))
     return QSize(fm.horizontalAdvance(text) + extra_w, height)
@@ -259,7 +266,7 @@ def _btn_ghost() -> str:
         f"border: none; border-radius: 999px; "
         f"font-family: Microsoft YaHei, sans-serif;}}"
         f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
-        f"QPushButton:disabled {{ color: {Theme.TEXT_DISABLED}; }}"
+        f"QPushButton:disabled {{ opacity: 0.5; }}"
     )
 
 
@@ -297,7 +304,7 @@ class DropZone(QFrame):
 
         self.icon_label = QLabel()
         self.icon_label.setAlignment(Qt.AlignCenter)
-        self.icon_label.setPixmap(_icon("upload-cloud", 44).pixmap(44, 44))
+        self.icon_label.setPixmap(_icon("upload-cloud", 56).pixmap(56, 56))
         self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.title_label = QLabel("拖拽图片到此处")
         self.title_label.setAlignment(Qt.AlignCenter)
@@ -305,6 +312,7 @@ class DropZone(QFrame):
         self.title_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; border: none;")
         self.tip_label = QLabel("支持 JPG · PNG · BMP · WebP · GIF · PDF · PPT/PPTX · PSD/PSB，点击上传")
         self.tip_label.setAlignment(Qt.AlignCenter)
+        self.tip_label.setWordWrap(True)
         self.tip_label.setFont(_font("Microsoft YaHei", 12))
         self.tip_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent; border: none;")
 
@@ -317,13 +325,15 @@ class DropZone(QFrame):
         """Collapse the large drop target after processing so previews stay visible."""
         if compact:
             self.icon_label.hide()
+            self.tip_label.hide()
             self.content_layout.setContentsMargins(16, 7, 16, 7)
             self.content_layout.setSpacing(2)
-            self.setMinimumHeight(72)
-            self.setMaximumHeight(72)
+            self.setMinimumHeight(48)
+            self.setMaximumHeight(48)
         else:
             self.icon_label.show()
-            self.icon_label.setPixmap(_icon("upload-cloud", 44).pixmap(44, 44))
+            self.tip_label.show()
+            self.icon_label.setPixmap(_icon("upload-cloud", 56).pixmap(56, 56))
             self.content_layout.setContentsMargins(28, 32, 28, 32)
             self.content_layout.setSpacing(10)
             self.setMinimumHeight(180)
@@ -388,6 +398,8 @@ class ProcessWorker(QThread):
             self.progress.emit(p_before)
             slice_paths = []
             for index, image in enumerate(images):
+                if self.isInterruptionRequested():
+                    return []
                 path = os.path.join(work_dir, f"{prefix}_{index}.png")
                 image.save(path)
                 slice_paths.append(path)
@@ -396,6 +408,9 @@ class ProcessWorker(QThread):
             self.progress.emit(p_after)
             final = []
             for p in slice_paths:
+                if self.isInterruptionRequested():
+                    cleanup_generated_slices(final)
+                    return []
                 final.extend(detect_and_slice(
                     p, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
                     smart=self.smart, target_width=self.width,
@@ -415,6 +430,8 @@ class ProcessWorker(QThread):
 
     def run(self):
         try:
+            if self.isInterruptionRequested():
+                return
             ext = Path(self.file_path).suffix.lower()
             self.progress.emit(15)
             if ext == ".pdf":
@@ -430,6 +447,9 @@ class ProcessWorker(QThread):
                     self.file_path, max_height=OUTLOOK_SAFE_MAX_HEIGHT_PER_SLICE,
                     smart=self.smart, target_width=self.width
                 )
+            if self.isInterruptionRequested():
+                cleanup_generated_slices(slice_paths)
+                return
             self.progress.emit(100)
             self.finished.emit(slice_paths)
         except Exception as exc:
@@ -449,31 +469,45 @@ class MainWindow(QMainWindow):
         # **不依赖** slice_paths 顺序、文件名、目录遍历
         self.slice_source_index: Dict[str, float] = {}
         self.worker: Optional[ProcessWorker] = None
+        self._retired_workers: List[ProcessWorker] = []
+        self._active_job_id = 0
         self.hotspot_map = HotspotMap()
         self.last_export_dir: Optional[str] = None
         self._build_ui()
 
     def _build_ui(self):
         self.setWindowTitle(Config.APP_TITLE)
-        self.setMinimumSize(620, 640)
-        self.resize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
+        fit_window_to_screen(self, (Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT), (620, 360))
 
+        self.page_scroll = QScrollArea()
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.page_scroll.setStyleSheet(
+            f"QScrollArea {{ background: {Theme.CARD}; border: 0; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: {Theme.CARD}; }}"
+        )
         container = QWidget()
-        self.setCentralWidget(container)
+        container.setStyleSheet(f"background: {Theme.CARD};")
+        self.page_scroll.setWidget(container)
+        self.setCentralWidget(self.page_scroll)
         root = QVBoxLayout(container)
+        root.setSizeConstraint(QVBoxLayout.SetMinimumSize)
         root.setContentsMargins(20, 16, 20, 14)
         root.setSpacing(8)
 
         # ══ Header ════════════════════════════
-        title = QLabel(f"Outlook 长图助手 V{VERSION}")
-        title.setFont(_font("Microsoft YaHei", 18, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent;")
-        root.addWidget(title)
+        self.header_title = QLabel(f"Outlook 长图助手 V{VERSION}")
+        self.header_title.setFont(_font("Microsoft YaHei", 18, QFont.Bold))
+        self.header_title.setMinimumHeight(30)
+        self.header_title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent;")
+        root.addWidget(self.header_title)
 
-        subtitle = QLabel("长图/PDF/PPT切片后插入Outlook邮件，保持原始清晰度")
-        subtitle.setFont(_font("Microsoft YaHei", 11))
-        subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
-        root.addWidget(subtitle)
+        self.header_subtitle = QLabel("长图/PDF/PPT切片后插入Outlook邮件，保持原始清晰度")
+        self.header_subtitle.setFont(_font("Microsoft YaHei", 11))
+        self.header_subtitle.setMinimumHeight(22)
+        self.header_subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
+        root.addWidget(self.header_subtitle)
 
         self.guide_label = QLabel(
             "1  放入文件    →    2  调整切线 / 添加链接    →    3  创建邮件"
@@ -486,19 +520,25 @@ class MainWindow(QMainWindow):
         )
         self.guide_label.setAlignment(Qt.AlignCenter)
         self.guide_label.setWordWrap(True)
+        self.guide_label.setMinimumHeight(34)
         root.addWidget(self.guide_label)
+
+        self.step_import = WorkflowStep("1  放入文件")
+        root.addWidget(self.step_import)
 
         # ══ Drop Zone ════════════════════════
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self._handle_dropped_files)
         self.drop_zone.clicked.connect(self._select_file)
-        root.addWidget(self.drop_zone)
+        self.step_import.body.addWidget(self.drop_zone)
 
-        # ══ 工具栏第一行：重置 + 宽度设置 ═══
-        toolbar1 = QHBoxLayout()
-        toolbar1.setSpacing(8)
+        # ══ 工具栏第一行：重置 + 宽度设置 + 复选框 ═══
+        self.settings_container = QWidget()
+        settings_layout = QHBoxLayout(self.settings_container)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(8)
 
-        self.btn_reset = QPushButton(" 重置")
+        self.btn_reset = QPushButton("重置")
         self.btn_reset.setFont(_font("Microsoft YaHei", 11))
         self.btn_reset.setCursor(Qt.PointingHandCursor)
         self.btn_reset.setStyleSheet(_btn_ghost())
@@ -507,12 +547,12 @@ class MainWindow(QMainWindow):
         self.btn_reset.setMinimumHeight(32)
         self.btn_reset.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.btn_reset.clicked.connect(self.reset_app)
-        toolbar1.addWidget(self.btn_reset)
+        _set_test_id(self.btn_reset, "resetButton")
+        settings_layout.addWidget(self.btn_reset)
 
         width_lbl = QLabel("邮件宽度：")
         width_lbl.setFont(_font("Microsoft YaHei", 11))
         width_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
-        toolbar1.addWidget(width_lbl)
 
         self.edit_width = QLineEdit(f"{Config.DEFAULT_WIDTH}")
         self.edit_width.setFont(_font("Microsoft YaHei", 11))
@@ -528,19 +568,26 @@ class MainWindow(QMainWindow):
             f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         )
         self.edit_width.editingFinished.connect(self._on_width_edited)
+        _set_test_id(self.edit_width, "mailWidthInput", "邮件正文图片显示宽度，单位像素")
         px_lbl = QLabel("px")
         px_lbl.setFont(_font("Microsoft YaHei", 11))
         px_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
-        toolbar1.addWidget(self.edit_width)
-        toolbar1.addWidget(px_lbl)
+        width_control = QWidget()
+        width_layout = QHBoxLayout(width_control)
+        width_layout.setContentsMargins(0, 0, 0, 0)
+        width_layout.setSpacing(5)
+        width_layout.addWidget(width_lbl)
+        width_layout.addWidget(self.edit_width)
+        width_layout.addWidget(px_lbl)
+        settings_layout.addWidget(width_control)
 
-        toolbar1.addStretch()
-        root.addLayout(toolbar1)
+        # 分隔符
+        sep_label = QLabel("│")
+        sep_label.setFont(_font("Microsoft YaHei", 11))
+        sep_label.setStyleSheet(f"color: {Theme.BORDER}; background: transparent;")
+        settings_layout.addWidget(sep_label)
 
-        # ══ 工具栏第二行：功能选项复选框 ═══
-        toolbar2 = QHBoxLayout()
-        toolbar2.setSpacing(8)
-
+        # 功能选项复选框（并入第一行，与宽度输入同排）
         _chk_indicator_style = (
             f"QCheckBox {{ color: {Theme.TEXT_PRIMARY}; background: transparent; spacing: 6px; "
             f"font-weight: 500;}}"
@@ -550,7 +597,7 @@ class MainWindow(QMainWindow):
             f"border-color: {Theme.PRIMARY}; }}"
         )
 
-        self.chk_export_mode = QCheckBox("导出图片模式")
+        self.chk_export_mode = QCheckBox("导出图片")
         self.chk_export_mode.setFont(_font("Microsoft YaHei", 11))
         self.chk_export_mode.setChecked(False)
         self.chk_export_mode.setCursor(Qt.PointingHandCursor)
@@ -559,24 +606,33 @@ class MainWindow(QMainWindow):
             "打开：拖入后进入图片导出模式（合并/转换为单张长图）"
         )
         self.chk_export_mode.setStyleSheet(_chk_indicator_style)
+        self.chk_export_mode.setIcon(_icon("image", 16))
+        self.chk_export_mode.setIconSize(QSize(16, 16))
         self.chk_export_mode.stateChanged.connect(self._on_export_mode_changed)
-        toolbar2.addWidget(self.chk_export_mode)
+        _set_test_id(self.chk_export_mode, "mergeExportModeCheckbox")
+        settings_layout.addWidget(self.chk_export_mode)
 
-        self.chk_smart = QCheckBox("智能避切文字（推荐）")
+        self.chk_smart = QCheckBox("避开文字切图（推荐）")
         self.chk_smart.setFont(_font("Microsoft YaHei", 11))
         self.chk_smart.setChecked(True)
         self.chk_smart.setCursor(Qt.PointingHandCursor)
         self.chk_smart.setStyleSheet(_chk_indicator_style)
-        toolbar2.addWidget(self.chk_smart)
+        _set_test_id(self.chk_smart, "smartSliceCheckbox")
+        settings_layout.addWidget(self.chk_smart)
 
-        toolbar2.addStretch()
-        root.addLayout(toolbar2)
+        settings_layout.addStretch()
+        self.step_import.body.addWidget(self.settings_container)
+
+        self.step_edit = WorkflowStep("2  编辑切片与链接")
+        root.addWidget(self.step_edit, stretch=1)
 
         # ══ 工具栏第三行：处理完成后的动作按钮（可换行布局）═══
-        toolbar3 = QHBoxLayout()
-        toolbar3.setSpacing(8)
+        self.edit_actions_container = QWidget()
+        self.edit_actions_grid = QGridLayout(self.edit_actions_container)
+        self.edit_actions_grid.setContentsMargins(0, 0, 0, 0)
+        self.edit_actions_grid.setSpacing(8)
 
-        self.btn_copy_html = QPushButton(" 复制HTML")
+        self.btn_copy_html = QPushButton("复制图片（兼容方式）")
         self.btn_copy_html.setFont(_font("Microsoft YaHei", 11))
         self.btn_copy_html.setCursor(Qt.PointingHandCursor)
         self.btn_copy_html.setEnabled(False)
@@ -586,9 +642,10 @@ class MainWindow(QMainWindow):
         self.btn_copy_html.setMinimumHeight(32)
         self.btn_copy_html.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.btn_copy_html.clicked.connect(self._copy_html)
-        toolbar3.addWidget(self.btn_copy_html)
+        self.btn_copy_html.setToolTip("手动粘贴到邮件；链接兼容性低于“在 Outlook 中创建邮件”")
+        _set_test_id(self.btn_copy_html, "copyCompatibilityButton")
 
-        self.btn_adjust_cuts = QPushButton(" 调整切线")
+        self.btn_adjust_cuts = QPushButton("调整切图位置")
         self.btn_adjust_cuts.setFont(_font("Microsoft YaHei", 11))
         self.btn_adjust_cuts.setCursor(Qt.PointingHandCursor)
         self.btn_adjust_cuts.setEnabled(False)
@@ -601,9 +658,9 @@ class MainWindow(QMainWindow):
             "切图完成后可拖动横线微调切开位置；自动限制在 Outlook 安全高度内"
         )
         self.btn_adjust_cuts.clicked.connect(self._adjust_cut_positions)
-        toolbar3.addWidget(self.btn_adjust_cuts)
+        _set_test_id(self.btn_adjust_cuts, "adjustCutsButton")
 
-        self.btn_hotspot = QPushButton(" 添加热区")
+        self.btn_hotspot = QPushButton("添加可点击按钮")
         self.btn_hotspot.setFont(_font("Microsoft YaHei", 11))
         self.btn_hotspot.setCursor(Qt.PointingHandCursor)
         self.btn_hotspot.setEnabled(False)
@@ -615,17 +672,19 @@ class MainWindow(QMainWindow):
         self.btn_hotspot.setToolTip("在切片上框选按钮区域并添加链接")
         self.btn_hotspot.clicked.connect(self._open_hotspot_editor)
         self.btn_hotspot.setVisible(HOTSPOT_FEATURE_ENABLED)
+        _set_test_id(self.btn_hotspot, "hotspotEditorButton")
+        self._edit_action_widgets = [self.btn_copy_html, self.btn_adjust_cuts]
         if HOTSPOT_FEATURE_ENABLED:
-            toolbar3.addWidget(self.btn_hotspot)
-
-        toolbar3.addStretch()
-        root.addLayout(toolbar3)
+            self._edit_action_widgets.append(self.btn_hotspot)
+        self.step_edit.body.addWidget(self.edit_actions_container)
 
         # ══ 邮件标题 ════════════════════════
         subject_lbl = QLabel("邮件标题（可选）")
         subject_lbl.setFont(_font("Microsoft YaHei", 11))
         subject_lbl.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
-        root.addWidget(subject_lbl)
+        self.step_output = WorkflowStep("3  检查并输出")
+        root.addWidget(self.step_output)
+        self.step_output.body.addWidget(subject_lbl)
 
         self.input_subject = QLineEdit()
         self.input_subject.setFont(_font("Microsoft YaHei", 12))
@@ -633,7 +692,27 @@ class MainWindow(QMainWindow):
         self.input_subject.setMinimumHeight(36)
         self.input_subject.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.input_subject.setStyleSheet(_input_style())
-        root.addWidget(self.input_subject)
+        _set_test_id(self.input_subject, "mailSubjectInput")
+        self.step_output.body.addWidget(self.input_subject)
+
+        quality_row = QHBoxLayout()
+        quality_row.setSpacing(8)
+        quality_label = QLabel("发送图片质量：")
+        quality_label.setFont(_font("Microsoft YaHei", 10))
+        quality_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
+        self.combo_mail_quality = QComboBox()
+        self.combo_mail_quality.addItem("自动（超过 20MB 时询问）", "auto")
+        self.combo_mail_quality.addItem("原画质", "original")
+        self.combo_mail_quality.addItem(f"压缩至 {COMPRESS_QUALITY}%", "compress")
+        self.combo_mail_quality.setMinimumHeight(30)
+        self.combo_mail_quality.setStyleSheet(
+            f"QComboBox {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {Theme.BORDER}; border-radius: 8px; padding: 3px 10px; }}"
+        )
+        _set_test_id(self.combo_mail_quality, "mailQualityCombo")
+        quality_row.addWidget(quality_label)
+        quality_row.addWidget(self.combo_mail_quality, 1)
+        self.step_output.body.addLayout(quality_row)
 
         # ══ 预览区 ═════════════════════════
         self.preview_area = QScrollArea()
@@ -653,7 +732,7 @@ class MainWindow(QMainWindow):
         self.thumb_grid.setSizeConstraint(QGridLayout.SetMinAndMaxSize)
         self.preview_area.setWidget(self.thumb_container)
         self.preview_area.hide()
-        root.addWidget(self.preview_area, stretch=1)
+        self.step_edit.body.addWidget(self.preview_area, stretch=1)
 
         # ══ 进度条 ═════════════════════════
         self.progress_bar = QProgressBar()
@@ -664,7 +743,7 @@ class MainWindow(QMainWindow):
             f"QProgressBar::chunk {{ background: {Theme.PRIMARY}; border-radius: 2px; }}"
         )
         self.progress_bar.hide()
-        root.addWidget(self.progress_bar)
+        self.step_output.body.addWidget(self.progress_bar)
 
         # ══ 状态 ═══════════════════════════
         self.status_label = QLabel("")
@@ -672,14 +751,15 @@ class MainWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(20)
         self.status_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; background: transparent;")
-        root.addWidget(self.status_label)
+        self.step_output.body.addWidget(self.status_label)
 
         # ══ 底部按钮区 ═════════════════════
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        btn_row.setContentsMargins(0, 4, 0, 0)
+        self.output_actions_container = QWidget()
+        self.output_grid = QGridLayout(self.output_actions_container)
+        self.output_grid.setSpacing(8)
+        self.output_grid.setContentsMargins(0, 4, 0, 0)
 
-        self.btn_send = QPushButton(" 在 Outlook 中创建邮件")
+        self.btn_send = QPushButton("在 Outlook 中创建邮件")
         self.btn_send.setFont(_font("Microsoft YaHei", 13, QFont.Bold))
         self.btn_send.setCursor(Qt.PointingHandCursor)
         self.btn_send.setEnabled(False)
@@ -689,8 +769,9 @@ class MainWindow(QMainWindow):
         self.btn_send.setIcon(_icon("mail-white", 18))
         self.btn_send.setIconSize(QSize(18, 18))
         self.btn_send.clicked.connect(self._send_email)
+        _set_test_id(self.btn_send, "createOutlookDraftButton")
 
-        self.btn_save = QPushButton(" 保存切图")
+        self.btn_save = QPushButton("保存切图")
         self.btn_save.setFont(_font("Microsoft YaHei", 12, QFont.Medium))
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setEnabled(False)
@@ -700,10 +781,11 @@ class MainWindow(QMainWindow):
         self.btn_save.setIcon(_icon("arrow-down-to-line", 16))
         self.btn_save.setIconSize(QSize(16, 16))
         self.btn_save.clicked.connect(self._save_slices)
+        _set_test_id(self.btn_save, "saveSlicesButton")
 
-        btn_row.addWidget(self.btn_send, stretch=3)
-        btn_row.addWidget(self.btn_save, stretch=2)
-        root.addLayout(btn_row)
+        self._output_action_widgets = [self.btn_send, self.btn_save]
+        self.step_output.body.addWidget(self.output_actions_container)
+        self._apply_responsive_layout(Config.WINDOW_WIDTH)
 
         # ══ 版本 ═══════════════════════════
         ver_row = QHBoxLayout()
@@ -755,11 +837,11 @@ class MainWindow(QMainWindow):
     def _reset_drop_zone(self):
         self.drop_zone.set_compact(False)
         self.drop_zone.title_label.setText("拖拽图片到此处")
-        self.drop_zone.icon_label.setPixmap(_icon("upload-cloud", 44).pixmap(44, 44))
+        self.drop_zone.icon_label.setPixmap(_icon("upload-cloud", 56).pixmap(56, 56))
         self.drop_zone.tip_label.setText("支持 JPG · PNG · BMP · WebP · GIF · PDF · PPT/PPTX · PSD/PSB，点击上传")
 
     def _on_width_edited(self):
-        """手动输入完成时同步到滑块，超限弹窗提醒"""
+        """手动输入宽度后校验范围，超限自动修正"""
         try:
             v = int(self.edit_width.text())
             if v < 400:
@@ -781,6 +863,9 @@ class MainWindow(QMainWindow):
             self._select_file()
         elif (mod & Qt.ControlModifier) and event.key() == Qt.Key_V:
             self._paste_image()
+        elif (mod & Qt.ControlModifier) and event.key() == Qt.Key_Return:
+            if self.btn_send.isEnabled():
+                self._create_outlook_mail()
         elif event.key() == Qt.Key_Escape:
             self.reset_app()
         else:
@@ -806,21 +891,28 @@ class MainWindow(QMainWindow):
         self._handle_dropped_files([temp_path])
 
     def _on_export_mode_changed(self, state: int):
-        """
-        V4.7.7 Fix E: 切换模式时即时状态反馈。
-        避免用户点完 toggle 不知道现在走哪个流程。
-        """
-        # state 是 Qt.CheckState 枚举的 int 值（非零=True）
+        """切换模式时弹预览说明 + 状态反馈。"""
         if bool(state):
             # 导出模式
             self._set_status(
-                "导出图片模式：拖入文件后将合并/转换为单张长图保存到本地",
+                "导出图片：拖入文件后选择格式和保存路径，只保存到本地",
                 "info"
+            )
+            QMessageBox.information(
+                self,
+                "导出图片模式",
+                "已切换到「导出图片」模式。\n\n"
+                "操作流程：\n"
+                "1. 拖入图片（支持多张合并）\n"
+                "2. 选择输出格式（PNG / JPG）\n"
+                "3. 选择保存路径\n\n"
+                "导出的图片只保存到本地，不会创建 Outlook 邮件。\n"
+                "如需发送邮件，请关闭此开关回到切图模式。"
             )
         else:
             # 切图模式（默认）
             self._set_status(
-                "切图模式：拖入文件后将切成多片，可在面板添加可点击按钮后发送 Outlook",
+                "邮件切图模式：拖入后可调整切线、添加链接并创建 Outlook 草稿",
                 "info"
             )
 
@@ -1081,7 +1173,7 @@ class MainWindow(QMainWindow):
 
         self.file_path = path
         self.drop_zone.title_label.setText(Path(path).name)
-        self.drop_zone.icon_label.setPixmap(_icon("check", 44).pixmap(44, 44))
+        self.drop_zone.icon_label.setPixmap(_icon("check", 56).pixmap(56, 56))
         self.drop_zone.tip_label.setText("正在切片处理...")
         self._set_status("正在处理，请稍候...", "info")
         self.progress_bar.setValue(0)
@@ -1089,30 +1181,56 @@ class MainWindow(QMainWindow):
         self._start_worker(path)
 
     def _start_worker(self, path: str):
-        # V4.8.7: quit() + wait() 而非仅 deleteLater()，避免双线程并发
-        if self.worker is not None:
-            if self.worker.isRunning():
-                self.worker.quit()
-                if not self.worker.wait(2000):
-                    # 兜底：2s 未结束则强制 terminate
-                    self.worker.terminate()
-                    self.worker.wait(1000)
-            self.worker.deleteLater()
-            self.worker = None
-        self.worker = ProcessWorker(path, self._get_width(), smart=self.chk_smart.isChecked())
-        self.worker.progress.connect(self.progress_bar.setValue)
-        self.worker.finished.connect(self._on_processed)
-        self.worker.error.connect(self._on_error)
-        self.worker.start()
+        self._retire_active_worker()
+        self._active_job_id += 1
+        job_id = self._active_job_id
+        worker = ProcessWorker(path, self._get_width(), smart=self.chk_smart.isChecked())
+        self.worker = worker
+        worker.progress.connect(lambda value, token=job_id: self._on_worker_progress(token, value))
+        worker.finished.connect(
+            lambda paths, token=job_id, owner=worker: self._on_processed(paths, token, owner)
+        )
+        worker.error.connect(
+            lambda msg, token=job_id, owner=worker: self._on_error(msg, token, owner)
+        )
+        worker.finished.connect(lambda _paths, owner=worker: self._release_worker(owner))
+        worker.error.connect(lambda _msg, owner=worker: self._release_worker(owner))
+        worker.start()
 
-    def _on_processed(self, paths: List[str]):
+    def _on_worker_progress(self, job_id: int, value: int):
+        if job_id == self._active_job_id:
+            self.progress_bar.setValue(value)
+
+    def _retire_active_worker(self):
+        worker = self.worker
+        if worker is None:
+            return
+        self.worker = None
+        worker.requestInterruption()
+        if worker.isRunning() and worker not in self._retired_workers:
+            self._retired_workers.append(worker)
+        elif not worker.isRunning():
+            worker.deleteLater()
+
+    def _release_worker(self, worker: ProcessWorker):
+        if self.worker is worker:
+            self.worker = None
+        if worker in self._retired_workers:
+            self._retired_workers.remove(worker)
+        worker.deleteLater()
+
+    def _on_processed(self, paths: List[str], job_id: Optional[int] = None,
+                      worker: Optional[ProcessWorker] = None):
+        if job_id is not None and job_id != self._active_job_id:
+            cleanup_generated_slices(paths)
+            return
         previous_paths = list(self.slice_paths)
         self.slice_paths = paths
         if previous_paths and set(previous_paths) != set(paths):
             cleanup_generated_slices(previous_paths)
         self.drop_zone.set_compact(bool(paths))
         if paths:
-            self.drop_zone.tip_label.setText("处理完成；可重新拖入文件替换")
+            self.drop_zone.title_label.setText("处理完成；可重新拖入文件替换")
         # V4.6.7：按生成顺序填 source_index（原切片 = 1.0, 2.0, 3.0, ...）
         # 这里的“顺序”由 image_slicer.detect_and_slice 返回顺序决定
         # —— _build_slices_with_hotspots 会用本映射，未误用 path.index() 兑底
@@ -1139,16 +1257,17 @@ class MainWindow(QMainWindow):
             "warning" if size_mb > MAX_EMAIL_SIZE_MB else "success"
         )
         self._show_thumbnails(paths)
-        if self.worker:
-            self.worker.deleteLater()
+        if worker is not None and self.worker is worker:
             self.worker = None
 
-    def _on_error(self, msg: str):
+    def _on_error(self, msg: str, job_id: Optional[int] = None,
+                  worker: Optional[ProcessWorker] = None):
+        if job_id is not None and job_id != self._active_job_id:
+            return
         self.progress_bar.hide()
         self._set_status(f"❌ 处理失败: {msg}", "error")
         QMessageBox.critical(self, "处理失败", msg)
-        if self.worker:
-            self.worker.deleteLater()
+        if worker is not None and self.worker is worker:
             self.worker = None
 
     def _show_thumbnails(self, paths: List[str]):
@@ -1174,7 +1293,7 @@ class MainWindow(QMainWindow):
                 )
                 wrapper.setStyleSheet(
                     "QWidget { background: transparent; }"
-                    "QWidget:hover { background: #e5e9ff; border-radius: 8px; }"
+                    f"QWidget:hover {{ background: {Theme.DROPZONE_HOVER_BG}; border-radius: 8px; }}"
                 )
             else:
                 wrapper.setCursor(Qt.ArrowCursor)
@@ -1205,9 +1324,9 @@ class MainWindow(QMainWindow):
             label.setFont(QFont("Microsoft YaHei", 9))
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet(
-                "color: #7f8d9f; background: transparent; padding: 2px;"
+                f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; padding: 2px;"
                 if not HOTSPOT_FEATURE_ENABLED
-                else "color: #0065fd; background: transparent; padding: 2px;"
+                else f"color: {Theme.PRIMARY}; background: transparent; padding: 2px;"
             )
             wrapper_layout.addWidget(label)
 
@@ -1295,6 +1414,10 @@ class MainWindow(QMainWindow):
             ))
         return items
 
+    def _validate_hotspots_before_output(self):
+        """Validate saved hotspot data immediately before copy or Outlook draft creation."""
+        return self.hotspot_map.validate_for_images(self.slice_paths)
+
     def _copy_html(self):
         """复制 HTML 到剪贴板（同时写入 HTML 和纯文本格式）"""
         if not self.slice_paths:
@@ -1302,12 +1425,14 @@ class MainWindow(QMainWindow):
         # V4.8.7: 记录 materialize 临时文件，复制成功后清理
         temp_files: List[str] = []
         try:
+            ok, reason = self._validate_hotspots_before_output()
+            if not ok:
+                raise ValueError(f"可点击按钮检查失败：{reason}")
             display_w = self._get_width()
             from html_assembler import _materialized_temp_files
             tracked_before = len(_materialized_temp_files)
-            html = generate_plain_html(
-                self._build_slices_with_hotspots(), display_w
-            )
+            raw_slices = self._build_slices_with_hotspots()
+            html = generate_plain_html(raw_slices, display_w)
             # 只清理本次 generate_plain_html 新登记的文件。不能 glob 系统临时目录，
             # 否则会误删另一个应用实例仍在使用的 mail_*.png。
             temp_files = list(_materialized_temp_files[tracked_before:])
@@ -1318,13 +1443,18 @@ class MainWindow(QMainWindow):
             mime.setText(html)
             QGuiApplication.clipboard().setMimeData(mime)
             self._set_status(
-                "HTML 已复制，可粘贴到经典 Outlook 或网页邮箱；如需 CID 附件请用『创建 Outlook 草稿』",
+                "图片 HTML 已复制；这是手动粘贴兼容方式，链接可靠性低于『创建 Outlook 邮件』",
                 "success",
             )
             # V4.8.7: 已复制到剪贴板（base64 内嵌），清理临时文件
             deleted = cleanup_temp_slices(temp_files)
             if deleted:
                 self._set_status(f"HTML 已复制（已清理 {deleted} 个临时文件）", "success")
+            derived = [
+                item.path for item in raw_slices
+                if item.path not in set(self.slice_paths)
+            ]
+            cleanup_generated_slices(derived)
         except Exception as exc:
             QMessageBox.critical(self, "复制失败", str(exc))
 
@@ -1395,6 +1525,9 @@ class MainWindow(QMainWindow):
         # （失败时保留以供调试，正常路径下用户无感知）
         temp_files: List[str] = []
         try:
+            ok, reason = self._validate_hotspots_before_output()
+            if not ok:
+                raise ValueError(f"可点击按钮检查失败：{reason}")
             display_w = self._get_width()
             raw_slices = self._build_slices_with_hotspots()
 
@@ -1415,7 +1548,13 @@ class MainWindow(QMainWindow):
 
             # 体积检测基于最终发送切片，包含 hotspot 物理切割和预渲染后的真实文件。
             size_mb = estimate_email_size_mb([s.path for s in slices])
-            if size_mb > MAX_EMAIL_SIZE_MB:
+            quality_mode = self.combo_mail_quality.currentData()
+            if quality_mode == "compress":
+                slices = self._compress_slice_items(slices)
+                temp_files.extend(s.path for s in slices)
+                compressed_size = estimate_email_size_mb([s.path for s in slices])
+                self._set_status(f"已压缩至约 {compressed_size}MB，正在打开邮件...", "success")
+            elif quality_mode == "auto" and size_mb > MAX_EMAIL_SIZE_MB:
                 btn_box = QMessageBox(self)
                 btn_box.setWindowTitle("邮件体积较大")
                 btn_box.setIcon(QMessageBox.Warning)
@@ -1441,24 +1580,32 @@ class MainWindow(QMainWindow):
                     return
                 if btn_box.clickedButton() == btn_compress:
                     slices = self._compress_slice_items(slices)
+                    temp_files.extend(s.path for s in slices)
                     compressed_size = estimate_email_size_mb([s.path for s in slices])
                     self._set_status(
                         f"已压缩至约 {compressed_size}MB，正在打开邮件...",
                         "success"
                     )
 
-            html_content = assemble_html(slices, display_w)
+            render_plan = build_render_plan(slices, display_w)
+            html_content = assemble_html(slices, display_w, prepared=True)
             subject = self.input_subject.text().strip() or "长图邮件"
             # V4.6.7：传 slices 让 outlook_sender 按 sort_key 排序后取 path
             # image_paths 保留向后兼容
             create_email_with_images(
                 html_content, subject=subject, to="",
                 slices=slices,
-                image_paths=[s.path for s in slices]
+                image_paths=[s.path for s in slices],
+                render_plan=render_plan,
             )
             self._set_status("邮件窗口已打开，请检查后发送", "success")
             # V4.8.7: Outlook 已收到 CID 附件，本地临时 PNG 可清理
             deleted = cleanup_temp_slices(temp_files)
+            derived = [
+                item.path for item in raw_slices
+                if item.path not in set(self.slice_paths)
+            ]
+            cleanup_generated_slices(derived)
             if deleted:
                 self._set_status(f"邮件窗口已打开（已清理 {deleted} 个临时文件）", "success")
         except Exception as exc:
@@ -1466,24 +1613,61 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def closeEvent(self, event):
+        """Cooperatively stop workers; never use QThread.terminate()."""
+        workers = [w for w in [self.worker, *self._retired_workers] if w is not None]
+        for worker in workers:
+            worker.requestInterruption()
+        still_running = [worker for worker in workers if worker.isRunning() and not worker.wait(5000)]
+        if still_running:
+            self._set_status("正在安全结束图片处理，请稍后再关闭窗口", "warning")
+            event.ignore()
+            return
+        super().closeEvent(event)
         if self.slice_paths and self.preview_area.isVisible():
             self._show_thumbnails(self.slice_paths)
 
+    def _apply_responsive_layout(self, width: int):
+        """Reflow edit actions and output buttons without shrinking controls."""
+        if not hasattr(self, "edit_actions_grid"):
+            return
+        edit_columns = 3
+        while self.edit_actions_grid.count():
+            self.edit_actions_grid.takeAt(0)
+        for index, widget in enumerate(self._edit_action_widgets):
+            row, column = divmod(index, edit_columns)
+            self.edit_actions_grid.addWidget(widget, row, column)
+        self.edit_actions_grid.setColumnStretch(edit_columns, 1)
+
+        if not hasattr(self, "output_grid"):
+            return
+        output_columns = 2
+        while self.output_grid.count():
+            self.output_grid.takeAt(0)
+        for index, widget in enumerate(self._output_action_widgets):
+            row, column = divmod(index, output_columns)
+            self.output_grid.addWidget(widget, row, column)
+        for column in range(output_columns):
+            self.output_grid.setColumnStretch(column, 1)
+
     def reset_app(self):
+        if self.slice_paths:
+            reply = QMessageBox.question(
+                self, "确认重置",
+                "重置将清除当前所有切片和热区数据，确定继续吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
         cleanup_generated_slices(self.slice_paths)
         self.slice_paths = []
         # V4.6.7 修复：重置时同步清空 source_index 映射，避免残留
         self.slice_source_index = {}
         self.file_path = None
-        # V4.8.7: quit() + wait() 而非仅 deleteLater()，避免双线程并发
-        if self.worker is not None:
-            if self.worker.isRunning():
-                self.worker.quit()
-                if not self.worker.wait(2000):
-                    self.worker.terminate()
-                    self.worker.wait(1000)
-            self.worker.deleteLater()
-            self.worker = None
+        self._active_job_id += 1
+        self._retire_active_worker()
         self.hotspot_map.clear()
         self._reset_drop_zone()
         self.input_subject.clear()

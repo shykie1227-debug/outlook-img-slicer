@@ -112,6 +112,77 @@ class SliceItem:
     original_width: int = 0
 
 
+@dataclass(frozen=True)
+class MailRenderItem:
+    """Final immutable geometry shared by HTML generation and Outlook CID attachment order."""
+
+    path: str
+    href: Optional[str]
+    alt_text: str
+    sort_key: float
+    physical_width: int
+    physical_height: int
+    display_width: int
+    display_height: int
+    cid: str
+
+
+@dataclass(frozen=True)
+class MailRenderPlan:
+    display_width: int
+    items: Tuple[MailRenderItem, ...]
+
+
+def build_render_plan(slices: List[SliceItem], display_w: int = 650) -> MailRenderPlan:
+    """Create the canonical ordered geometry used by the final email."""
+    ordered = sorted(slices, key=lambda item: item.sort_key)
+    groups = _group_by_source(ordered)
+    if _is_plain_vertical_stack(groups):
+        render_items = []
+        effective_width = 0
+        for index, item in enumerate(ordered, start=1):
+            physical_width, physical_height = _get_img_dimensions(item.path)
+            if effective_width == 0:
+                effective_width = physical_width
+            render_items.append(MailRenderItem(
+                path=item.path,
+                href=item.href,
+                alt_text=item.alt_text,
+                sort_key=item.sort_key,
+                physical_width=physical_width,
+                physical_height=physical_height,
+                display_width=physical_width,
+                display_height=physical_height,
+                cid=f"slice_{index:03d}",
+            ))
+        return MailRenderPlan(effective_width or int(display_w), tuple(render_items))
+
+    widths_by_path: Dict[str, int] = {}
+    heights_by_path: Dict[str, int] = {}
+    for group in groups:
+        widths = _allocate_group_widths(group, display_w)
+        height = _compute_group_height(group, display_w)
+        for item in group:
+            widths_by_path[item.path] = widths[item.path]
+            heights_by_path[item.path] = height
+
+    render_items = []
+    for index, item in enumerate(ordered, start=1):
+        physical_width, physical_height = _get_img_dimensions(item.path)
+        render_items.append(MailRenderItem(
+            path=item.path,
+            href=item.href,
+            alt_text=item.alt_text,
+            sort_key=item.sort_key,
+            physical_width=physical_width,
+            physical_height=physical_height,
+            display_width=widths_by_path[item.path],
+            display_height=heights_by_path[item.path],
+            cid=f"slice_{index:03d}",
+        ))
+    return MailRenderPlan(_normalize_display_width(display_w), tuple(render_items))
+
+
 def _get_img_dimensions(img_path: str) -> tuple:
     """
     获取图片实际像素尺寸 (width, height)。
@@ -714,56 +785,89 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             for s in seg_list:
                 prepared.append(s)
 
-    # 2. 处理 hotspot 行
-    for key in sorted(hotspot_rows_map.keys()):
-        group = hotspot_rows_map[key]
-        if not group:
-            continue
-        allocated_widths = _allocate_group_widths(group, display_w_even)
-        row_height = _compute_group_height(group, display_w_even)
+    # 2. 处理 hotspot 行：同一源图先完整重组，只做一次 LANCZOS 缩放，再切回。
+    # 独立缩放每一行会在行边界重复采样，Outlook 中容易表现为细线或错位。
+    hotspot_sources: Dict[int, List[Tuple[Tuple[int, int], List[SliceItem]]]] = {}
+    for key in sorted(hotspot_rows_map):
+        hotspot_sources.setdefault(key[0], []).append((key, hotspot_rows_map[key]))
+
+    for _src_idx, keyed_groups in sorted(hotspot_sources.items()):
+        fallback_groups = [group for _, group in keyed_groups]
         try:
-            source_parts = []
-            total_w = 0
-            max_h = 0
-            for s in group:
-                with Image.open(s.path) as img:
-                    part = img.convert("RGB")
-                    source_parts.append((s, part.copy()))
-                    total_w += part.width
-                    max_h = max(max_h, part.height)
-            if total_w <= 0 or max_h <= 0:
-                raise ValueError("invalid image size")
+            row_records = []
+            source_width = 0
+            source_height = 0
+            target_height = 0
+            for _key, group in keyed_groups:
+                if not group:
+                    continue
+                source_parts = []
+                row_width = 0
+                row_height = 0
+                for s in sorted(group, key=lambda item: item.sort_key):
+                    with Image.open(s.path) as img:
+                        part = img.convert("RGB").copy()
+                    source_parts.append((s, part))
+                    row_width += part.width
+                    row_height = max(row_height, part.height)
+                if row_width <= 0 or row_height <= 0:
+                    raise ValueError("invalid hotspot row size")
 
-            source_row = Image.new("RGB", (total_w, max_h))
-            x = 0
-            for _, part in source_parts:
-                source_row.paste(part, (x, 0))
-                x += part.width
+                row_image = Image.new("RGB", (row_width, row_height))
+                x = 0
+                for _, part in source_parts:
+                    row_image.paste(part, (x, 0))
+                    x += part.width
+                allocated = _allocate_group_widths(group, display_w_even)
+                output_height = _compute_group_height(group, display_w_even)
+                row_records.append((source_parts, row_image, allocated, output_height))
+                source_width = max(source_width, row_width)
+                source_height += row_height
+                target_height += output_height
 
-            target_total_w = sum(
-                _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
-                for s, _ in source_parts
+            if not row_records or source_width <= 0 or source_height <= 0:
+                raise ValueError("invalid hotspot source size")
+
+            full_source = Image.new("RGB", (source_width, source_height))
+            source_y = 0
+            for _parts, row_image, _allocated, _height in row_records:
+                if row_image.width != source_width:
+                    # Physical hotspot partitions should share one source width.
+                    # Extend the final edge rather than introducing a white/black strip.
+                    extended = Image.new("RGB", (source_width, row_image.height))
+                    extended.paste(row_image, (0, 0))
+                    edge = row_image.crop((row_image.width - 1, 0, row_image.width, row_image.height))
+                    for x in range(row_image.width, source_width):
+                        extended.paste(edge, (x, 0))
+                    row_image = extended
+                full_source.paste(row_image, (0, source_y))
+                source_y += row_image.height
+
+            full_resized = full_source.resize(
+                (display_w_even, target_height), Image.LANCZOS
             )
-            source_row_resized = source_row.resize((target_total_w, row_height), Image.LANCZOS)
-
-            crop_x = 0
-            for s, _ in source_parts:
-                counter += 1
-                target_w = _even_pixel_4x(int(allocated_widths.get(s.path, display_w_even)))
-                target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
-                part = source_row_resized.crop((crop_x, 0, crop_x + target_w, row_height))
-                part.save(target_path, "PNG")
-                crop_x += target_w
-                prepared.append(SliceItem(
-                    path=str(target_path),
-                    href=s.href,
-                    alt_text=s.alt_text,
-                    sort_key=s.sort_key,
-                    original_width=display_w_even,
-                ))
+            crop_y = 0
+            for source_parts, _row_image, allocated, output_height in row_records:
+                crop_x = 0
+                for s, _part in source_parts:
+                    counter += 1
+                    target_w = int(allocated.get(s.path, display_w_even))
+                    target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
+                    part = full_resized.crop(
+                        (crop_x, crop_y, crop_x + target_w, crop_y + output_height)
+                    )
+                    part.save(target_path, "PNG")
+                    crop_x += target_w
+                    prepared.append(SliceItem(
+                        path=str(target_path), href=s.href, alt_text=s.alt_text,
+                        sort_key=s.sort_key, original_width=display_w_even,
+                    ))
+                if crop_x != display_w_even:
+                    raise ValueError("hotspot row width contract failed")
+                crop_y += output_height
         except Exception:
-            for s in group:
-                prepared.append(s)
+            for group in fallback_groups:
+                prepared.extend(group)
 
     # 按 sort_key 排序返回
     prepared.sort(key=lambda s: s.sort_key)
@@ -801,7 +905,8 @@ def materialize_display_slices_strict(slices: List[SliceItem], display_w: int = 
     return prepared
 
 
-def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
+def assemble_html(slices: List[SliceItem], display_w: int = 650,
+                  prepared: bool = False) -> str:
     """
     生成适用于 Outlook 的 HTML 邮件正文（CID 内联嵌入版）。
 
@@ -833,7 +938,8 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
             # 与 HTML 声明的 4x 宽/高严格一致，消除纵向/横向错位与表间缝隙。
             # 临时文件由 materialize_display_slices_strict 内部 _track_temp_files 登记，
             # 调用方可用 cleanup_temp_slices 清理（V5 main.py 已做）。
-            slices = materialize_display_slices_strict(slices, effective_w)
+            if not prepared:
+                slices = materialize_display_slices_strict(slices, effective_w)
             sorted_slices = sorted(slices, key=lambda s: s.sort_key)
             groups = _group_by_source(sorted_slices)
             content_blocks, cid_counter = _build_complex_inline_stack(
@@ -844,10 +950,13 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650) -> str:
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
-            f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">\n'
+            f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office" '
+            f'xmlns:v="urn:schemas-microsoft-com:vml">\n'
             f'<head>\n'
             f'<meta http-equiv="Content-Type" content="text/html; charset=utf-8">\n'
             f'<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+            f'<!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/>'
+            f'<o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->\n'
             f'<title>长图邮件</title>\n'
             f'</head>\n'
             f'<body style="margin: 0; padding: 0; background-color: #ffffff; '

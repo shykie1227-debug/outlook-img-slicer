@@ -32,6 +32,16 @@ def test_vm_build_script_builds_desktop_pyside_exe_without_electron():
     assert "sidecar_server" not in lowered
 
 
+def test_vm_build_rejects_locked_or_stale_output():
+    source = (ROOT / "vm_build.ps1").read_text(encoding="utf-8")
+
+    assert 'Get-Process -Name "OutlookImgSlicer"' in source
+    assert 'Fail "Unable to clean local build directory' in source
+    assert "$buildStartedAt" in source
+    assert "LastWriteTimeUtc -lt $buildStartedAt" in source
+    assert 'Join-Path $SharedRoot "build-manifest.json"' in source
+
+
 def test_manual_windows_build_script_uses_same_desktop_entrypoint():
     """Double-click/manual Windows builds should match the VM/release target."""
     source = (ROOT / "build.ps1").read_text(encoding="utf-8")
@@ -85,9 +95,11 @@ def test_repository_no_longer_contains_electron_or_sidecar_release_tree():
         assert not (ROOT / rel).exists(), f"旧架构残留未清理: {rel}"
 
 
-def test_github_workflow_uses_desktop_dist_output():
-    """CI must upload the PySide desktop build output, not a stale root dist path."""
+def test_github_workflow_uses_verified_build_manifest():
+    """CI must consume the exact hashed artifact, not guess from a stale dist path."""
     source = (ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
 
-    assert "desktop/dist/OutlookImgSlicer.exe" in source
-    assert not re.search(r'(?<!desktop/)dist/OutlookImgSlicer\.exe', source)
+    assert "build-manifest.json" in source
+    assert "Get-FileHash -Algorithm SHA256" in source
+    assert "manifest.artifact_path" in source
+    assert "python -m pytest tests/ -q" in source
