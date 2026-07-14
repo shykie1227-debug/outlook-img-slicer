@@ -103,3 +103,6 @@ def test_github_workflow_uses_verified_build_manifest():
     assert "Get-FileHash -Algorithm SHA256" in source
     assert "manifest.artifact_path" in source
     assert "python -m pytest tests/ -q" in source
+    assert "pip install pytest" in source
+    assert "python -m compileall -q" in source
+    assert "desktop/*.py" not in source

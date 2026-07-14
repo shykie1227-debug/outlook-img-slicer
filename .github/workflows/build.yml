@@ -30,13 +30,14 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install pytest
 
       - name: Run tests and runtime safety audit
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m pytest tests/ -q
-          python -m py_compile build.py desktop/*.py image_slicer.py html_assembler.py outlook_sender.py clipboard_html.py clickable_map.py hotspot_slicer.py image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py
+          python -m compileall -q build.py desktop tests image_slicer.py html_assembler.py outlook_sender.py clipboard_html.py clickable_map.py hotspot_slicer.py image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py
 
       - name: Build EXE
         env:
