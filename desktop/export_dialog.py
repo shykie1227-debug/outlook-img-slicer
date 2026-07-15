@@ -50,6 +50,7 @@ from PySide6.QtGui import QFont, QIcon
 import os
 
 from theme import Theme, fit_window_to_screen
+from ui_scaling import ResponsiveDialogMixin
 
 def _resource_dir(name: str) -> str:
     bases = [
@@ -81,7 +82,7 @@ FMT_JPG = "jpg"  # 有损，白底
 DEFAULT_JPG_QUALITY = 85  # JPG 默认压缩品质
 
 
-class ExportFormatDialog(QDialog):
+class ExportFormatDialog(ResponsiveDialogMixin, QDialog):
     """
     图片导出格式选择弹窗。
     Returns: (format, keep_alpha, jpg_quality, save_dir) via .get_result()
@@ -96,6 +97,7 @@ class ExportFormatDialog(QDialog):
         self.save_dir: Optional[str] = initial_save_dir if initial_save_dir else None
         self._build_ui()
         fit_window_to_screen(self, (580, 620), (480, 340))
+        self._setup_responsive_dialog_scale(580)
 
     def _build_ui(self):
         self.setWindowTitle("图片导出 - 选择格式")
@@ -121,7 +123,7 @@ class ExportFormatDialog(QDialog):
         info_lbl.setAlignment(Qt.AlignCenter)
         info_lbl.setStyleSheet(
             f"color: {Theme.TEXT_PRIMARY}; background: {Theme.GHOST_BG}; padding: 10px 16px; "
-            f"border-radius: 999px; border: 1px solid {Theme.BORDER}; font-family: Microsoft YaHei, sans-serif;"
+            f"border-radius: 12px; border: 1px solid {Theme.BORDER}; font-family: Microsoft YaHei, sans-serif;"
         )
         info_lbl.setWordWrap(True)
         root.addWidget(info_lbl)
@@ -250,7 +252,7 @@ class ExportFormatDialog(QDialog):
         btn_browse.setIconSize(QSize(16, 16))
         btn_browse.setFixedHeight(34)
         btn_browse.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: none; border-radius: 999px; "
+            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: none; border-radius: 17px; "
             "padding: 0 14px; font-family: Microsoft YaHei, sans-serif; }"
             f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
         )
@@ -268,7 +270,7 @@ class ExportFormatDialog(QDialog):
         btn_cancel.setFixedSize(90, 36)
         btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: none; border-radius: 999px; "
+            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: none; border-radius: 18px; "
             "font-family: Microsoft YaHei, sans-serif; }"
             f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
         )
@@ -282,7 +284,7 @@ class ExportFormatDialog(QDialog):
         btn_ok.setIcon(_icon("arrow-down-to-line-white", 18))
         btn_ok.setIconSize(QSize(18, 18))
         btn_ok.setStyleSheet(
-            f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; border: none; border-radius: 999px; "
+            f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; border: none; border-radius: 18px; "
             "font-family: Microsoft YaHei, sans-serif; }"
             f"QPushButton:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
         )

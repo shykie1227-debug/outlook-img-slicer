@@ -71,17 +71,26 @@ def write_build_manifest(artifact: Path, artifact_kind: str) -> Path:
 
 
 def _get_git_sha() -> str:
-    """取当前 git commit SHA（前 8 位），无 git 环境返回 'unknown'
+    """Return the full source commit SHA, with an override for copied VM builds.
+
+    ``vm_build.ps1`` copies the source without ``.git`` to avoid shared-folder
+    locks, so it passes the already verified commit through the environment.
+    Invalid overrides are ignored rather than written into a release manifest.
+
     V4.7.7 R3.2: 显式 utf-8 + errors='replace'，兼容 Windows 中文系统（默认 gbk 乱码）"""
+    override = os.environ.get("OUTLOOK_IMG_SLICER_GIT_SHA", "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{40}", override):
+        return override
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "rev-parse", "HEAD"],
             cwd=PROJECT_ROOT,
             capture_output=True, text=True, timeout=5,
             encoding="utf-8", errors="replace",
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
+        candidate = result.stdout.strip().lower()
+        if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", candidate):
+            return candidate
     except Exception:
         pass
     return "unknown"

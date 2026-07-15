@@ -43,6 +43,7 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QMouseEvent, QFont, Q
 from clickable_map import HotspotMap, Hotspot
 
 from theme import Theme, fit_window_to_screen
+from ui_scaling import ResponsiveDialogMixin
 
 import os
 
@@ -263,7 +264,7 @@ class ImageCanvas(QLabel):
             painter.drawRect(rect)
 
 
-class HotspotEditorDialog(QDialog):
+class HotspotEditorDialog(ResponsiveDialogMixin, QDialog):
     """单张切片的热区编辑对话框（V4.6.1 重设计）。"""
 
     def __init__(self, slice_path: str, hotspot_map: HotspotMap, parent=None,
@@ -292,6 +293,7 @@ class HotspotEditorDialog(QDialog):
         # V4.6.8：初始 fit 一次画布宽度（处理小窗口打开场景）
         self._refit_canvas_to_size()
         self._refresh()
+        self._setup_responsive_dialog_scale(880)
 
     # ── UI 构造 ──────────────────────────────
     def _build_ui(self):
@@ -381,7 +383,7 @@ class HotspotEditorDialog(QDialog):
         self.btn_add.setIcon(_icon("check-white", 18))
         self.btn_add.setIconSize(QSize(18, 18))
         self.btn_add.setStyleSheet(
-            f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; border: none; border-radius: 999px; font-weight: bold; }}"
+            f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; border: none; border-radius: 17px; font-weight: bold; }}"
             f"QPushButton:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
             f"QPushButton:disabled {{ background: {Theme.PRIMARY_DISABLED}; color: {Theme.TEXT_PLACEHOLDER}; }}"
         )
@@ -392,7 +394,7 @@ class HotspotEditorDialog(QDialog):
         self.btn_cancel_sel.setFixedSize(90, 34)
         self.btn_cancel_sel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel_sel.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: 1px solid {Theme.BORDER}; border-radius: 999px; }}"
+            f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; border: 1px solid {Theme.BORDER}; border-radius: 17px; }}"
             f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
             f"QPushButton:disabled {{ color: {Theme.TEXT_DISABLED}; background: {Theme.CARD}; }}"
         )
@@ -436,7 +438,7 @@ class HotspotEditorDialog(QDialog):
         self.btn_close.setIcon(_icon("check-white", 18))
         self.btn_close.setIconSize(QSize(18, 18))
         self.btn_close.setStyleSheet(
-            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+            "QPushButton { background: #0065fd; color: white; border: none; border-radius: 18px; font-weight: bold; }"
             "QPushButton:hover { background: #0057da; }"
             "QPushButton:disabled { background: #e5e9ff; color: #7f8d9f; }"
         )
@@ -598,7 +600,7 @@ class HotspotEditorDialog(QDialog):
         self.btn_add.setText(" 添加")
         if edit_mode_done:
             self.btn_add.setStyleSheet(
-                "QPushButton { background: #0065fd; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+                "QPushButton { background: #0065fd; color: white; border: none; border-radius: 17px; font-weight: bold; }"
                 "QPushButton:hover { background: #0057da; }"
             )
 
@@ -641,7 +643,7 @@ class HotspotEditorDialog(QDialog):
         # 改按钮文字和颜色
         self.btn_add.setText(" 更新")
         self.btn_add.setStyleSheet(
-            "QPushButton { background: #ef4444; color: white; border: none; border-radius: 999px; font-weight: bold; }"
+            "QPushButton { background: #ef4444; color: white; border: none; border-radius: 17px; font-weight: bold; }"
             "QPushButton:hover { background: #dc2626; }"
         )
         # 清空 URL 输入（用户可能要改 URL）
@@ -678,8 +680,10 @@ class HotspotEditorDialog(QDialog):
             )
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, i)
-            item.setFont(QFont("Microsoft YaHei", 9))
-            item.setSizeHint(item.sizeHint().expandedTo(__import__("PySide6").QtCore.QSize(0, 50)))
+            item.setFont(QFont("Microsoft YaHei", self._scaled_dialog_value(9)))
+            item.setSizeHint(item.sizeHint().expandedTo(
+                QSize(0, self._scaled_dialog_value(50))
+            ))
             self.list_widget.addItem(item)
         # 更新计数
         self.list_label.setText(f"已添加热区（{len(self._current)} 个）:")

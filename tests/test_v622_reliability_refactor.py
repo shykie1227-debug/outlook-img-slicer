@@ -105,6 +105,54 @@ def test_hotspot_materialize_uses_one_global_resize(tmp_path):
     assert reconstructed.tobytes() == expected.tobytes()
 
 
+def test_many_hotspot_rows_keep_the_whole_image_aspect_ratio(tmp_path):
+    source = Image.new("RGB", (1000, 1000), "white")
+    for top, bottom, color in (
+        (0, 101, "red"), (101, 202, "green"),
+        (202, 303, "blue"), (303, 1000, "yellow"),
+    ):
+        source.paste(color, (0, top, source.width, bottom))
+
+    items = []
+    row_bounds = (0, 101, 202, 303, 1000)
+    for row, (top, bottom) in enumerate(zip(row_bounds, row_bounds[1:]), start=1):
+        for col, (left, right) in enumerate(((0, 437), (437, 1000)), start=1):
+            path = tmp_path / f"many-r{row}c{col}.png"
+            source.crop((left, top, right, bottom)).save(path)
+            items.append(SliceItem(
+                path=str(path),
+                href=f"https://r{row}c{col}.example" if col == 2 else None,
+                sort_key=1 + row / 1000 + col / 1_000_000,
+                original_width=1000,
+            ))
+
+    prepared = materialize_display_slices(items, 648)
+    rows = {}
+    for item in prepared:
+        row = int((item.sort_key - int(item.sort_key)) * 1000 + 1e-6)
+        rows.setdefault(row, []).append(item)
+
+    reconstructed_rows = []
+    for row in sorted(rows):
+        parts = [Image.open(item.path).convert("RGB") for item in sorted(rows[row], key=lambda i: i.sort_key)]
+        canvas = Image.new("RGB", (sum(part.width for part in parts), parts[0].height))
+        x = 0
+        for part in parts:
+            canvas.paste(part, (x, 0))
+            x += part.width
+        reconstructed_rows.append(canvas)
+
+    reconstructed = Image.new("RGB", (648, sum(row.height for row in reconstructed_rows)))
+    y = 0
+    for row in reconstructed_rows:
+        reconstructed.paste(row, (0, y))
+        y += row.height
+
+    assert reconstructed.size == (648, 648)
+    expected = source.resize((648, 648), Image.Resampling.LANCZOS)
+    assert reconstructed.tobytes() == expected.tobytes()
+
+
 def test_build_manifest_contract_is_machine_readable():
     build_source = (Path(__file__).parents[1] / "desktop" / "build.py").read_text(encoding="utf-8")
     build_ps1 = (Path(__file__).parents[1] / "build.ps1").read_text(encoding="utf-8")

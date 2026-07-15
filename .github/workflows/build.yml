@@ -5,11 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  release:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -52,10 +51,7 @@ jobs:
           if (-not (Test-Path $manifest.artifact_path)) { throw "Manifest artifact missing" }
           $hash = (Get-FileHash -Algorithm SHA256 $manifest.artifact_path).Hash.ToLowerInvariant()
           if ($hash -ne $manifest.sha256) { throw "Manifest SHA-256 mismatch" }
-          if ("${{ github.event_name }}" -eq "release") {
-            $tagVersion = "${{ github.event.release.tag_name }}" -replace '^v', ''
-            if ($tagVersion -ne $manifest.app_version) { throw "Release tag does not match app version" }
-          }
+          if ($manifest.git_sha -ne "${{ github.sha }}") { throw "Manifest source commit mismatch" }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item $manifest.artifact_path (Join-Path dist $manifest.release_filename) -Force
 
@@ -63,25 +59,9 @@ jobs:
         id: asset_names
         shell: pwsh
         run: |
-          $tag = "${{ github.event.release.tag_name }}"
-          if ($tag -match "v(\d+\.\d+\.\d+)") {
-            $version = $Matches[1]
-          } else {
-            $version = "dev"
-          }
+          $manifest = Get-Content -Raw -Encoding UTF8 build-manifest.json | ConvertFrom-Json
+          $version = $manifest.app_version
           "version=$version" >> $env:GITHUB_OUTPUT
-          "zip_name=OutlookImgSlicer-V$version.zip" >> $env:GITHUB_OUTPUT
-
-      - name: Compress EXE
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
-          $exe = Get-ChildItem "dist/OutlookImgSlicer-V*.exe" | Select-Object -First 1
-          Compress-Archive -Path $exe.FullName -DestinationPath "dist/${{ steps.asset_names.outputs.zip_name }}" -Force
-          Write-Host "EXE size MB:"
-          $exe.Length / 1MB
-          Write-Host "ZIP size MB:"
-          (Get-Item "dist/${{ steps.asset_names.outputs.zip_name }}").Length / 1MB
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -90,39 +70,4 @@ jobs:
           path: |
             dist/OutlookImgSlicer-V*.exe
             build-manifest.json
-            dist/${{ steps.asset_names.outputs.zip_name }}
           retention-days: 5
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release'
-
-    steps:
-      - name: Compute release asset names
-        id: asset_names
-        shell: bash
-        run: |
-          tag="${{ github.event.release.tag_name }}"
-          if [[ "$tag" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            version="${BASH_REMATCH[1]}"
-          else
-            version="dev"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "zip_name=OutlookImgSlicer-V$version.zip" >> "$GITHUB_OUTPUT"
-
-      - name: Download EXE
-        uses: actions/download-artifact@v4
-        with:
-          name: OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}
-
-      - name: Upload Release assets
-        run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
-            "dist/OutlookImgSlicer-V${{ steps.asset_names.outputs.version }}.exe#OutlookImgSlicer.exe" \
-            "${{ steps.asset_names.outputs.zip_name }}" \
-            --repo "${{ github.repository }}" \
-            --clobber
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

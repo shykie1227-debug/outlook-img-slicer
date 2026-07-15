@@ -1,6 +1,6 @@
 # SPEC.md - Outlook 长图助手产品与技术规格
 
-> 当前版本：V6.2.2
+> 当前版本：V6.3.0
 > 当前架构：稳定 V6/PySide 桌面应用 + Python 图像处理 + 经典 Outlook COM
 > 目标平台：Windows / 经典 Outlook
 
@@ -129,7 +129,7 @@ Outlook 使用 Word 引擎，不等同于浏览器。必须遵守：
 - spec：`desktop/outlook_img_slicer.spec`
 - VM 构建入口：`vm_start_build.ps1`
 - VM 构建脚本：`vm_build.ps1`
-- 输出文件名：`OutlookImgSlicer-V6.2.2.exe`
+- 输出文件名：`OutlookImgSlicer-V6.3.0.exe`
 - 每次构建生成 `build-manifest.json`，包装脚本必须校验其中的产物路径与 SHA-256。
 - EXE 内部文件名：`OutlookImgSlicer.exe`
 - 图标来源：根目录 `icon.ico`，界面 SVG 来源为 `icons/`

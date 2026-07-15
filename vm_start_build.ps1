@@ -8,6 +8,11 @@ vm_build.ps1 as a detached process so the build continues even if
 prlctl exec disconnects.
 #>
 
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$SourceGitSha
+)
+
 $buildScript = "\\Mac\Home\outlook-img-slicer\vm_build.ps1"
 $logFile = "\\Mac\Home\outlook-img-slicer\vm_build.log"
 $statusFile = "\\Mac\Home\outlook-img-slicer\vm_build_status.txt"
@@ -17,7 +22,7 @@ $statusFile = "\\Mac\Home\outlook-img-slicer\vm_build_status.txt"
 
 # Launch build script as detached process
 $proc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$buildScript `
+    -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$buildScript,"-SourceGitSha",$SourceGitSha `
     -WindowStyle Hidden `
     -PassThru
 

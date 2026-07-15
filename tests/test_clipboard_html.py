@@ -1,6 +1,8 @@
 import re
 
 from main import _build_windows_clipboard_html
+from PIL import Image
+from html_assembler import SliceItem, generate_plain_html
 
 
 def _offsets(payload: bytes) -> dict[str, int]:
@@ -33,3 +35,13 @@ def test_cf_html_fragment_boundaries_preserve_complete_html():
 
     copied = payload[offsets["StartFragment"]:offsets["EndFragment"]]
     assert copied.decode("utf-8") == fragment
+
+
+def test_plain_clipboard_html_has_an_outlook_centering_container(tmp_path):
+    image = tmp_path / "slice.png"
+    Image.new("RGB", (648, 120), "white").save(image)
+
+    html = generate_plain_html([SliceItem(path=str(image), sort_key=1.0)], 648)
+
+    assert '<div align="center"' in html
+    assert 'width: 100%; text-align: center;' in html

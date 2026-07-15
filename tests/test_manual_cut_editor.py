@@ -5,6 +5,14 @@ from PIL import Image
 
 import image_slicer
 
+pytest.importorskip("PySide6")
+from PySide6.QtWidgets import QApplication
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    return QApplication.instance() or QApplication([])
+
 
 def _manual_api():
     validate = getattr(image_slicer, "validate_cut_positions", None)
@@ -12,6 +20,12 @@ def _manual_api():
     assert callable(validate), "validate_cut_positions 尚未实现"
     assert callable(reslice), "reslice_existing_stack 尚未实现"
     return validate, reslice
+
+
+def _complete_api():
+    complete = getattr(image_slicer, "complete_cut_positions", None)
+    assert callable(complete), "complete_cut_positions 尚未实现"
+    return complete
 
 
 def _make_vertical_gradient(path: Path, width: int, height: int) -> None:
@@ -66,3 +80,31 @@ def test_manual_cut_positions_accept_outlook_safe_boundaries():
     validate, _ = _manual_api()
 
     assert validate(2400, [800, 1600]) == [800, 1600]
+
+
+def test_free_manual_cut_is_preserved_and_long_sections_are_safely_completed():
+    complete = _complete_api()
+
+    positions = complete(2400, [300], min_height=80, max_height=1200)
+
+    assert positions[0] == 300
+    boundaries = [0, *positions, 2400]
+    heights = [bottom - top for top, bottom in zip(boundaries, boundaries[1:])]
+    assert all(80 <= height <= 1200 for height in heights)
+
+
+def test_cut_editor_drag_is_not_locked_to_the_outlook_maximum(qapp, tmp_path):
+    from cut_editor import CutEditorDialog
+
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"slice_{index}.png"
+        Image.new("RGB", (600, 1200), "white").save(path)
+        paths.append(str(path))
+
+    dialog = CutEditorDialog(paths)
+    try:
+        line = dialog._line_items[0]
+        assert round(dialog.clamp_scene_y(line, 300 * dialog._scale) / dialog._scale) == 300
+    finally:
+        dialog.close()

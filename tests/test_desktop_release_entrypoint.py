@@ -42,6 +42,19 @@ def test_vm_build_rejects_locked_or_stale_output():
     assert 'Join-Path $SharedRoot "build-manifest.json"' in source
 
 
+def test_vm_release_build_requires_and_preserves_full_source_commit():
+    """A release EXE must be traceable to the exact committed source snapshot."""
+    source = (ROOT / "vm_build.ps1").read_text(encoding="utf-8")
+    desktop_build = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
+
+    assert "SourceGitSha" in source
+    assert "^[0-9a-fA-F]{40}$" in source
+    assert '$env:OUTLOOK_IMG_SLICER_GIT_SHA = $SourceGitSha.ToLowerInvariant()' in source
+    assert '$manifest.git_sha -ne $env:OUTLOOK_IMG_SLICER_GIT_SHA' in source
+    assert 'os.environ.get("OUTLOOK_IMG_SLICER_GIT_SHA"' in desktop_build
+    assert '["git", "rev-parse", "HEAD"]' in desktop_build
+
+
 def test_manual_windows_build_script_uses_same_desktop_entrypoint():
     """Double-click/manual Windows builds should match the VM/release target."""
     source = (ROOT / "build.ps1").read_text(encoding="utf-8")
@@ -106,3 +119,27 @@ def test_github_workflow_uses_verified_build_manifest():
     assert "pip install pytest" in source
     assert "python -m compileall -q" in source
     assert "desktop/*.py" not in source
+
+
+def test_github_release_is_not_created_before_local_release_verification():
+    source = (ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
+
+    assert "release:\n    types: [created]" not in source
+    assert "Compress-Archive" not in source
+    assert "gh release upload" not in source
+
+
+def test_vm_build_runs_windows_release_gates_and_checks_copy_result():
+    source = (ROOT / "vm_build.ps1").read_text(encoding="utf-8")
+
+    assert "$robocopyCode = $LASTEXITCODE" in source
+    assert "$robocopyCode -ge 8" in source
+    assert "-m pytest" in source
+    assert "-m compileall" in source
+    assert ".VersionInfo.FileVersion" in source
+    assert ".VersionInfo.ProductVersion" in source
+    assert "Get-NetTCPConnection" in source
+    assert "-ErrorAction Stop" in source
+    assert "$second -lt 45" in source
+    assert "Start-Process -FilePath $resultExe" in source
+    assert "dulwich" in source

@@ -1,4 +1,4 @@
-# 测试计划 - Outlook 长图助手 V6.2.2
+# 测试计划 - Outlook 长图助手 V6.3.0
 
 ## 1. 目标与底线
 
@@ -8,7 +8,7 @@
 - 普通长图与热区长图必须保持顺序、居中和像素连续，不得出现可见缝隙。
 - 单切片可添加多个互不重叠的有效链接，保存后可编辑和删除。
 - Outlook 路径只创建并显示草稿；运行时代码不得包含 `mail.Send()`、联网、上传、遥测或自动更新。
-- 构建清单、文件名、窗口版本和 Windows 文件属性必须一致为 V6.2.2。
+- 构建清单、文件名、窗口版本和 Windows 文件属性必须一致为 V6.3.0。
 
 ## 2. 自动化范围
 
@@ -19,7 +19,7 @@
 | 热区 | 单/多链接、贴边、奇偶像素、越界、重叠、空链接、协议校验、再次编辑 |
 | 邮件渲染 | 普通直接 `<img>` 路径、热区物理切片、CID 数量、链接映射、零间距表格 |
 | Outlook 与剪贴板 | 草稿 `Display(False)`、CF_HTML 字节偏移、异常恢复、禁止自动发送 |
-| 主界面 | 三步流程、按钮状态、620px 窄窗口、响应式重排、压缩/品质、错误恢复 |
+| 主界面 | 三步流程、按钮状态、620px 窄窗口、主窗口与编辑弹窗全局缩放、后台导出、压缩/品质、错误恢复 |
 | 发布 | 版本同步、构建清单、SHA-256、ASCII 文件名、运行时本地安全契约 |
 
 测试数据由 pytest fixture 或临时目录动态生成，不依赖用户文件，不保留隐私数据。
@@ -28,7 +28,7 @@
 
 ```bash
 QT_QPA_PLATFORM=offscreen python3 -m pytest tests/ -q
-python3 -m py_compile *.py desktop/*.py tests/*.py
+python3 -m compileall -q build.py desktop tests
 git diff --check
 ```
 
@@ -39,6 +39,8 @@ git diff --check
 - `tests/test_v620_hotspot_preflight.py`
 - `tests/test_v622_reliability_refactor.py`
 - `tests/test_main_window_ux.py`
+- `tests/test_responsive_dialogs.py`
+- `tests/test_export_worker.py`
 - `tests/test_runtime_safety_contract.py`
 - `tests/test_release_consistency.py`
 - `tests/test_documentation_release_contract.py`
@@ -51,7 +53,7 @@ git diff --check
 1. 从共享目录复制源码到 Windows 本地目录，避免共享文件锁导致清理失败。
 2. 运行全量 pytest，再执行 PyInstaller onefile 构建。
 3. 校验 `build-manifest.json` 中的版本、产物类型、大小和 SHA-256。
-4. 复制为 `dist/OutlookImgSlicer-V6.2.2.exe`。
+4. 复制为 `dist/OutlookImgSlicer-V6.3.0.exe`。
 5. 读取 PE `FileVersion` / `ProductVersion`，启动 EXE，等待主窗口进程稳定后关闭。
 6. 检查运行期无网络请求，且 Outlook 自动化路径不存在 `mail.Send()`。
 

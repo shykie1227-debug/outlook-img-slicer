@@ -16,7 +16,7 @@
 
 ## 用户使用
 
-1. 打开 `OutlookImgSlicer-V6.2.2.exe`。
+1. 打开 `OutlookImgSlicer-V6.3.0.exe`。
 2. 拖入图片、PDF、PPT 或 PSD 文件。
 3. 按需调整邮件宽度、手动切线或添加可点击按钮。
 4. 点击“在 Outlook 中创建邮件”，在 Outlook 草稿窗口中检查后手动发送。
@@ -45,14 +45,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 输出：
 
 ```text
-dist/OutlookImgSlicer-V6.2.2.exe
+dist/OutlookImgSlicer-V6.3.0.exe
 ```
 
 本地 Parallels Windows VM 构建入口：
 
 ```powershell
-\\Mac\Home\outlook-img-slicer\vm_start_build.ps1
+\\Mac\Home\outlook-img-slicer\vm_start_build.ps1 -SourceGitSha <40位提交SHA>
 ```
+
+上面的共享目录是本地 Parallels 示例；发布构建必须传入当前源码的完整提交 SHA，
+构建清单会据此校验 EXE 与源码一致。
 
 ## 项目结构
 
@@ -63,6 +66,8 @@ outlook-img-slicer/
 │   ├── cut_editor.py           # 手动切图编辑器
 │   ├── hotspot_editor.py       # 可点击按钮/热区编辑器
 │   ├── export_dialog.py        # 图片导出设置
+│   ├── export_worker.py        # 后台导出与持续进度
+│   ├── ui_scaling.py           # 编辑弹窗统一响应式缩放
 │   ├── build.py                # PyInstaller 构建脚本
 │   └── outlook_img_slicer.spec # 单文件 EXE 打包配置
 ├── image_slicer.py             # 图片切片与智能切图

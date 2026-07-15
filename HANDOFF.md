@@ -1,8 +1,8 @@
-# HANDOFF — Outlook 长图助手 V6.2.2
+# HANDOFF — Outlook 长图助手 V6.3.0
 
-> 交接日期：2026-07-14
-> 当前版本：V6.2.2
-> 测试状态：149 passed, 0 failed
+> 交接日期：2026-07-15
+> 当前版本：V6.3.0
+> 测试状态：166 passed, 0 failed
 
 ---
 
@@ -11,7 +11,7 @@
 PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持原始清晰度。支持热区链接、智能切图、图片导出。
 
 - 架构：`PySide6 桌面界面 + Python 图像处理 + Outlook COM`
-- 构建：PyInstaller → `OutlookImgSlicer-V6.2.2.exe`
+- 构建：PyInstaller → `OutlookImgSlicer-V6.3.0.exe`
 - 平台：Windows 10/11，经典 Outlook
 
 ## 2. 当前 UI 状态
@@ -19,7 +19,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 ### 布局结构（3 步分区）
 
 ```
-[标题栏 40px — Outlook 长图助手 V6.2.2]
+[标题栏 40px — Outlook 长图助手 V6.3.0]
 [应用标题 18px + 副标题 11px]
 [引导药丸 10px：1 放入文件 → 2 调整切线/添加链接 → 3 创建邮件]
 
@@ -37,16 +37,16 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
   ├─ 状态提示(11px)
   └─ [在 Outlook 中创建邮件(Primary 42px)] [保存切图(Secondary 42px)]
 
-[版本号 V6.2.2 + 作者]
+[版本号 V6.3.0 + 作者]
 ```
 
 ### 精确尺寸规范
 
 | 类型 | 高度 | 字号 | 图标 | 字重 | 圆角 |
 |------|------|------|------|------|------|
-| Primary | 42px | 13px | 18px 白色 | 700 | 999px |
-| Secondary | 42px | 12px | 16px 深色 | 500 | 999px |
-| Ghost | 32px | 11px | 16px 深色 | 400 | 999px |
+| Primary | 42px | 13px | 18px 白色 | 700 | 21px |
+| Secondary | 42px | 12px | 16px 深色 | 500 | 21px |
+| Ghost | 32px | 11px | 16px 深色 | 400 | 16px |
 | 拖放区图标 | — | — | 56px | — | — |
 
 ### 快捷键
@@ -82,6 +82,8 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 | `desktop/cut_editor.py` | 切图位置编辑器 |
 | `desktop/hotspot_editor.py` | 热区链接编辑器 |
 | `desktop/export_dialog.py` | 图片导出格式选择弹窗 |
+| `desktop/export_worker.py` | 后台渲染、合并与写盘任务 |
+| `desktop/ui_scaling.py` | 主编辑弹窗统一响应式缩放 |
 | `desktop/version_info.txt` | Windows 版本信息 |
 | `icons/*.svg` | 13 个彩色填充图标 |
 | `image_slicer.py` | 图像切片核心 |
@@ -103,8 +105,8 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 ## 6. 测试
 
 ```bash
-python3 -m pytest tests/ -q          # 149 passed
-python3 -m py_compile desktop/*.py   # 编译检查
+python3 -m pytest tests/ -q          # 166 passed
+python3 -m compileall -q desktop     # 编译检查
 ```
 
 ## 7. 构建
@@ -115,32 +117,18 @@ python3 build.py                    # 默认内部产物 desktop/dist/OutlookImg
 
 若旧目录因 Windows/共享文件锁无法清理，内部产物会写入时间戳备用目录；
 真实路径始终以根目录 `build-manifest.json` 为准。清单记录内部产物的路径、版本、
-大小和 SHA-256。Windows 包装脚本或 VM 构建完成后，按清单复制为最终发布文件：
-`dist/OutlookImgSlicer-V6.2.2.exe`。文件名保持英文 ASCII。
+大小、SHA-256 和完整源码提交 SHA。Windows 包装脚本或 VM 构建完成后，按清单复制为最终发布文件：
+`dist/OutlookImgSlicer-V6.3.0.exe`。文件名保持英文 ASCII。
 
-## 8. 本轮（V6.2.2）修改摘要
+## 8. 本轮（V6.3.0）修改摘要
 
-### UI 布局重构
-- 设置行 QGridLayout → QHBoxLayout，两个复选框紧挨在一起
-- 6 个按钮去掉前导空格
-- _apply_responsive_layout 简化（移除 settings grid 重建）
-- "合并导出长图" → "导出图片"
-- 勾选"导出图片"时弹预览说明弹窗
-
-### 图标统一
-- 13 个图标全部 24x24 viewBox 彩色填充风格
-- DropZone 图标 4 处全部 56px
-- Ghost 按钮 16px / Primary 按钮 18px
-
-### 交互优化
-- Ctrl+Enter 创建邮件
-- 重置弹确认对话框
-- ui-preview.html 全面重写
-
-### 文档
-- DESIGN.md 第 8 节精确尺寸规范
-- CODE-AGENT-GUIDE.md 第 8 节布局结构 + 快捷键 + 复选框
-- CHANGELOG.md 分类整理
+- 切线编辑解除 1200px 拖动锁定，保留用户切线并自动补充 Outlook 安全切线。
+- 热区图片只做一次整图缩放，所有行高总和严格等于唯一目标总高。
+- 热区视觉行使用独立列网格，避免经典 Outlook 对不同 X 边界跨行重排。
+- 复制图片增加全宽居中容器，Windows 使用原生 CF_HTML 剪贴板格式。
+- 主窗口与三个编辑弹窗统一缩放字体、图标、控件尺寸、圆角、内边距和布局间距。
+- 字体启用抗锯齿质量策略，Windows 优先 Microsoft YaHei UI。
+- 导出渲染、合并和写盘在后台线程运行，显示阶段进度并真实应用 JPG 品质设置。
 
 ## 9. 后续优化空间
 

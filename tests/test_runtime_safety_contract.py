@@ -41,3 +41,10 @@ def test_outlook_runtime_displays_draft_and_never_sends():
     ]
     assert "mail.Display(False)" in source
     assert not send_calls
+
+
+def test_repository_rules_do_not_publish_private_real_name():
+    rules = (ROOT / "LOCAL_RULES.md").read_text(encoding="utf-8")
+    private_name = "".join(chr(codepoint) for codepoint in (29579, 33831, 38125))
+
+    assert private_name not in rules

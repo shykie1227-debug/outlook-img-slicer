@@ -58,12 +58,12 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
 
     assert "https://top.example" in html
     assert "https://bottom.example" in html
-    # Fix 1-A: 全部 5 行放进「1 个内层 table」+ 1 个外层 wrapper table = 2 个 table。
-    # 表间 1px 缝消失（单表结构），横向/纵向错位消除（_allocate_group_widths / _compute_group_height）。
-    assert html.count("<table") == 2
+    # 连续外表格消除纵向 block 间隙，每个视觉行独立解释自己的列边界。
+    assert html.count('data-layout="hotspot-stack"') == 1
+    assert html.count('data-layout="hotspot-row"') == 5
     assert html.count("<div") == 0
-    # 5 个内层 <tr>（每行一个）+ 1 个外层 <tr>
-    assert html.count("<tr") == 6  # 5 内层 + 1 外层
+    # 1 个邮件 wrapper 行 + 5 个 stack 行 + 5 个独立列网格行。
+    assert html.count("<tr") == 11
 
     # 所有预渲染 PNG 边缘不得出现默认黑/白异常色。
     for item in prepared:

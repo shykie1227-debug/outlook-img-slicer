@@ -38,15 +38,15 @@ def _prepared_hotspot_items(tmp_path: Path) -> list[SliceItem]:
     return materialize_display_slices_strict(raw, 648)
 
 
-def test_hotspot_rows_do_not_share_or_nest_table_columns(tmp_path):
+def test_hotspot_rows_use_independent_nested_column_grids(tmp_path):
     prepared = _prepared_hotspot_items(tmp_path)
     html = assemble_html(prepared, 648)
 
-    # Fix 1-A: 所有行放入「1 个内层 table」+ 外层 wrapper table = 2 个 table；
-    # 不再有每行独立 table（消除表间 1px 缝），也不再使用 <div>。
-    assert html.count("<table") == 2
+    # 一个连续 stack 管纵向，每行自己的单行表格管理不同的 X 边界。
+    assert html.count('data-layout="hotspot-stack"') == 1
+    assert html.count('data-layout="hotspot-row"') == 5
     assert html.count("<div") == 0
-    # 单表内每行一个 <tr height>，且 <tr height> 与 <td height> 一致（修复纵向错位）
+    assert "table-layout: fixed" in html
     assert "<tr height=" in html
 
 

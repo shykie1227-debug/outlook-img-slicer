@@ -8,9 +8,10 @@ import re
 import time
 import tempfile
 import shutil
-import traceback
 from pathlib import Path
 from typing import Optional, List, Dict
+
+os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
 # Direct source launches use desktop/ as sys.path[0]. Add the project root so
 # the documented `python desktop/main.py` entrypoint can import core modules.
@@ -23,10 +24,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QMessageBox, QFileDialog,
     QFrame, QGridLayout, QScrollArea,
-    QLineEdit, QCheckBox, QDialog, QSizePolicy, QComboBox
+    QLineEdit, QCheckBox, QDialog, QSizePolicy, QComboBox, QLayout
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator, QIcon
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontDatabase, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator, QIcon
 
 from theme import Theme, fit_window_to_screen
 
@@ -49,10 +50,11 @@ from html_assembler import (
     _group_by_source, _is_plain_vertical_stack,
 )
 from hotspot_slicer import slice_paths_by_hotspots
-from outlook_sender import create_email_with_images
+from outlook_sender import copy_cf_html_to_clipboard, create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 # 模式选择在主面板中完成，不再弹出单独模式选择窗口。
 from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
+from export_worker import ExportWorker
 from clipboard_html import (
     build_windows_clipboard_html as _build_windows_clipboard_html,
 )
@@ -157,7 +159,7 @@ def _tinted_icon(svg_path: str, color: str) -> QIcon:
         return QIcon(svg_path)
 
 
-VERSION = "6.2.2"
+VERSION = "6.3.0"
 VERSION_BY = "xiaoming"
 # 桌面版：PySide6 + 本地图像处理 + Outlook COM。
 HOTSPOT_FEATURE_ENABLED = True
@@ -208,8 +210,33 @@ def _render_source_to_images(path: str):
     raise ValueError(f"不支持的导出格式: {path}")
 
 
-def _font(family: str = "Microsoft YaHei", size: int = 12, weight: int = QFont.Normal) -> QFont:
-    return QFont(family, size, weight)
+_ACTIVE_UI_SCALE = 1.0
+_FONT_FAMILY: Optional[str] = None
+
+
+def _preferred_font_family() -> str:
+    global _FONT_FAMILY
+    if _FONT_FAMILY:
+        return _FONT_FAMILY
+    available = set(QFontDatabase.families())
+    for candidate in ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC"):
+        if candidate in available:
+            _FONT_FAMILY = candidate
+            break
+    if not _FONT_FAMILY:
+        _FONT_FAMILY = QApplication.font().family()
+    return _FONT_FAMILY
+
+
+def _font(family: str = "Microsoft YaHei UI", size: int = 12, weight: int = QFont.Normal) -> QFont:
+    font = QFont(_preferred_font_family())
+    font.setWeight(weight)
+    font.setPointSizeF(max(1.0, size * _ACTIVE_UI_SCALE))
+    font.setStyleStrategy(
+        QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
+    )
+    font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
+    return font
 
 
 class WorkflowStep(QFrame):
@@ -243,7 +270,7 @@ def _btn_size(text: str, font_size: int = 13, extra_w: int = 36, height: int = 3
 def _btn_primary() -> str:
     return (
         f"QPushButton {{ background: {Theme.PRIMARY}; color: {Theme.PRIMARY_TEXT}; "
-        f"border: none; border-radius: 999px; font-weight: 700; font-family: Microsoft YaHei, sans-serif;}}"
+        f"border: none; border-radius: 21px; padding: 0 18px; font-weight: 700;}}"
         f"QPushButton:hover {{ background: {Theme.PRIMARY_HOVER}; }}"
         f"QPushButton:pressed {{ background: {Theme.PRIMARY_ACTIVE}; }}"
         f"QPushButton:disabled {{ background: {Theme.PRIMARY_DISABLED}; color: {Theme.TEXT_PLACEHOLDER}; }}"
@@ -253,8 +280,7 @@ def _btn_primary() -> str:
 def _btn_secondary() -> str:
     return (
         f"QPushButton {{ background: {Theme.SECONDARY_BG}; color: {Theme.SECONDARY_TEXT}; "
-        f"border: 1px solid {Theme.SECONDARY_BORDER}; border-radius: 999px; "
-        f"font-family: Microsoft YaHei, sans-serif;}}"
+        f"border: 1px solid {Theme.SECONDARY_BORDER}; border-radius: 21px; padding: 0 16px;}}"
         f"QPushButton:hover {{ background: {Theme.SECONDARY_HOVER}; border-color: {Theme.BORDER_HOVER}; }}"
         f"QPushButton:disabled {{ color: {Theme.TEXT_DISABLED}; border-color: {Theme.BORDER}; }}"
     )
@@ -263,8 +289,7 @@ def _btn_secondary() -> str:
 def _btn_ghost() -> str:
     return (
         f"QPushButton {{ background: {Theme.GHOST_BG}; color: {Theme.GHOST_TEXT}; "
-        f"border: none; border-radius: 999px; "
-        f"font-family: Microsoft YaHei, sans-serif;}}"
+        f"border: none; border-radius: 16px; padding: 0 12px;}}"
         f"QPushButton:hover {{ background: {Theme.GHOST_HOVER}; }}"
         f"QPushButton:disabled {{ opacity: 0.5; }}"
     )
@@ -274,7 +299,7 @@ def _input_style() -> str:
     return (
         f"QLineEdit {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
         f"border: 1px solid {Theme.BORDER}; border-radius: 8px; "
-        f"padding: 0 12px; font-family: Microsoft YaHei, sans-serif;}}"
+        f"padding: 0 12px;}}"
         f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         f"QLineEdit::placeholder {{ color: {Theme.TEXT_PLACEHOLDER}; }}"
     )
@@ -293,6 +318,8 @@ class DropZone(QFrame):
         self.setAcceptDrops(True)
         self.setCursor(Qt.PointingHandCursor)
         self._hovered = False
+        self._compact = False
+        self._ui_scale = 1.0
         self._setup_ui()
         self._apply_style()
 
@@ -323,27 +350,37 @@ class DropZone(QFrame):
 
     def set_compact(self, compact: bool):
         """Collapse the large drop target after processing so previews stay visible."""
+        self._compact = compact
+        self.apply_ui_scale(self._ui_scale)
+
+    def apply_ui_scale(self, scale: float):
+        self._ui_scale = scale
+        px = lambda value: max(1, round(value * scale))
+        compact = self._compact
         if compact:
             self.icon_label.hide()
             self.tip_label.hide()
-            self.content_layout.setContentsMargins(16, 7, 16, 7)
-            self.content_layout.setSpacing(2)
-            self.setMinimumHeight(48)
-            self.setMaximumHeight(48)
+            self.content_layout.setContentsMargins(px(16), px(7), px(16), px(7))
+            self.content_layout.setSpacing(px(2))
+            self.setMinimumHeight(px(48))
+            self.setMaximumHeight(px(48))
         else:
             self.icon_label.show()
             self.tip_label.show()
-            self.icon_label.setPixmap(_icon("upload-cloud", 56).pixmap(56, 56))
-            self.content_layout.setContentsMargins(28, 32, 28, 32)
-            self.content_layout.setSpacing(10)
-            self.setMinimumHeight(180)
+            icon_size = px(56)
+            self.icon_label.setPixmap(_icon("upload-cloud", icon_size).pixmap(icon_size, icon_size))
+            self.content_layout.setContentsMargins(px(28), px(32), px(28), px(32))
+            self.content_layout.setSpacing(px(10))
+            self.setMinimumHeight(px(180))
             self.setMaximumHeight(16777215)
+        self._apply_style()
 
     def _apply_style(self):
         border = Theme.DROPZONE_HOVER_BORDER if self._hovered else Theme.DROPZONE_IDLE_BORDER
         bg = Theme.DROPZONE_HOVER_BG if self._hovered else Theme.CARD
         self.setStyleSheet(
-            f"QFrame {{ background: {bg}; border: 2px dashed {border}; border-radius: 12px; }}"
+            f"QFrame {{ background: {bg}; border: {max(1, round(2 * self._ui_scale))}px dashed {border}; "
+            f"border-radius: {max(1, round(12 * self._ui_scale))}px; }}"
         )
 
     def enterEvent(self, event):
@@ -463,6 +500,13 @@ class ProcessWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        global _ACTIVE_UI_SCALE
+        _ACTIVE_UI_SCALE = 1.0
+        self._ui_scale = 1.0
+        self._scale_baseline_ready = False
+        self._applying_ui_scale = False
+        self._thumbnail_signature = None
+        self._status_level = "info"
         self.slice_paths: List[str] = []
         # V4.6.7 排序架构：原切片的 source_index 映射
         # key = slice 文件名，value = source_index（浮点：原切片=整数，Hotspot派生=整数+N*0.001）
@@ -473,6 +517,7 @@ class MainWindow(QMainWindow):
         self._active_job_id = 0
         self.hotspot_map = HotspotMap()
         self.last_export_dir: Optional[str] = None
+        self._export_worker: Optional[ExportWorker] = None
         self._build_ui()
 
     def _build_ui(self):
@@ -515,7 +560,7 @@ class MainWindow(QMainWindow):
         self.guide_label.setFont(_font("Microsoft YaHei", 10, QFont.Medium))
         self.guide_label.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; background: {Theme.GHOST_BG}; "
-            f"border: 1px solid {Theme.BORDER}; border-radius: 999px; "
+            f"border: 1px solid {Theme.BORDER}; border-radius: 17px; "
             f"padding: 6px 10px;"
         )
         self.guide_label.setAlignment(Qt.AlignCenter)
@@ -564,7 +609,7 @@ class MainWindow(QMainWindow):
         self.edit_width.setStyleSheet(
             f"QLineEdit {{ background: {Theme.CARD}; color: {Theme.TEXT_PRIMARY}; "
             f"border: 1px solid {Theme.BORDER}; border-radius: 8px; "
-            f"padding: 0 8px; font-family: Microsoft YaHei, sans-serif; }}"
+            f"padding: 0 8px; }}"
             f"QLineEdit:focus {{ border-color: {Theme.BORDER_FOCUS}; }}"
         )
         self.edit_width.editingFinished.connect(self._on_width_edited)
@@ -655,7 +700,7 @@ class MainWindow(QMainWindow):
         self.btn_adjust_cuts.setMinimumHeight(32)
         self.btn_adjust_cuts.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.btn_adjust_cuts.setToolTip(
-            "切图完成后可拖动横线微调切开位置；自动限制在 Outlook 安全高度内"
+            "切图完成后可自由拖动横线；超长区间会自动补充 Outlook 安全切线"
         )
         self.btn_adjust_cuts.clicked.connect(self._adjust_cut_positions)
         _set_test_id(self.btn_adjust_cuts, "adjustCutsButton")
@@ -736,11 +781,13 @@ class MainWindow(QMainWindow):
 
         # ══ 进度条 ═════════════════════════
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(4)
-        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(18)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         self.progress_bar.setStyleSheet(
-            f"QProgressBar {{ border: none; background: {Theme.BORDER}; border-radius: 2px; }}"
-            f"QProgressBar::chunk {{ background: {Theme.PRIMARY}; border-radius: 2px; }}"
+            f"QProgressBar {{ border: none; background: {Theme.BORDER}; border-radius: 9px; "
+            f"color: {Theme.TEXT_PRIMARY}; text-align: center; }}"
+            f"QProgressBar::chunk {{ background: {Theme.PRIMARY}; border-radius: 9px; }}"
         )
         self.progress_bar.hide()
         self.step_output.body.addWidget(self.progress_bar)
@@ -805,6 +852,8 @@ class MainWindow(QMainWindow):
         ver_row.addLayout(ver_col)
         root.addLayout(ver_row)
         self._set_status("拖入文件后自动切图，再检查切线并在经典 Outlook 中创建邮件", "info")
+        self._capture_ui_scale_baseline()
+        self._apply_ui_scale(self.width(), force=True)
 
     # ── 工具函数 ────────────────────────────
     def _get_width(self) -> int:
@@ -819,8 +868,6 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str, level: str = "info"):
         icons = {"info": "ℹ️", "success": "✅", "error": "❌", "warning": "⚠️"}
-        colors = {"info": Theme.TEXT_SECONDARY, "success": Theme.SUCCESS,
-                  "error": Theme.ERROR, "warning": Theme.WARNING}
         clean = text.strip()
         prefixes = tuple(icons.values())
         while clean.startswith(prefixes):
@@ -829,9 +876,16 @@ class MainWindow(QMainWindow):
                     clean = clean[len(prefix):].strip()
                     break
         self.status_label.setText(f"{icons.get(level, '')} {clean}".strip())
+        self._status_level = level
+        self._apply_status_style()
+
+    def _apply_status_style(self):
+        colors = {"info": Theme.TEXT_SECONDARY, "success": Theme.SUCCESS,
+                  "error": Theme.ERROR, "warning": Theme.WARNING}
+        padding = max(1, round(4 * self._ui_scale))
         self.status_label.setStyleSheet(
-            f"color: {colors.get(level, Theme.TEXT_SECONDARY)}; "
-            f"font-size: 12px; background: transparent; padding: 4px 0;"
+            f"color: {colors.get(self._status_level, Theme.TEXT_SECONDARY)}; "
+            f"background: transparent; padding: {padding}px 0;"
         )
 
     def _reset_drop_zone(self):
@@ -946,7 +1000,8 @@ class MainWindow(QMainWindow):
             er = export_dlg.get_result()
             self.last_export_dir = er["save_dir"]
             self._export_images(valid, save_dir=er["save_dir"],
-                                fmt=er["format"], keep_alpha=er["keep_alpha"])
+                                fmt=er["format"], keep_alpha=er["keep_alpha"],
+                                jpg_quality=er["jpg_quality"])
         else:
             # ── 切图模式：原 V4.6.1 路径（不再弹智能拼图弹窗） ──
             if len(valid) == 1:
@@ -971,172 +1026,105 @@ class MainWindow(QMainWindow):
                 )
 
     def _export_images(self, paths: List[str], save_dir: Optional[str] = None,
-                       fmt: str = "png", keep_alpha: bool = True):
-        """
-        图片导出模式（V4.6.3 重写 + V4.7.6 架构升级）：
-        - fmt: 'png' (支持透明) / 'jpg' (强制白底)
-        - keep_alpha: 是否保留透明底（仅 png 有效）
-        - 多图自动合并为长图，再按选定格式保存
-        - V4.7.6: 支持 JPG/PNG/BMP/WEBP/GIF/PDF/PPT/PPTX/PSD/PSB 任意受支持格式
-          (通过 _render_source_to_images 统一渲染成 PIL Image)
-        """
-        self._set_status("正在图片导出...", "info")
-        try:
-            from PIL import Image as PILImage
-            # V4.7.6: 多页文件大数量确认
-            from pathlib import Path
-            _exts_multi = (".pdf", ".ppt", ".pptx", ".psd", ".psb")
-            if any(Path(p).suffix.lower() in _exts_multi for p in paths):
-                # 预估总页数（一次性扫一遍）
-                total_pages = 0
-                for p in paths:
-                    try:
-                        total_pages += len(_render_source_to_images(p))
-                    except Exception:
-                        pass
-                if total_pages > 5:
-                    reply = QMessageBox.question(
-                        self, "多页文件确认",
-                        f"检测到多页文件，总计约 {total_pages} 页。\n"
-                        f"将合并为一张长图导出。是否继续？",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No,
-                    )
-                    if reply != QMessageBox.Yes:
-                        self._set_status("已取消导出", "info")
-                        return
+                       fmt: str = "png", keep_alpha: bool = True,
+                       jpg_quality: int = 85):
+        """Start a responsive background export and report progress in the main UI."""
+        if self._export_worker is not None and self._export_worker.isRunning():
+            QMessageBox.information(self, "正在导出", "当前导出尚未完成，请稍候。")
+            return
 
-            # 1) V4.7.6: 用 _render_source_to_images 统一渲染（替代旧 _PI.open 直开）
-            images = []
-            for p in paths:
-                try:
-                    rendered = _render_source_to_images(p)
-                except Exception as e:
-                    self._set_status(f"无法渲染 {Path(p).name}: {e}", "error")
-                    return
-                for img in rendered:
-                    # PNG 保留透明底则保留 RGBA；否则转 RGB
-                    if fmt == "png" and keep_alpha:
-                        if img.mode != "RGBA":
-                            img = img.convert("RGBA")
-                    else:
-                        # JPG 强制白底 / PNG 不保留透明
-                        if img.mode in ("RGBA", "LA", "P"):
-                            bg = PILImage.new("RGB", img.size, (255, 255, 255))
-                            if img.mode in ("RGBA", "LA"):
-                                bg.paste(img, mask=img.split()[-1])
-                            else:
-                                bg.paste(img.convert("RGB"))
-                            img = bg
-                        elif img.mode != "RGB":
-                            img = img.convert("RGB")
-                    images.append(img)
+        if any(Path(path).suffix.lower() in (".pdf", ".ppt", ".pptx", ".psd", ".psb") for path in paths):
+            reply = QMessageBox.question(
+                self,
+                "多页文件确认",
+                "检测到可能包含多页的文件，将在后台渲染并合并为一张长图。是否继续？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                self._set_status("已取消导出", "info")
+                return
 
-            # 2) 单图直接保存 / 多图合并
-            if len(images) == 1:
-                merged = images[0]
-            else:
-                # 多图：纵向拼接（保持原 RGBA/RGB）
-                widths = [im.width for im in images]
-                heights = [im.height for im in images]
-                canvas_w = max(widths)
-                canvas_h = sum(heights)
-                # 按第一张图的 mode 决定画布 mode
-                if images[0].mode == "RGBA":
-                    canvas = PILImage.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-                else:
-                    canvas = PILImage.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
-                y = 0
-                for im in images:
-                    x = (canvas_w - im.width) // 2
-                    if im.mode == "RGBA" and canvas.mode == "RGBA":
-                        canvas.alpha_composite(im, (x, y))
-                    else:
-                        canvas.paste(im, (x, y))
-                    y += im.height
-                merged = canvas
-
-            # 3) 保存到目标路径
+        if not save_dir:
+            save_dir = QFileDialog.getExistingDirectory(
+                self, "选择保存目录", self.last_export_dir or ""
+            )
             if not save_dir:
-                save_dir = QFileDialog.getExistingDirectory(
-                    self, "选择保存目录", self.last_export_dir or ""
-                )
-                if not save_dir:
-                    self._set_status("已取消导出", "info")
-                    return
-            self.last_export_dir = save_dir
-
-            # V4.7.7 防御 1: 目录存在性 + 可写性检查
-            if not os.path.isdir(save_dir):
-                QMessageBox.critical(self, "导出失败", f"目录不存在：\n{save_dir}")
-                self._set_status(f"❌ 目录不存在: {save_dir}", "error")
+                self._set_status("已取消导出", "info")
                 return
-            test_write = os.path.join(save_dir, ".outlook_slicer_write_test")
-            try:
-                with open(test_write, "w") as _tf:
-                    _tf.write("test")
-                os.remove(test_write)
-            except Exception as _we:
-                QMessageBox.critical(self, "导出失败",
-                    f"目录无写权限：\n{save_dir}\n\n原因：{_we}\n\n"
-                    f"请选择其他目录（如桌面、文档）。")
-                self._set_status(f"❌ 目录无写权限: {save_dir}", "error")
-                return
+        if not os.path.isdir(save_dir):
+            QMessageBox.critical(self, "导出失败", f"目录不存在：\n{save_dir}")
+            self._set_status(f"目录不存在: {save_dir}", "error")
+            return
 
-            ext = "png" if fmt == "png" else "jpg"
-            # V4.7.7 修复：用 len(images) 不用 len(paths)
-            # paths 是原始输入文件数，images 是渲染后图片数
-            # 单文件多页（如 1 PDF 3 页）时 len(paths)=1, len(images)=3
-            # V4.7.7 R2 架构师建议：完整时间戳 + pid 避免 1 秒内重名
-            suffix = f"_{int(time.time())}_{os.getpid()}" if len(images) > 1 else ""
-            base_name = "merged" if len(images) > 1 else Path(paths[0]).stem
-            fname = f"{base_name}{suffix}.{ext}"
-            dst = os.path.join(save_dir, fname)
-
-            if fmt == "jpg":
-                # JPG 不支持 RGBA → 强制转 RGB
-                if merged.mode != "RGB":
-                    bg = PILImage.new("RGB", merged.size, (255, 255, 255))
-                    if merged.mode in ("RGBA", "LA"):
-                        bg.paste(merged, mask=merged.split()[-1])
-                    else:
-                        bg.paste(merged.convert("RGB"))
-                    merged = bg
-                merged.save(dst, "JPEG", quality=95)
-            else:
-                # PNG：保留原 mode（RGBA 或 RGB）
-                merged.save(dst, "PNG")
-
-            # V4.7.7 防御 2: 保存后验证文件存在 + size > 0
-            if not os.path.exists(dst):
-                QMessageBox.critical(self, "导出失败", f"文件保存后未找到：\n{dst}\n请检查目录权限。")
-                self._set_status(f"❌ 文件未生成: {dst}", "error")
-                return
-            file_size = os.path.getsize(dst)
-            if file_size == 0:
-                os.remove(dst)  # 清掉 0 字节文件
-                QMessageBox.critical(self, "导出失败", f"文件保存为空 (0 字节)：\n{dst}")
-                self._set_status(f"❌ 文件 0 字节: {dst}", "error")
-                return
-
-            # 成功：明确反馈
-            file_count = 1
-            page_info = f"({len(images)} 页合并)" if len(images) > 1 else ""
-            QMessageBox.information(self, "导出成功",
-                f"✅ 图片已导出至：\n{dst}\n\n"
-                f"格式：{ext.upper()}\n"
-                f"大小：{file_size:,} 字节 {page_info}\n"
-                f"透明底：{'保留' if (fmt=='png' and keep_alpha) else '白底'}")
-            self._set_status(f"✅ 图片已导出至：{dst} ({file_size:,} 字节)", "success")
-            self.reset_app()
-            self._set_status("✅ 导出完成，可继续拖入新图片", "success")
+        test_write = os.path.join(save_dir, ".outlook_slicer_write_test")
+        try:
+            with open(test_write, "w", encoding="utf-8") as handle:
+                handle.write("test")
+            os.remove(test_write)
         except Exception as exc:
-            # V4.7.7 防御 3: 详细错误反馈
-            tb = traceback.format_exc()
-            QMessageBox.critical(self, "导出失败",
-                f"错误：{exc}\n\n"
-                f"详细堆栈（请报错时截图）：\n{tb[:1500]}")
-            self._set_status(f"❌ 导出失败: {exc}", "error")
+            QMessageBox.critical(
+                self, "导出失败", f"目录无写权限：\n{save_dir}\n\n原因：{exc}"
+            )
+            self._set_status(f"目录无写权限: {save_dir}", "error")
+            return
+
+        self.last_export_dir = save_dir
+        self._set_status("正在图片导出...", "info")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(5)
+        self.progress_bar.show()
+
+        worker = ExportWorker(
+            paths=paths,
+            save_dir=save_dir,
+            fmt=fmt,
+            keep_alpha=keep_alpha,
+            jpg_quality=jpg_quality,
+            renderer=_render_source_to_images,
+            parent=self,
+        )
+        self._export_worker = worker
+        worker.progress.connect(self._on_export_progress)
+        worker.succeeded.connect(self._on_export_succeeded)
+        worker.failed.connect(self._on_export_failed)
+        worker.finished.connect(self._on_export_finished)
+        worker.start()
+
+    def _on_export_progress(self, value: int, message: str):
+        self.progress_bar.setValue(value)
+        self._set_status(message, "info")
+
+    def _on_export_succeeded(self, result: dict):
+        path = result["path"]
+        page_info = f" ({result['page_count']} 页合并)" if result["page_count"] > 1 else ""
+        quality_info = (
+            f"\nJPG 品质：{result['jpg_quality']}%"
+            if result["format"] == "jpg" else ""
+        )
+        QMessageBox.information(
+            self,
+            "导出成功",
+            f"图片已导出至：\n{path}\n\n"
+            f"格式：{result['format'].upper()}{page_info}\n"
+            f"大小：{result['size_bytes']:,} 字节{quality_info}\n"
+            f"透明底：{'保留' if result['keep_alpha'] else '白底'}",
+        )
+        self._set_status(f"图片已导出至：{path}", "success")
+
+    def _on_export_failed(self, message: str, details: str):
+        QMessageBox.critical(
+            self, "导出失败", f"错误：{message}\n\n详细信息：\n{details[:1500]}"
+        )
+        self._set_status(f"导出失败: {message}", "error")
+
+    def _on_export_finished(self):
+        self.progress_bar.hide()
+        worker = self._export_worker
+        self._export_worker = None
+        if worker is not None:
+            worker.deleteLater()
+
 
     def _start_processing(self, path: str, save_dir: Optional[str] = None):
         """单图/合并后处理的统一入口"""
@@ -1270,21 +1258,28 @@ class MainWindow(QMainWindow):
         if worker is not None and self.worker is worker:
             self.worker = None
 
-    def _show_thumbnails(self, paths: List[str]):
+    def _show_thumbnails(self, paths: List[str], update_status: bool = True):
         """展示切片缩略图，V4.6.4 加角标 + 双行提示"""
         from PySide6.QtWidgets import QVBoxLayout, QWidget
+        scale = self._ui_scale
+        px = lambda value: max(1, round(value * scale))
+        wrapper_w, wrapper_h = px(128), px(130)
+        thumb_w, thumb_h = px(120), px(100)
+        available_width = max(1, self.preview_area.viewport().width() - px(20))
+        cols = max(1, min(6, available_width // (wrapper_w + px(10))))
+        signature = (tuple(paths), wrapper_w, wrapper_h, cols)
+        if signature == self._thumbnail_signature and self.thumb_grid.count():
+            return
+
         while self.thumb_grid.count():
             item = self.thumb_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        available_width = self.preview_area.viewport().width() - 20
-        thumb_w = 128
-        cols = max(1, min(6, available_width // (thumb_w + 10)))
         for i, path in enumerate(paths):
             row, col = divmod(i, cols)
             # 每个缩略图用 QWidget 包裹：上面图，下面文字标识
             wrapper = QWidget()
-            wrapper.setFixedSize(128, 130)
+            wrapper.setFixedSize(wrapper_w, wrapper_h)
             if HOTSPOT_FEATURE_ENABLED:
                 wrapper.setCursor(Qt.PointingHandCursor)
                 wrapper.setToolTip(
@@ -1293,40 +1288,40 @@ class MainWindow(QMainWindow):
                 )
                 wrapper.setStyleSheet(
                     "QWidget { background: transparent; }"
-                    f"QWidget:hover {{ background: {Theme.DROPZONE_HOVER_BG}; border-radius: 8px; }}"
+                    f"QWidget:hover {{ background: {Theme.DROPZONE_HOVER_BG}; border-radius: {px(8)}px; }}"
                 )
             else:
                 wrapper.setCursor(Qt.ArrowCursor)
                 wrapper.setToolTip(f"切片 {i + 1}: {Path(path).name}")
                 wrapper.setStyleSheet("QWidget { background: transparent; }")
             wrapper_layout = QVBoxLayout(wrapper)
-            wrapper_layout.setContentsMargins(4, 4, 4, 4)
-            wrapper_layout.setSpacing(2)
+            wrapper_layout.setContentsMargins(px(4), px(4), px(4), px(4))
+            wrapper_layout.setSpacing(px(2))
 
             # 图片（V4.8.7: QPixmapCache 避免同一路径多次缩放）
             thumb = QLabel()
-            thumb.setFixedSize(120, 100)
+            thumb.setFixedSize(thumb_w, thumb_h)
             thumb.setScaledContents(True)
             thumb.setStyleSheet(
-                f"background: {Theme.CARD}; border-radius: 8px; border: 1px solid {Theme.BORDER};"
+                f"background: {Theme.CARD}; border-radius: {px(8)}px; border: 1px solid {Theme.BORDER};"
             )
             from PySide6.QtGui import QPixmapCache
-            pix_key = f"thumb_{path}"
+            pix_key = f"thumb_{thumb_w}x{thumb_h}_{path}"
             pix = QPixmapCache.find(pix_key)
             if pix is None or pix.isNull():
-                pix = QPixmap(path).scaled(120, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix = QPixmap(path).scaled(thumb_w, thumb_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 QPixmapCache.insert(pix_key, pix)
             thumb.setPixmap(pix)
             wrapper_layout.addWidget(thumb)
 
             # 文字标识
             label = QLabel(f"#{i+1}" if not HOTSPOT_FEATURE_ENABLED else f"#{i+1} ✏️ 编辑热区")
-            label.setFont(QFont("Microsoft YaHei", 9))
+            label.setFont(_font(size=9))
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet(
-                f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; padding: 2px;"
+                f"color: {Theme.TEXT_PLACEHOLDER}; background: transparent; padding: {px(2)}px;"
                 if not HOTSPOT_FEATURE_ENABLED
-                else f"color: {Theme.PRIMARY}; background: transparent; padding: 2px;"
+                else f"color: {Theme.PRIMARY}; background: transparent; padding: {px(2)}px;"
             )
             wrapper_layout.addWidget(label)
 
@@ -1334,9 +1329,10 @@ class MainWindow(QMainWindow):
             if HOTSPOT_FEATURE_ENABLED:
                 wrapper.mousePressEvent = lambda ev, p=path, idx=i: self._on_thumb_clicked(ev, p, idx)
             self.thumb_grid.addWidget(wrapper, row, col)
+        self._thumbnail_signature = signature
         self.preview_area.show()
         # V4.6.4：状态条提示缩略图可点
-        if paths and HOTSPOT_FEATURE_ENABLED:
+        if update_status and paths and HOTSPOT_FEATURE_ENABLED:
             self._set_status(
                 f"已生成 {len(paths)} 张切片 — 点击下方任一缩略图可添加可点击热区",
                 "info",
@@ -1437,11 +1433,15 @@ class MainWindow(QMainWindow):
             # 否则会误删另一个应用实例仍在使用的 mail_*.png。
             temp_files = list(_materialized_temp_files[tracked_before:])
 
-            mime = QMimeData()
-            mime.setHtml(html)
-            mime.setData("HTML Format", _build_windows_clipboard_html(html))
-            mime.setText(html)
-            QGuiApplication.clipboard().setMimeData(mime)
+            clipboard_html = _build_windows_clipboard_html(html)
+            if sys.platform == "win32":
+                copy_cf_html_to_clipboard(clipboard_html)
+            else:
+                mime = QMimeData()
+                mime.setHtml(html)
+                mime.setData("HTML Format", clipboard_html)
+                mime.setText(html)
+                QGuiApplication.clipboard().setMimeData(mime)
             self._set_status(
                 "图片 HTML 已复制；这是手动粘贴兼容方式，链接可靠性低于『创建 Outlook 邮件』",
                 "success",
@@ -1614,10 +1614,16 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_layout(event.size().width())
+        self._apply_ui_scale(event.size().width())
+        if self.slice_paths and self.preview_area.isVisible():
+            self._show_thumbnails(self.slice_paths, update_status=False)
 
     def closeEvent(self, event):
         """Cooperatively stop workers; never use QThread.terminate()."""
-        workers = [w for w in [self.worker, *self._retired_workers] if w is not None]
+        workers = [
+            worker for worker in [self.worker, self._export_worker, *self._retired_workers]
+            if worker is not None
+        ]
         for worker in workers:
             worker.requestInterruption()
         still_running = [worker for worker in workers if worker.isRunning() and not worker.wait(5000)]
@@ -1626,8 +1632,6 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         super().closeEvent(event)
-        if self.slice_paths and self.preview_area.isVisible():
-            self._show_thumbnails(self.slice_paths)
 
     def _apply_responsive_layout(self, width: int):
         """Reflow edit actions and output buttons without shrinking controls."""
@@ -1651,6 +1655,101 @@ class MainWindow(QMainWindow):
             self.output_grid.addWidget(widget, row, column)
         for column in range(output_columns):
             self.output_grid.setColumnStretch(column, 1)
+
+    @staticmethod
+    def _scale_stylesheet(style: str, scale: float) -> str:
+        def replace(match):
+            value = int(match.group(1))
+            if value <= 1:
+                return f"{value}px"
+            return f"{max(1, round(value * scale))}px"
+
+        return re.sub(r"(?<![\w.-])(\d+)px", replace, style)
+
+    def _capture_ui_scale_baseline(self):
+        self._scale_widget_baselines = {}
+        for widget in self.findChildren(QWidget):
+            font = widget.font()
+            icon_size = None
+            if isinstance(widget, (QPushButton, QCheckBox)):
+                icon_size = widget.iconSize()
+            self._scale_widget_baselines[widget] = {
+                "font_size": font.pointSizeF(),
+                "minimum": widget.minimumSize(),
+                "maximum": widget.maximumSize(),
+                "icon_size": icon_size,
+                "style": "" if widget in (self.drop_zone, self.status_label) else widget.styleSheet(),
+            }
+
+        self._scale_layout_baselines = {}
+        for layout in self.findChildren(QLayout):
+            margins = layout.contentsMargins()
+            self._scale_layout_baselines[layout] = {
+                "margins": (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                "spacing": layout.spacing(),
+            }
+        self._scale_baseline_ready = True
+
+    def _apply_ui_scale(self, width: int, force: bool = False):
+        if not self._scale_baseline_ready or self._applying_ui_scale:
+            return
+        scale = min(1.35, max(0.82, width / Config.WINDOW_WIDTH))
+        scale = round(scale * 20) / 20
+        if not force and scale == self._ui_scale:
+            return
+
+        self._applying_ui_scale = True
+        try:
+            global _ACTIVE_UI_SCALE
+            _ACTIVE_UI_SCALE = scale
+            self._ui_scale = scale
+            for widget, baseline in self._scale_widget_baselines.items():
+                if widget is None:
+                    continue
+                font_size = baseline["font_size"]
+                if font_size > 0:
+                    font = widget.font()
+                    font.setPointSizeF(max(1.0, font_size * scale))
+                    font.setStyleStrategy(
+                        QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
+                    )
+                    widget.setFont(font)
+
+                if not isinstance(widget, DropZone):
+                    minimum = baseline["minimum"]
+                    maximum = baseline["maximum"]
+                    widget.setMinimumSize(
+                        round(minimum.width() * scale) if minimum.width() > 0 else 0,
+                        round(minimum.height() * scale) if minimum.height() > 0 else 0,
+                    )
+                    widget.setMaximumSize(
+                        round(maximum.width() * scale) if maximum.width() < 16777215 else 16777215,
+                        round(maximum.height() * scale) if maximum.height() < 16777215 else 16777215,
+                    )
+
+                icon_size = baseline["icon_size"]
+                if icon_size is not None and icon_size.width() > 0:
+                    widget.setIconSize(QSize(
+                        max(1, round(icon_size.width() * scale)),
+                        max(1, round(icon_size.height() * scale)),
+                    ))
+                style = baseline["style"]
+                if style and "px" in style:
+                    widget.setStyleSheet(self._scale_stylesheet(style, scale))
+
+            for layout, baseline in self._scale_layout_baselines.items():
+                left, top, right, bottom = baseline["margins"]
+                layout.setContentsMargins(
+                    round(left * scale), round(top * scale),
+                    round(right * scale), round(bottom * scale),
+                )
+                if baseline["spacing"] >= 0:
+                    layout.setSpacing(max(0, round(baseline["spacing"] * scale)))
+
+            self.drop_zone.apply_ui_scale(scale)
+            self._apply_status_style()
+        finally:
+            self._applying_ui_scale = False
 
     def reset_app(self):
         if self.slice_paths:

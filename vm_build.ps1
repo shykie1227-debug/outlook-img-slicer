@@ -7,6 +7,11 @@ Runs in the local Parallels Windows VM, builds the PySide/PyInstaller desktop
 application, and copies the final EXE back to the shared dist/ folder.
 #>
 
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$SourceGitSha
+)
+
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 
@@ -46,10 +51,15 @@ function Fail($msg) {
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Magenta
+
+if ($SourceGitSha -notmatch '^[0-9a-fA-F]{40}$') {
+    Fail "SourceGitSha must be the full 40-character commit SHA."
+}
+$env:OUTLOOK_IMG_SLICER_GIT_SHA = $SourceGitSha.ToLowerInvariant()
 Write-Host "  Outlook Image Slicer - Desktop VM Build" -ForegroundColor Magenta
 Write-Host "============================================" -ForegroundColor Magenta
 
-Write-Step "Step 0/5: Copy project to local directory"
+Write-Step "Step 0/7: Copy project to local directory"
 
 # A previous onefile smoke test can leave its extracted child process alive and
 # lock C:\build. Never allow that lock to turn a stale EXE into a false success.
@@ -68,7 +78,12 @@ if (Test-Path $LocalRoot) {
 }
 
 Write-Info "Copying source from shared folder..."
-robocopy $SharedRoot $LocalRoot /E /XD dist .git release-artifacts build desktop\dist desktop\build /XF *.exe *.pdb /NJH /NJS /NP /NFL /NDL 2>&1 | Out-Null
+robocopy $SharedRoot $LocalRoot /E /XD dist release-artifacts build desktop\dist desktop\build /XF *.exe *.pdb /NJH /NJS /NP /NFL /NDL 2>&1 | Out-Null
+$robocopyCode = $LASTEXITCODE
+
+if ($robocopyCode -ge 8) {
+    Fail "robocopy failed with exit code $robocopyCode"
+}
 
 if (-not (Test-Path $LocalRoot)) {
     Fail "robocopy failed - $LocalRoot not created"
@@ -81,7 +96,7 @@ Get-ChildItem -Path $LocalRoot -Recurse -ErrorAction SilentlyContinue | ForEach-
 Write-Ok "Project copied to $LocalRoot"
 Set-Location $LocalRoot
 
-Write-Step "Step 1/5: Check Python"
+Write-Step "Step 1/7: Check Python"
 
 $pythonExe = $null
 $pyCandidates = @(
@@ -146,10 +161,10 @@ if ($pythonExe -and (Test-Path $pythonExe)) {
     Write-Ok "Python installed: $pyVer"
 }
 
-Write-Step "Step 2/5: Install Python build/runtime dependencies"
+Write-Step "Step 2/7: Install Python build/runtime dependencies"
 
 & $pythonExe -m pip install --upgrade pip -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
-& $pythonExe -m pip install Pillow PyMuPDF PySide6 pywin32 pyinstaller psd-tools numpy python-pptx lxml cairosvg svglib reportlab -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
+& $pythonExe -m pip install Pillow PyMuPDF PySide6 pywin32 pyinstaller psd-tools numpy python-pptx lxml cairosvg svglib reportlab pytest dulwich -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Fail "Python deps install failed"
 }
@@ -162,7 +177,26 @@ if (Test-Path $postInstall) {
 $pyiVer = & $pythonExe -m PyInstaller --version 2>&1
 Write-Ok "PyInstaller $pyiVer ready"
 
-Write-Step "Step 3/5: Build desktop EXE"
+Write-Step "Step 3/7: Verify committed source and run Windows tests"
+
+& $pythonExe (Join-Path $LocalRoot "verify_source_snapshot.py") $LocalRoot $SourceGitSha
+if ($LASTEXITCODE -ne 0) {
+    Fail "Copied source does not match a clean committed snapshot."
+}
+
+$env:QT_QPA_PLATFORM = "offscreen"
+& $pythonExe -m pytest tests -q
+if ($LASTEXITCODE -ne 0) {
+    Fail "Windows pytest regression failed."
+}
+& $pythonExe -m compileall -q build.py desktop tests image_slicer.py html_assembler.py outlook_sender.py clipboard_html.py clickable_map.py hotspot_slicer.py image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py
+if ($LASTEXITCODE -ne 0) {
+    Fail "Windows Python compile check failed."
+}
+Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+Write-Ok "Committed source and Windows tests verified"
+
+Write-Step "Step 4/7: Build desktop EXE"
 
 $env:PYTHONIOENCODING = "utf-8"
 $env:OUTLOOK_IMG_SLICER_NO_PAUSE = "1"
@@ -178,6 +212,7 @@ $manifestPath = Join-Path $LocalRoot "build-manifest.json"
 if (-not (Test-Path $manifestPath)) { Fail "Build manifest not found: $manifestPath" }
 $manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
 if ($manifest.artifact_kind -ne "onefile") { Fail "Release requires a onefile EXE." }
+if ($manifest.git_sha -ne $env:OUTLOOK_IMG_SLICER_GIT_SHA) { Fail "Build manifest source commit does not match SourceGitSha." }
 $resultExe = $manifest.artifact_path
 if (-not (Test-Path $resultExe)) { Fail "Manifest artifact not found: $resultExe" }
 $FinalExeName = $manifest.release_filename
@@ -192,7 +227,54 @@ if ($resultInfo.LastWriteTimeUtc -lt $buildStartedAt) {
 $sizeMB = [math]::Round($resultInfo.Length / 1MB, 1)
 Write-Ok "Desktop EXE built ($sizeMB MB)"
 
-Write-Step "Step 4/5: Copy EXE to shared dist"
+Write-Step "Step 5/7: Verify PE version, startup and runtime network silence"
+
+$fileVersion = $resultInfo.VersionInfo.FileVersion
+if ($fileVersion -notlike "$($manifest.app_version).*") {
+    Fail "PE FileVersion $fileVersion does not match app version $($manifest.app_version)."
+}
+$productVersion = $resultInfo.VersionInfo.ProductVersion
+if ($productVersion -notlike "$($manifest.app_version).*") {
+    Fail "PE ProductVersion $productVersion does not match app version $($manifest.app_version)."
+}
+Write-Ok "PE versions verified: FileVersion=$fileVersion ProductVersion=$productVersion"
+
+$smokeProcess = Start-Process -FilePath $resultExe -PassThru
+$networkViolation = $false
+$networkAuditFailed = $false
+$appProcesses = @()
+for ($second = 0; $second -lt 45; $second++) {
+    Start-Sleep -Seconds 1
+    $appProcesses = @(Get-Process -Name "OutlookImgSlicer" -ErrorAction SilentlyContinue)
+    if ($appProcesses.Count -eq 0) { continue }
+    $appProcessIds = @($appProcesses | ForEach-Object { $_.Id })
+    try {
+        $networkConnections = @(
+            Get-NetTCPConnection -ErrorAction Stop |
+                Where-Object { $appProcessIds -contains $_.OwningProcess }
+        )
+    } catch {
+        $networkAuditFailed = $true
+        break
+    }
+    if ($networkConnections.Count -gt 0) {
+        $networkViolation = $true
+        break
+    }
+}
+if ($appProcesses.Count -eq 0) {
+    Fail "EXE startup smoke failed: OutlookImgSlicer process did not stay running."
+}
+$appProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+if ($networkAuditFailed) {
+    Fail "Runtime network audit could not query TCP connections."
+}
+if ($networkViolation) {
+    Fail "Runtime network audit found a TCP connection owned by OutlookImgSlicer."
+}
+Write-Ok "EXE startup and runtime network audit passed"
+
+Write-Step "Step 6/7: Copy EXE to shared dist"
 
 $sharedDist = Join-Path $SharedRoot "dist"
 if (-not (Test-Path $sharedDist)) {
@@ -208,7 +290,7 @@ Copy-Item -Path $manifestPath -Destination (Join-Path $SharedRoot "build-manifes
 Write-Ok "EXE copied to $sharedDist"
 Write-Ok "Build manifest copied to $SharedRoot"
 
-Write-Step "Step 5/5: Done"
+Write-Step "Step 7/7: Done"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green

@@ -21,13 +21,14 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from image_slicer import validate_cut_positions
+from image_slicer import complete_cut_positions
 
 from theme import Theme, fit_window_to_screen
+from ui_scaling import ResponsiveDialogMixin
 
 
 class DraggableCutLine(QGraphicsLineItem):
-    """A horizontal line constrained by neighboring Outlook-safe slices."""
+    """A horizontal line constrained only by neighboring user cut lines."""
 
     def __init__(self, owner: "CutEditorDialog", scene_width: int, scene_y: float):
         super().__init__(0, 0, scene_width, 0)
@@ -54,7 +55,7 @@ class DraggableCutLine(QGraphicsLineItem):
         return super().itemChange(change, value)
 
 
-class CutEditorDialog(QDialog):
+class CutEditorDialog(ResponsiveDialogMixin, QDialog):
     """Scrollable image preview with draggable horizontal cut lines."""
 
     MIN_SLICE_HEIGHT = 80
@@ -72,9 +73,11 @@ class CutEditorDialog(QDialog):
         self.total_height = sum(image.height for image in self._images)
         self._auto_positions = self._cumulative_positions(self._images)
         self._line_items: List[DraggableCutLine] = []
+        self._resolved_positions: List[int] | None = None
         self._scale = 1.0
         self._build_ui()
         fit_window_to_screen(self, (760, 700), (520, 340))
+        self._setup_responsive_dialog_scale(760)
 
     @staticmethod
     def _load_images(paths: List[str]) -> List[Image.Image]:
@@ -137,8 +140,8 @@ class CutEditorDialog(QDialog):
         root.addWidget(title)
 
         hint = QLabel(
-            f"防呆保护：每片至少 {self.MIN_SLICE_HEIGHT}px，"
-            f"且不超过经典 Outlook 安全上限 {self.max_slice_height}px。"
+            f"可自由拖动到任意位置，每片至少 {self.MIN_SLICE_HEIGHT}px。"
+            f"超过 {self.max_slice_height}px 的区间会在应用时自动补充安全切线。"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 12px; font-family: Microsoft YaHei, sans-serif;")
@@ -170,7 +173,7 @@ class CutEditorDialog(QDialog):
         self.summary_label.setWordWrap(True)
         self.summary_label.setStyleSheet(
             f"color: {Theme.PRIMARY}; background: {Theme.GHOST_BG}; border: 1px solid {Theme.BORDER}; "
-            "border-radius: 999px; padding: 7px 10px; font-family: Microsoft YaHei, sans-serif;"
+            "border-radius: 12px; padding: 7px 10px; font-family: Microsoft YaHei, sans-serif;"
         )
         root.addWidget(self.summary_label)
 
@@ -208,14 +211,8 @@ class CutEditorDialog(QDialog):
         following = self.total_height if index == len(self._line_items) - 1 else round(
             self._line_items[index + 1].pos().y() / self._scale
         )
-        lower = max(
-            previous + self.MIN_SLICE_HEIGHT,
-            following - self.max_slice_height,
-        )
-        upper = min(
-            following - self.MIN_SLICE_HEIGHT,
-            previous + self.max_slice_height,
-        )
+        lower = previous + self.MIN_SLICE_HEIGHT
+        upper = following - self.MIN_SLICE_HEIGHT
         proposed = round(proposed_y / self._scale)
         clamped = max(lower, min(upper, proposed))
         return clamped * self._scale
@@ -242,7 +239,7 @@ class CutEditorDialog(QDialog):
 
     def _accept_if_valid(self):
         try:
-            validate_cut_positions(
+            self._resolved_positions = complete_cut_positions(
                 self.total_height,
                 self.cut_positions(),
                 min_height=self.MIN_SLICE_HEIGHT,
@@ -254,4 +251,4 @@ class CutEditorDialog(QDialog):
         self.accept()
 
     def get_cut_positions(self) -> List[int]:
-        return self.cut_positions()
+        return self._resolved_positions or self.cut_positions()

@@ -285,6 +285,19 @@ def _distribute_units(raw: List[float], total_units: int) -> List[int]:
     return units
 
 
+def _allocate_axis_4x(source_lengths: List[int], target_total: int) -> List[int]:
+    """Map source boundaries to 4px Outlook units while preserving one total size."""
+    if not source_lengths or any(length <= 0 for length in source_lengths):
+        raise ValueError("invalid source geometry")
+    target_total = _even_pixel_4x(target_total)
+    total_units = target_total // 4
+    if total_units < len(source_lengths):
+        raise ValueError("too many hotspot partitions for the target size")
+    source_total = sum(source_lengths)
+    raw_units = [length * total_units / source_total for length in source_lengths]
+    return [units * 4 for units in _distribute_units(raw_units, total_units)]
+
+
 def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional[str] = None,
               alt: str = "", original_width: int = 0, is_base64: bool = False,
               forced_display_w: Optional[int] = None,
@@ -616,15 +629,12 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
 def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
                                 is_base64: bool = False) -> Tuple[str, int]:
     """
-    V6.0.3 (Fix 1-A): hotspot/multi-segment 链路统一为「单 <table> + 每行一个 <tr>」。
+    Build one continuous outer stack while isolating every visual row's column grid.
 
-    修复前：每个 Y 行各自生成一个独立 <table> 堆进外层单 <td>，
-    Outlook Word 引擎在相邻 block 级 <table> 之间插入约 1px 间距 → 缝隙/错位。
-    修复后：
-      ① 整段只有 1 个内层 <table>，表间 1px 缝消失；
-      ② 同组所有 cell 共享 forced_display_h（来自 _compute_group_height 的 4 倍数化），
-         <tr height> 与 <td>/<img height> 完全一致，纵向不再错位；
-      ③ 各 cell 宽由 _allocate_group_widths 保证「之和 == display_w」，横向不再错位/换行。
+    Classic Outlook coordinates columns across rows of one fixed-layout table. Hotspot
+    rows can have unrelated X boundaries, so each row receives its own nested one-row
+    table. The nested tables are contained by exact-height outer cells, avoiding both
+    cross-row column negotiation and sibling block-table gaps.
     """
     display_w = _normalize_display_width(display_w)
     all_rows_html = ""
@@ -649,17 +659,35 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
                 forced_display_h=row_height,
             )
 
-        all_rows_html += (
+        row_table = (
+            f'<table role="presentation" data-layout="hotspot-row" cellpadding="0" '
+            f'cellspacing="0" border="0" align="left" width="{display_w}" '
+            f'height="{row_height}" style="width: {display_w}px; height: {row_height}px; '
+            f'border: 0; border-collapse: collapse; border-spacing: 0; font-size: 0; '
+            f'line-height: 0; mso-line-height-rule: exactly; mso-table-lspace: 0pt; '
+            f'mso-table-rspace: 0pt; mso-padding-alt: 0; table-layout: fixed;">\n'
             f'<tr height="{row_height}" style="height: {row_height}px; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
             f'valign="top" align="left">\n'
             f'{cells}'
             f'</tr>\n'
+            f'</table>\n'
+        )
+        all_rows_html += (
+            f'<tr height="{row_height}" style="height: {row_height}px; font-size: 0; '
+            f'line-height: 0; mso-line-height-rule: exactly; border: 0;" valign="top">\n'
+            f'<td width="{display_w}" height="{row_height}" align="left" valign="top" '
+            f'style="width: {display_w}px; height: {row_height}px; padding: 0; margin: 0; '
+            f'border: 0; font-size: 0; line-height: 0; mso-line-height-rule: exactly;">\n'
+            f'{row_table}'
+            f'</td>\n'
+            f'</tr>\n'
         )
 
     block = (
-        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" '
+        f'<table role="presentation" data-layout="hotspot-stack" cellpadding="0" '
+        f'cellspacing="0" border="0" align="center" '
         f'width="{display_w}" '
         f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
@@ -797,7 +825,6 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             row_records = []
             source_width = 0
             source_height = 0
-            target_height = 0
             for _key, group in keyed_groups:
                 if not group:
                     continue
@@ -819,27 +846,27 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                     row_image.paste(part, (x, 0))
                     x += part.width
                 allocated = _allocate_group_widths(group, display_w_even)
-                output_height = _compute_group_height(group, display_w_even)
-                row_records.append((source_parts, row_image, allocated, output_height))
+                row_records.append((source_parts, row_image, allocated))
                 source_width = max(source_width, row_width)
                 source_height += row_height
-                target_height += output_height
 
             if not row_records or source_width <= 0 or source_height <= 0:
                 raise ValueError("invalid hotspot source size")
 
+            if any(row_image.width != source_width for _, row_image, _ in row_records):
+                raise ValueError("hotspot rows do not share one source width")
+
+            target_height = _even_pixel_4x(
+                max(1, round(source_height * display_w_even / source_width))
+            )
+            output_heights = _allocate_axis_4x(
+                [row_image.height for _, row_image, _ in row_records],
+                target_height,
+            )
+
             full_source = Image.new("RGB", (source_width, source_height))
             source_y = 0
-            for _parts, row_image, _allocated, _height in row_records:
-                if row_image.width != source_width:
-                    # Physical hotspot partitions should share one source width.
-                    # Extend the final edge rather than introducing a white/black strip.
-                    extended = Image.new("RGB", (source_width, row_image.height))
-                    extended.paste(row_image, (0, 0))
-                    edge = row_image.crop((row_image.width - 1, 0, row_image.width, row_image.height))
-                    for x in range(row_image.width, source_width):
-                        extended.paste(edge, (x, 0))
-                    row_image = extended
+            for _parts, row_image, _allocated in row_records:
                 full_source.paste(row_image, (0, source_y))
                 source_y += row_image.height
 
@@ -847,7 +874,9 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
                 (display_w_even, target_height), Image.LANCZOS
             )
             crop_y = 0
-            for source_parts, _row_image, allocated, output_height in row_records:
+            for (source_parts, _row_image, allocated), output_height in zip(
+                row_records, output_heights
+            ):
                 crop_x = 0
                 for s, _part in source_parts:
                     counter += 1
@@ -1047,6 +1076,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'<body style="margin: 0; padding: 0; background-color: #ffffff; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'Margin: 0;">\n'
+            f'<div align="center" style="width: 100%; text-align: center; margin: 0; padding: 0;">\n'
             f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
             f'width="{effective_w}" '
@@ -1070,6 +1100,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'</td>\n'
             f'</tr>\n'
             f'</table>\n'
+            f'</div>\n'
             f'</body>\n'
             f'</html>'
         )

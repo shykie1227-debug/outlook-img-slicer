@@ -581,6 +581,52 @@ def validate_cut_positions(
     return positions
 
 
+def complete_cut_positions(
+    total_height: int,
+    cut_positions: List[int],
+    min_height: int = 80,
+    max_height: int = 1200,
+) -> List[int]:
+    """Preserve user cuts and add evenly spaced cuts only where Outlook needs them."""
+    try:
+        total_height = int(total_height)
+        positions = [int(position) for position in cut_positions]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("切线位置必须是整数像素。") from exc
+
+    if max_height < min_height:
+        raise ValueError("最大切片高度不能小于最小切片高度。")
+
+    # User-authored cuts may create a long section; only ordering and the minimum
+    # distance constrain editing. Outlook-safe supplementary cuts are inserted below.
+    validate_cut_positions(
+        total_height,
+        positions,
+        min_height=min_height,
+        max_height=max(total_height, max_height),
+    )
+
+    completed: List[int] = []
+    boundaries = [0, *positions, total_height]
+    for start, end in zip(boundaries, boundaries[1:]):
+        length = end - start
+        part_count = max(1, (length + max_height - 1) // max_height)
+        base, remainder = divmod(length, part_count)
+        cursor = start
+        for index in range(part_count - 1):
+            cursor += base + (1 if index < remainder else 0)
+            completed.append(cursor)
+        if end != total_height:
+            completed.append(end)
+
+    return validate_cut_positions(
+        total_height,
+        completed,
+        min_height=min_height,
+        max_height=max_height,
+    )
+
+
 def reslice_existing_stack(
     slice_paths: List[str],
     cut_positions: List[int],

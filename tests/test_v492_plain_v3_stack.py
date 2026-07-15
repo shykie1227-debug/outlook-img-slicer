@@ -80,7 +80,8 @@ def test_plain_copy_html_uses_same_v3_direct_img_stack(tmp_path):
     assert html.count("<table") == 1
     assert html.count("<tr") == 1
     assert html.count("<td") == 1
-    assert html.count("<div") == 0
+    # CF_HTML 提取 body 内容，复制路径需要保留全宽居中上下文。
+    assert html.count('<div align="center"') == 1
     assert 'height="' not in html
     # V4.9.3: width 应为图片实际宽度 650
     assert 'width="650"' in html
