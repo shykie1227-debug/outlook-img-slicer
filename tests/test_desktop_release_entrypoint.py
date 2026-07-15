@@ -147,3 +147,6 @@ def test_vm_build_runs_windows_release_gates_and_checks_copy_result():
     assert "$second -lt 45" in source
     assert "Start-Process -FilePath $resultExe" in source
     assert "dulwich" in source
+    assert ".build-wheelhouse" in source
+    assert "--no-index" in source
+    assert "--find-links" in source

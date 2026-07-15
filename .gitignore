@@ -74,6 +74,7 @@ release-artifacts/electron/
 
 # Local build evidence (release EXE is uploaded as a GitHub Release asset)
 build-manifest.json
+.build-wheelhouse/
 
 # Local scratch
 *.local.md

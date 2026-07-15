@@ -176,9 +176,22 @@ if ($pythonExe -and (Test-Path $pythonExe)) {
 Write-Step "Step 2/7: Install Python build/runtime dependencies"
 
 & $pythonExe -m pip install --upgrade pip -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
-& $pythonExe -m pip install Pillow PyMuPDF PySide6 pywin32 pyinstaller psd-tools numpy python-pptx lxml cairosvg svglib reportlab pytest dulwich -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
+& $pythonExe -m pip install Pillow PyMuPDF PySide6 pywin32 pyinstaller psd-tools numpy python-pptx lxml cairosvg svglib reportlab -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Fail "Python deps install failed"
+}
+
+& $pythonExe -m pip install pytest dulwich -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    $wheelhouse = Join-Path $LocalRoot ".build-wheelhouse"
+    if (-not (Test-Path $wheelhouse)) {
+        Fail "Test dependencies unavailable online and local wheelhouse is missing."
+    }
+    Write-Info "Online test dependency install failed; using local Windows wheelhouse..."
+    & $pythonExe -m pip install pytest dulwich --no-index --find-links $wheelhouse -q
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Offline test dependency install failed."
+    }
 }
 
 $postInstall = Join-Path (Split-Path $pythonExe) "Scripts\pywin32_postinstall.py"
