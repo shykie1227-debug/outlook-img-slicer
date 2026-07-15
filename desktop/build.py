@@ -150,7 +150,7 @@ def print_change_log():
         print("=" * 60 + "\n")
     else:
         try:
-            last = json.loads(HISTORY_FILE.read_text())
+            last = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             # git SHA 变化
             if last.get("git_sha") != git_sha:
                 print(f"  🔄 Commit 变化: {last.get('git_sha')} → {git_sha}")

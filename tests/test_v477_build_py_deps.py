@@ -28,7 +28,7 @@ sys.path.insert(0, str(DESKTOP_ROOT))
 
 def test_build_py_no_hardcoded_pywin32_version():
     """V4.7.7 R3: build.py 不应有 pywin32==XXX 硬编码版本号"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     # 去除 docstring 和注释（以 # 或三引号 开头的行）
     code_lines = []
     in_docstring = False
@@ -50,7 +50,7 @@ def test_build_py_no_hardcoded_pywin32_version():
 
 def test_build_py_import_to_pip_includes_python_pptx():
     """V4.7.7 R3: import_to_pip 应包含 python-pptx（V4.6.1 漏了）"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     # 找 import_to_pip 字典
     m = re.search(
         r'import_to_pip\s*=\s*\{(.*?)\}',
@@ -65,7 +65,7 @@ def test_build_py_import_to_pip_includes_python_pptx():
 
 def test_build_py_import_to_pip_includes_lxml():
     """V4.7.7 R3: import_to_pip 应包含 lxml（V4.6.1 漏了）"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     m = re.search(
         r'import_to_pip\s*=\s*\{(.*?)\}',
         build_src,
@@ -78,7 +78,7 @@ def test_build_py_import_to_pip_includes_lxml():
 
 def test_build_py_pip_installs_pywin32_unpinned():
     """V4.7.7 R3: pip install 应使用 'pywin32'（不锁版本）"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     # 找 pip install 行的 pywin32 段
     m = re.search(r'pip_pkgs\s*=\s*.*?pywin32["\']?', build_src)
     assert m, "找不到 pip_pkgs 中的 pywin32"
@@ -90,7 +90,7 @@ def test_build_py_pip_installs_pywin32_unpinned():
 
 def test_requirements_txt_and_build_py_consistent():
     """V4.7.7 R3: requirements.txt 的所有包应都能在 build.py 装上"""
-    reqs_text = (ROOT / "requirements.txt").read_text()
+    reqs_text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     # 提取 requirements.txt 里的包名（去掉版本约束）
     req_names = set()
     for line in reqs_text.split('\n'):
@@ -104,7 +104,7 @@ def test_requirements_txt_and_build_py_consistent():
     # 排除 UPX（不是 pip 包）
     req_names.discard('upx')
 
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     m = re.search(
         r'import_to_pip\s*=\s*\{(.*?)\}',
         build_src,
@@ -137,7 +137,7 @@ def test_pyinstaller_spec_disables_strip_on_windows():
 
 def test_build_py_has_print_change_log():
     """R3.1: build.py 必须在 main() 调用 print_change_log()"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     assert "def print_change_log" in build_src, "缺 print_change_log() 函数"
     # 必须从 main() 调用
     assert "print_change_log()" in build_src, "main() 未调用 print_change_log()"
@@ -145,7 +145,7 @@ def test_build_py_has_print_change_log():
 
 def test_build_py_history_file_in_dist():
     """R3.1: 历史记录文件应在 dist/ 下（被 .gitignore 排除）"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     # HISTORY_FILE 路径应在 dist/.build_history.json
     assert "HISTORY_FILE" in build_src
     assert "dist" in build_src
@@ -154,7 +154,7 @@ def test_build_py_history_file_in_dist():
 
 def test_gitignore_excludes_build_history():
     """R3.1: .gitignore 应排除 .build_history.json（避免误提交）"""
-    gitignore = (ROOT / ".gitignore").read_text()
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     # dist/ 整目录被排除，或者 .build_history.json 被单条排除
     assert "dist/" in gitignore or ".build_history.json" in gitignore, \
         ".gitignore 应排除 dist/ 或 .build_history.json"
@@ -163,7 +163,7 @@ def test_gitignore_excludes_build_history():
 def test_print_change_log_handles_no_history():
     """R3.1: 首次运行（无历史记录）不应崩"""
     # 验证 print_change_log() 有 try-except 保护
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     m = re.search(
         r'def print_change_log\(.*?\):(.*?)(?=\ndef )',
         build_src,
@@ -179,7 +179,7 @@ def test_print_change_log_handles_no_history():
 
 def test_print_change_log_shows_warn_on_write_fail():
     """R3.1: 写历史记录失败时，应警告而不是静默"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     # 保存历史记录的 try-except 块不应是裸 pass
     m = re.search(
         r'# 保存本次记录(.*?)\n    try:',
@@ -210,13 +210,13 @@ def test_print_change_log_actually_writes_history(tmp_path):
         # 首次运行
         build_mod.print_change_log()
         assert build_mod.HISTORY_FILE.exists(), "首次运行后应创建历史文件"
-        first_record = json.loads(build_mod.HISTORY_FILE.read_text())
+        first_record = json.loads(build_mod.HISTORY_FILE.read_text(encoding="utf-8"))
         assert "git_sha" in first_record
         assert "timestamp" in first_record
         assert "deps" in first_record
         # 第二次运行（依赖未变）
         build_mod.print_change_log()
-        second_record = json.loads(build_mod.HISTORY_FILE.read_text())
+        second_record = json.loads(build_mod.HISTORY_FILE.read_text(encoding="utf-8"))
         # 记录应被覆盖（timestamp 变化或保持一致）
         assert second_record["git_sha"] == first_record["git_sha"]
     finally:
@@ -226,7 +226,7 @@ def test_print_change_log_actually_writes_history(tmp_path):
 
 def test_get_declared_deps_uses_utf8_encoding():
     """R3.2: _get_declared_deps() 必须用 utf-8 encoding（防 Windows GBK UnicodeDecodeError）"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     # 找 _get_declared_deps 函数体
     m = re.search(
         r'def _get_declared_deps\(.*?\):(.*?)(?=\ndef )',
@@ -245,7 +245,7 @@ def test_get_declared_deps_uses_utf8_encoding():
 
 def test_get_git_sha_uses_utf8_encoding():
     """R3.2: _get_git_sha() 必须用 utf-8 encoding"""
-    build_src = (DESKTOP_ROOT / "build.py").read_text()
+    build_src = (DESKTOP_ROOT / "build.py").read_text(encoding="utf-8")
     m = re.search(
         r'def _get_git_sha\(.*?\):(.*?)(?=\ndef )',
         build_src,
