@@ -67,6 +67,16 @@ Get-Process -Name "OutlookImgSlicer" -ErrorAction SilentlyContinue | ForEach-Obj
     Write-Info "Stopping previous OutlookImgSlicer test process (PID $($_.Id))..."
     Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
 }
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.ProcessId -ne $PID -and
+        $_.Name -match '^python(w)?\.exe$' -and
+        $_.CommandLine -like "*$LocalRoot*"
+    } |
+    ForEach-Object {
+        Write-Info "Stopping stale local UI smoke process (PID $($_.ProcessId))..."
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 Start-Sleep -Milliseconds 500
 
 if (Test-Path $LocalRoot) {

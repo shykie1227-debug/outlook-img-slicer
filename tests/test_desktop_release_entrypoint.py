@@ -36,6 +36,8 @@ def test_vm_build_rejects_locked_or_stale_output():
     source = (ROOT / "vm_build.ps1").read_text(encoding="utf-8")
 
     assert 'Get-Process -Name "OutlookImgSlicer"' in source
+    assert "Get-CimInstance Win32_Process" in source
+    assert "CommandLine -like \"*$LocalRoot*\"" in source
     assert 'Fail "Unable to clean local build directory' in source
     assert "$buildStartedAt" in source
     assert "LastWriteTimeUtc -lt $buildStartedAt" in source
