@@ -52,8 +52,8 @@ def copy_cf_html_to_clipboard(raw: bytes) -> None:
     CF_HTML 专用格式，不能只写普通文本；否则经典 Outlook 粘贴时容易丢样式、
     错位或只得到纯文本。
 
-    `raw` 来自 clipboard_html.build_windows_clipboard_html，格式与
-    win32clipboard.CF_HTML 内置常量（值为 "HTML Format"）一致。
+    `raw` 来自 clipboard_html.build_windows_clipboard_html，并通过 Windows
+    注册的 `HTML Format` 剪贴板格式写入。
 
     Args:
         raw: 已按 CF_HTML 规范编码的字节（含 Version/StartHTML/... 头）。
@@ -68,14 +68,14 @@ def copy_cf_html_to_clipboard(raw: bytes) -> None:
     import win32clipboard
     import win32con
 
+    html_format = win32clipboard.RegisterClipboardFormat("HTML Format")
     win32clipboard.OpenClipboard()
     try:
         win32clipboard.EmptyClipboard()
         # 兼容纯文本：部分邮箱/富文本编辑器需要 Unicode 文本回退
         win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, "")
-        # CF_HTML 是 win32clipboard 内置常量（"HTML Format"），与
-        # clipboard_html.build_windows_clipboard_html 产出的字节格式一致
-        win32clipboard.SetClipboardData(win32clipboard.CF_HTML, raw)
+        # pywin32 不保证提供 CF_HTML 常量，必须向 Windows 动态注册格式。
+        win32clipboard.SetClipboardData(html_format, raw)
     finally:
         win32clipboard.CloseClipboard()
 

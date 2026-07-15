@@ -33,7 +33,8 @@ def test_copy_cf_html_writes_same_bytes_as_build_windows_clipboard_html():
     raw = build_windows_clipboard_html(html)
 
     mock_wc = mock.MagicMock()
-    mock_wc.CF_HTML = "HTML Format"  # win32clipboard.CF_HTML 内置常量
+    html_format_id = 49301
+    mock_wc.RegisterClipboardFormat.return_value = html_format_id
     mock_wcon = mock.MagicMock()
     mock_wcon.CF_UNICODETEXT = 13
 
@@ -44,14 +45,16 @@ def test_copy_cf_html_writes_same_bytes_as_build_windows_clipboard_html():
     mock_wc.OpenClipboard.assert_called_once()
     # SetClipboardData 至少写入 CF_UNICODETEXT（兼容）与 CF_HTML
     set_calls = [tuple(c.args) for c in mock_wc.SetClipboardData.call_args_list]
-    assert (mock_wc.CF_HTML, raw) in set_calls, "CF_HTML 写入字节与 build 产物不一致"
+    mock_wc.RegisterClipboardFormat.assert_called_once_with("HTML Format")
+    assert (html_format_id, raw) in set_calls, "CF_HTML 写入字节与 build 产物不一致"
     mock_wc.CloseClipboard.assert_called_once()
 
 
 def test_copy_cf_html_raises_runtime_error_on_non_windows():
     """非 Windows 平台必须明确抛 RuntimeError（不静默失败）。"""
-    with pytest.raises(RuntimeError):
-        copy_cf_html_to_clipboard(b"x")
+    with mock.patch.object(outlook_sender.sys, "platform", "darwin"):
+        with pytest.raises(RuntimeError):
+            copy_cf_html_to_clipboard(b"x")
 
 
 def test_generate_plain_html_embeds_base64_for_webmail(tmp_path):
