@@ -16,7 +16,9 @@ $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 
 $SharedRoot = "\\Mac\Home\outlook-img-slicer"
-$LocalRoot = "C:\build\outlook-img-slicer"
+$LocalRoot = Join-Path "C:\build" (
+    "outlook-img-slicer-{0}-{1}" -f $SourceGitSha.Substring(0, 12), "$PID"
+)
 $LogFile = Join-Path $SharedRoot "vm_build.log"
 $StatusFile = Join-Path $SharedRoot "vm_build_status.txt"
 $buildStartedAt = [DateTime]::UtcNow

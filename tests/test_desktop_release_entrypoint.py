@@ -35,6 +35,8 @@ def test_vm_build_script_builds_desktop_pyside_exe_without_electron():
 def test_vm_build_rejects_locked_or_stale_output():
     source = (ROOT / "vm_build.ps1").read_text(encoding="utf-8")
 
+    assert "$SourceGitSha.Substring(0, 12)" in source
+    assert '"$PID"' in source
     assert 'Get-Process -Name "OutlookImgSlicer"' in source
     assert "Get-CimInstance Win32_Process" in source
     assert "CommandLine -like \"*$LocalRoot*\"" in source
