@@ -301,7 +301,8 @@ def _allocate_axis_4x(source_lengths: List[int], target_total: int) -> List[int]
 def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional[str] = None,
               alt: str = "", original_width: int = 0, is_base64: bool = False,
               forced_display_w: Optional[int] = None,
-              forced_display_h: Optional[int] = None) -> str:
+              forced_display_h: Optional[int] = None,
+              colspan: int = 1) -> str:
     """
     生成一张切片的 <td>...</td>（V4.7.8 缝隙消除+错位修复）。
 
@@ -384,8 +385,10 @@ def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional
     else:
         inner = img_tag
 
+    colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
     return (
-        f'<td align="left" valign="top" width="{seg_display_w}" height="{seg_display_h}" style="'
+        f'<td align="left" valign="top" width="{seg_display_w}" height="{seg_display_h}"'
+        f'{colspan_attr} style="'
         f'width: {seg_display_w}px; height: {seg_display_h}px; '
         f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
         f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
@@ -629,64 +632,68 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
 def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
                                 is_base64: bool = False) -> Tuple[str, int]:
     """
-    Build one continuous outer stack while isolating every visual row's column grid.
+    Build one Outlook table with a shared column grid for every hotspot row.
 
-    Classic Outlook coordinates columns across rows of one fixed-layout table. Hotspot
-    rows can have unrelated X boundaries, so each row receives its own nested one-row
-    table. The nested tables are contained by exact-height outer cells, avoiding both
-    cross-row column negotiation and sibling block-table gaps.
+    Each row can have different image boundaries. Their union becomes one global grid,
+    while cells span the columns they cover. This avoids both cross-row column drift and
+    the visible seams caused by stacking nested tables in Outlook's Word renderer.
     """
     display_w = _normalize_display_width(display_w)
+    row_layouts = []
+    global_boundaries = {0, display_w}
+
+    for group in groups:
+        allocated_widths = _allocate_group_widths(group, display_w)
+        widths = [allocated_widths[s.path] for s in group]
+        boundaries = [0]
+        for width in widths:
+            boundaries.append(boundaries[-1] + width)
+        if boundaries[-1] != display_w:
+            raise ValueError("hotspot row width does not match the email width")
+        global_boundaries.update(boundaries)
+        row_layouts.append((group, widths, boundaries, _compute_group_height(group, display_w)))
+
+    ordered_boundaries = sorted(global_boundaries)
+    boundary_indexes = {value: index for index, value in enumerate(ordered_boundaries)}
+    column_widths = [
+        right - left for left, right in zip(ordered_boundaries, ordered_boundaries[1:])
+    ]
+    colgroup = "<colgroup>\n" + "".join(
+        f'<col width="{width}" style="width: {width}px;" />\n'
+        for width in column_widths
+    ) + "</colgroup>\n"
+
     all_rows_html = ""
     cid_counter = 0
 
-    for group in groups:
-        # 强制「各 cell 宽之和 == display_w」且「整行共享同一 4x 高度」
-        allocated_widths = _allocate_group_widths(group, display_w)
-        row_height = _compute_group_height(group, display_w)
-
+    for group, widths, boundaries, row_height in row_layouts:
         cells = ""
-        for s in group:
+        for index, (s, cell_width) in enumerate(zip(group, widths)):
             if is_base64:
                 cid_or_src = ""
             else:
                 cid_counter += 1
                 cid_or_src = f"cid:slice_{cid_counter:03d}"
+            colspan = boundary_indexes[boundaries[index + 1]] - boundary_indexes[boundaries[index]]
             cells += _build_cell(
                 s.path, cid_or_src, display_w, s.href, s.alt_text,
                 s.original_width, is_base64=is_base64,
-                forced_display_w=allocated_widths.get(s.path),
+                forced_display_w=cell_width,
                 forced_display_h=row_height,
+                colspan=colspan,
             )
 
-        row_table = (
-            f'<table role="presentation" data-layout="hotspot-row" cellpadding="0" '
-            f'cellspacing="0" border="0" align="left" width="{display_w}" '
-            f'height="{row_height}" style="width: {display_w}px; height: {row_height}px; '
-            f'border: 0; border-collapse: collapse; border-spacing: 0; font-size: 0; '
-            f'line-height: 0; mso-line-height-rule: exactly; mso-table-lspace: 0pt; '
-            f'mso-table-rspace: 0pt; mso-padding-alt: 0; table-layout: fixed;">\n'
+        all_rows_html += (
             f'<tr height="{row_height}" style="height: {row_height}px; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
             f'valign="top" align="left">\n'
             f'{cells}'
             f'</tr>\n'
-            f'</table>\n'
-        )
-        all_rows_html += (
-            f'<tr height="{row_height}" style="height: {row_height}px; font-size: 0; '
-            f'line-height: 0; mso-line-height-rule: exactly; border: 0;" valign="top">\n'
-            f'<td width="{display_w}" height="{row_height}" align="left" valign="top" '
-            f'style="width: {display_w}px; height: {row_height}px; padding: 0; margin: 0; '
-            f'border: 0; font-size: 0; line-height: 0; mso-line-height-rule: exactly;">\n'
-            f'{row_table}'
-            f'</td>\n'
-            f'</tr>\n'
         )
 
     block = (
-        f'<table role="presentation" data-layout="hotspot-stack" cellpadding="0" '
+        f'<table role="presentation" data-layout="hotspot-grid" cellpadding="0" '
         f'cellspacing="0" border="0" align="center" '
         f'width="{display_w}" '
         f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
@@ -694,6 +701,7 @@ def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
         f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
         f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
         f'table-layout: fixed;">\n'
+        f'{colgroup}'
         f'{all_rows_html}'
         f'</table>\n'
     )

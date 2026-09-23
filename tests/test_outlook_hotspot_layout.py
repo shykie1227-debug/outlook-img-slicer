@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from PIL import Image
 
@@ -38,16 +39,39 @@ def _prepared_hotspot_items(tmp_path: Path) -> list[SliceItem]:
     return materialize_display_slices_strict(raw, 648)
 
 
-def test_hotspot_rows_use_independent_nested_column_grids(tmp_path):
+def test_hotspot_rows_share_one_unified_column_grid(tmp_path):
     prepared = _prepared_hotspot_items(tmp_path)
     html = assemble_html(prepared, 648)
 
-    # 一个连续 stack 管纵向，每行自己的单行表格管理不同的 X 边界。
-    assert html.count('data-layout="hotspot-stack"') == 1
-    assert html.count('data-layout="hotspot-row"') == 5
+    # 外层居中 table + 一个统一热区 table。不能再为每个视觉行嵌套 table，
+    # 否则 Outlook Word 会在嵌套表边界重新计算行高并产生可见缝隙。
+    assert html.count("<table") == 2
+    assert html.count('data-layout="hotspot-grid"') == 1
+    assert 'data-layout="hotspot-row"' not in html
     assert html.count("<div") == 0
     assert "table-layout: fixed" in html
     assert "<tr height=" in html
+
+    col_widths = [
+        int(width)
+        for width in re.findall(r'<col width="(\d+)"', html)
+    ]
+    assert len(col_widths) > 1
+    assert sum(col_widths) == 648
+
+    grid = re.search(
+        r'<table[^>]*data-layout="hotspot-grid"[^>]*>(.*?)</table>',
+        html,
+        re.DOTALL,
+    ).group(1)
+    visual_rows = re.findall(r'<tr height="\d+"[^>]*>(.*?)</tr>', grid, re.DOTALL)
+    assert len(visual_rows) == 5
+    for row in visual_rows:
+        spans = []
+        for tag in re.findall(r'<td[^>]*>', row):
+            match = re.search(r'colspan="(\d+)"', tag)
+            spans.append(int(match.group(1)) if match else 1)
+        assert sum(spans) == len(col_widths)
 
 
 def test_hotspot_links_are_inline_while_images_remain_block(tmp_path):

@@ -1,10 +1,10 @@
 """
-Hotspot / 多段链路回归测试：连续外表格 + 每个视觉行独立列网格。
+Hotspot / 多段链路回归测试：单表统一列网格。
 
 覆盖 Fix 1-A（单表结构消除表间 1px 缝）+ Fix 1-B（非普通链路先 materialize，
 保证 PNG 物理尺寸与 HTML 声明严格一致）：
 
-  1. CID 模式保留一个连续外表格，每个视觉行在精确高度外层 cell 中拥有独立单行表格。
+  1. CID 模式使用一个统一热区表格，通过 colgroup/colspan 容纳不同 X 边界。
   2. 每个 <tr height="H"> 内所有 <td height> 都 == H（纵向不再错位）。
   3. 同一 <tr> 内所有 <td width> 之和 == 外层显示宽度（横向不再错位/换行）。
   4. CID 模式下 slice_XXX 的计数与顺序，与 outlook_sender.create_email_with_images
@@ -73,25 +73,29 @@ def _tr_blocks(html: str):
     return blocks
 
 
-def _hotspot_row_tables(html: str):
-    return re.findall(
-        r'<table[^>]*data-layout="hotspot-row"[^>]*>(.*?)</table>',
+def _hotspot_grid(html: str):
+    match = re.search(
+        r'<table[^>]*data-layout="hotspot-grid"[^>]*>(.*?)</table>',
         html,
         re.DOTALL,
     )
+    assert match, "未找到统一热区网格"
+    return match.group(1)
 
 
 def _cid_sequence(html: str):
     return re.findall(r'cid:(slice_\d+)', html)
 
 
-def test_cid_assemble_isolates_each_visual_row_column_grid(tmp_path):
-    """不让 Outlook 把不同热区行的 X 边界合并成同一个固定列网格。"""
+def test_cid_assemble_uses_one_unified_column_grid(tmp_path):
+    """所有热区行共享同一列定义，不嵌套会产生 Outlook 缝隙的行表格。"""
     slices = _build_complex_slices(tmp_path)
     html = assemble_html(slices, 960)
 
-    assert html.count('data-layout="hotspot-stack"') == 1
-    assert len(_hotspot_row_tables(html)) == 5
+    assert html.count("<table") == 2
+    assert html.count('data-layout="hotspot-grid"') == 1
+    assert 'data-layout="hotspot-row"' not in html
+    assert len(_tr_blocks(_hotspot_grid(html))) == 5
     assert html.count("<div") == 0
 
 
@@ -100,12 +104,9 @@ def test_cid_assemble_tr_height_matches_td_height(tmp_path):
     slices = _build_complex_slices(tmp_path)
     html = assemble_html(slices, 960)
 
-    row_tables = _hotspot_row_tables(html)
-    assert row_tables, "未找到独立热区行表格"
-    for row_table in row_tables:
-        blocks = _tr_blocks(row_table)
-        assert len(blocks) == 1
-        tr_height, cells = blocks[0]
+    blocks = _tr_blocks(_hotspot_grid(html))
+    assert blocks, "统一热区网格应包含视觉行"
+    for tr_height, cells in blocks:
         assert cells, "内层 <tr> 应至少含 1 个 <td>"
         for td_w, td_h in cells:
             assert td_h == tr_height, (
@@ -119,8 +120,7 @@ def test_cid_assemble_row_width_sums_to_display_width(tmp_path):
     html = assemble_html(slices, 960)
     outer_w = _outer_width(html)
 
-    for row_table in _hotspot_row_tables(html):
-        tr_height, cells = _tr_blocks(row_table)[0]
+    for tr_height, cells in _tr_blocks(_hotspot_grid(html)):
         row_sum = sum(td_w for td_w, _ in cells)
         assert row_sum == outer_w, (
             f"一行 <td width> 之和 {row_sum} != 外层宽度 {outer_w} → 横向错位"
@@ -141,13 +141,14 @@ def test_cid_assemble_cid_order_matches_sorted_slices(tmp_path):
     )
 
 
-def test_base64_generate_plain_html_uses_isolated_rows_with_base64(tmp_path):
-    """复制模式使用相同独立行结构，并保持自包含内联图片。"""
+def test_base64_generate_plain_html_uses_unified_grid_with_base64(tmp_path):
+    """复制模式使用相同统一网格，并保持自包含内联图片。"""
     slices = _build_complex_slices(tmp_path)
     html = generate_plain_html(slices, 960)
 
-    assert html.count('data-layout="hotspot-stack"') == 1
-    assert len(_hotspot_row_tables(html)) == 5
+    assert html.count('data-layout="hotspot-grid"') == 1
+    assert 'data-layout="hotspot-row"' not in html
+    assert len(_tr_blocks(_hotspot_grid(html))) == 5
     # 网页邮箱路径：base64 内联，无 cid 引用
     assert "data:image/" in html and ";base64," in html
     assert "cid:" not in html
