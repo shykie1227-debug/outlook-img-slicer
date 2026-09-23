@@ -1,7 +1,20 @@
 """
-HTML 组装器模块（V4.9.0 缝隙根除 + 预渲染重构）
+HTML 组装器模块（V6.4.0 热点邮件单行列网格 + V4.9.0 缝隙根除）
 
-V4.9.0 变更（当前版本）：
+V6.4.0 变更（当前版本）：
+  - 热点邮件结构性根修：整封邮件只有 **1 条 <tr>**、无嵌套表格。
+    旧实现（V6.0.3）为每个视觉行输出一条 <tr>，一封 3 按钮邮件实测 9 条 <tr>；
+    Outlook Word 引擎在 <tr> 之间始终插入约 1px 间距，行数越多缝隙越多 ——
+    这就是"添加可点击按钮后出现各种缝隙"的根因。
+    新实现把网格转置：取所有行 X 边界的并集作为列，每列 1 个 <td>，
+    列内用 display:block 连续堆叠该列的竖向片段 —— 与普通长图
+    （V3.0 用户实测无缝）的写法完全一致，行间缝隙从结构上不存在。
+  - materialize 阶段即按"列 × 行"网格产出最终 PNG（SliceItem.grid_col/grid_row），
+    PNG 物理尺寸与 HTML 声明严格一致。
+  - build_render_plan 与 assemble_html 共用 _ordered_grid_cells（列优先）这一份
+    顺序，保证 Outlook 附件 CID 与正文 cid: 引用一一对应不漂移。
+
+V4.9.0 变更：
   - 缝隙根因修：Outlook Word 引擎在多个 <tr> 之间始终插入约 1px 间距。
     改为单 <tr> + 单 <td> 布局，所有图片在同一个 <td> 内通过 <div> 垂直堆叠，
     根除多行之间的 1px 间距。
@@ -110,6 +123,11 @@ class SliceItem:
     sort_key: float = 0.0
     # V4.6.9 修复：原图宽度，用于多段拼接时按比例缩放
     original_width: int = 0
+    # V6.4.0 单行列网格：materialize 产出的最终网格单元坐标。
+    # grid_col/grid_row >= 0 表示该切片已是「单行列网格」单元，
+    # HTML 侧据此直接输出 1 条 <tr>（列 = <td>，行 = <td> 内堆叠 <img>）。
+    grid_col: int = -1
+    grid_row: int = -1
 
 
 @dataclass(frozen=True)
@@ -156,6 +174,31 @@ def build_render_plan(slices: List[SliceItem], display_w: int = 650) -> MailRend
                 cid=f"slice_{index:03d}",
             ))
         return MailRenderPlan(effective_width or int(display_w), tuple(render_items))
+
+    if _is_single_row_grid(slices):
+        # V6.4.0：切片已是最终网格单元，几何尺寸直接读 PNG（materialize 已保证
+        # 物理尺寸 == 声明尺寸）。CID 编号顺序必须与 HTML 的 <td> 顺序一致（列优先）。
+        cells = _ordered_grid_cells(slices)
+        column_widths: Dict[int, int] = {}
+        for item in cells:
+            width, _height = _get_img_dimensions(item.path)
+            column_widths.setdefault(item.grid_col, width)
+        plan_width = sum(column_widths[col] for col in sorted(column_widths))
+        render_items = []
+        for index, item in enumerate(cells, start=1):
+            physical_width, physical_height = _get_img_dimensions(item.path)
+            render_items.append(MailRenderItem(
+                path=item.path,
+                href=item.href,
+                alt_text=item.alt_text,
+                sort_key=item.sort_key,
+                physical_width=physical_width,
+                physical_height=physical_height,
+                display_width=physical_width,
+                display_height=physical_height,
+                cid=f"slice_{index:03d}",
+            ))
+        return MailRenderPlan(plan_width, tuple(render_items))
 
     widths_by_path: Dict[str, int] = {}
     heights_by_path: Dict[str, int] = {}
@@ -431,6 +474,28 @@ def _is_plain_vertical_stack(groups: List[List[SliceItem]]) -> bool:
     return True
 
 
+def _is_single_row_grid(slices: List[SliceItem]) -> bool:
+    """
+    V6.4.0：切片是否已经是「单行列网格」的最终网格单元（由 materialize 产出）。
+
+    判定依据是 SliceItem.grid_col/grid_row >= 0，而不是猜 sort_key 编码，
+    避免与 V1/V2 hotspot 编码混淆。
+    """
+    if not slices:
+        return False
+    return all(s.grid_col >= 0 and s.grid_row >= 0 for s in slices)
+
+
+def _ordered_grid_cells(slices: List[SliceItem]) -> List[SliceItem]:
+    """
+    单行列网格的输出顺序：列优先（与 HTML 里 <td> 的排列顺序一致）。
+
+    build_render_plan 的 CID 编号和 assemble_html 的 cid 引用都必须用这个顺序，
+    否则 Outlook 附件 CID 与正文引用错位，图片会整体错乱。
+    """
+    return sorted(slices, key=lambda item: (item.grid_col, item.grid_row))
+
+
 def _build_v3_plain_image_stack(groups: List[List[SliceItem]], display_w: int,
                                 is_base64: bool = False) -> Tuple[str, int]:
     """
@@ -623,89 +688,126 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
     return _even_pixel_4x(max(1, round(row_h * display_w / total_w)))
 
 
-# NOTE: _build_group_row 与 _build_inline_segment 已删除（B3/B4 死代码，Fix 1-A / Fix 2-C）。
-# - _build_group_row：仅定义、无主路径调用；其「单 table + 单 tr」逻辑已被
-#   _build_complex_inline_stack 的单表多 <tr> 版本取代。
-# - _build_inline_segment：用 inline-block <span> 包裹，Outlook 易重排，方案已否决。
+# NOTE: 以下旧结构已删除：
+# - _build_group_row / _build_inline_segment（B3/B4 死代码，Fix 1-A / Fix 2-C）。
+# - _build_complex_inline_stack（V6.0.3 单表多 <tr> 版本，V6.4.0 被
+#   _build_single_row_column_grid 取代）：它为每个视觉行输出一条 <tr>，
+#   一封 3 按钮邮件实测 9 条 <tr>；Outlook Word 引擎在 <tr> 之间始终插入约 1px
+#   间距，行数越多缝隙越多 —— 这是"添加可点击按钮后出现各种缝隙"的根因。
+# - _build_cell / _build_image_row：只被上述两条旧链路使用，一并删除。
 
 
-def _build_complex_inline_stack(groups: List[List[SliceItem]], display_w: int,
-                                is_base64: bool = False) -> Tuple[str, int]:
+def _grid_cell_image(slice_path: str, src: str, width: int, height: int,
+                     href: Optional[str], alt: str, is_base64: bool) -> str:
     """
-    Build one Outlook table with a shared column grid for every hotspot row.
+    生成一个网格单元的 <img>（或 <a><img></a>）。
 
-    Each row can have different image boundaries. Their union becomes one global grid,
-    while cells span the columns they cover. This avoids both cross-row column drift and
-    the visible seams caused by stacking nested tables in Outlook's Word renderer.
+    写法对齐 _build_v3_plain_image_stack（普通长图已验证无缝的同一套属性）：
+    display:block + font-size:0 + line-height:0 + vertical-align:top。
+    """
+    if is_base64:
+        import base64
+        with open(slice_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        ext = Path(slice_path).suffix.lower().lstrip(".")
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+        src = f"data:{mime};base64,{b64}"
+    safe_src = escape(src, quote=True)
+    safe_alt = escape(alt or Path(slice_path).name, quote=True)
+    img_tag = (
+        f'<img src="{safe_src}" '
+        f'width="{width}" height="{height}" '
+        f'alt="{safe_alt}" '
+        f'border="0" hspace="0" vspace="0" '
+        f'style="width: {width}px; height: {height}px; '
+        f'border: 0; border-collapse: collapse; border-spacing: 0; '
+        f'display: block; outline: none; text-decoration: none; '
+        f'vertical-align: top; margin: 0; padding: 0; '
+        f'line-height: 0; font-size: 0; '
+        f'-ms-interpolation-mode: bicubic; '
+        f'visibility: visible !important;" />'
+    )
+    if href:
+        safe_href = escape(href, quote=True)
+        return (
+            f'<a href="{safe_href}" target="_blank" '
+            f'style="display: block; width: {width}px; height: {height}px; '
+            f'text-decoration: none; outline: none; border: 0; '
+            f'border-collapse: collapse; border-spacing: 0; '
+            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+            f'line-height: 0; font-size: 0;">{img_tag}</a>'
+        )
+    return img_tag
+
+
+def _build_single_row_column_grid(slices: List[SliceItem], display_w: int,
+                                  is_base64: bool = False,
+                                  cid_by_sort_key: Optional[Dict[float, str]] = None) -> str:
+    """
+    V6.4.0 单行列网格：整封邮件只有 **1 条 <tr>**，每列 1 个 <td>，列内连续堆叠 <img>。
+
+    返回的是 `<td>...</td>` 序列，直接放进外层 <table> 的唯一 <tr> 里 ——
+    不再产生嵌套表格。这是普通长图（V3.0 实测无缝）与热点邮件在结构上的统一：
+
+      普通长图  ：<table><tr><td> img img img </td></tr></table>
+      热点邮件  ：<table><tr><td> img img </td><td> img </td>...</td></tr></table>
+
+    唯一差异是普通长图只有 1 个 <td>；纵向堆叠写法完全一致，因此
+    行间 1px 缝从结构上不存在。横向为同一 <tr> 内的相邻 <td>，
+    由 border-collapse + cellspacing=0 + table-layout:fixed 保证无缝。
     """
     display_w = _normalize_display_width(display_w)
-    row_layouts = []
-    global_boundaries = {0, display_w}
+    columns: Dict[int, List[SliceItem]] = {}
+    for item in slices:
+        columns.setdefault(item.grid_col, []).append(item)
 
-    for group in groups:
-        allocated_widths = _allocate_group_widths(group, display_w)
-        widths = [allocated_widths[s.path] for s in group]
-        boundaries = [0]
-        for width in widths:
-            boundaries.append(boundaries[-1] + width)
-        if boundaries[-1] != display_w:
-            raise ValueError("hotspot row width does not match the email width")
-        global_boundaries.update(boundaries)
-        row_layouts.append((group, widths, boundaries, _compute_group_height(group, display_w)))
+    cells = ""
+    for col_index in sorted(columns):
+        column = sorted(columns[col_index], key=lambda item: item.grid_row)
+        dimensions = [_get_img_dimensions(item.path) for item in column]
+        column_widths = {width for width, _height in dimensions}
+        if len(column_widths) != 1:
+            raise ValueError("hotspot grid column width is not consistent")
+        col_width = column_widths.pop()
+        total_height = sum(height for _width, height in dimensions)
 
-    ordered_boundaries = sorted(global_boundaries)
-    boundary_indexes = {value: index for index, value in enumerate(ordered_boundaries)}
-    column_widths = [
-        right - left for left, right in zip(ordered_boundaries, ordered_boundaries[1:])
-    ]
-    colgroup = "<colgroup>\n" + "".join(
-        f'<col width="{width}" style="width: {width}px;" />\n'
-        for width in column_widths
-    ) + "</colgroup>\n"
-
-    all_rows_html = ""
-    cid_counter = 0
-
-    for group, widths, boundaries, row_height in row_layouts:
-        cells = ""
-        for index, (s, cell_width) in enumerate(zip(group, widths)):
+        inner = ""
+        for item, (_width, height) in zip(column, dimensions):
             if is_base64:
-                cid_or_src = ""
+                src = ""
             else:
-                cid_counter += 1
-                cid_or_src = f"cid:slice_{cid_counter:03d}"
-            colspan = boundary_indexes[boundaries[index + 1]] - boundary_indexes[boundaries[index]]
-            cells += _build_cell(
-                s.path, cid_or_src, display_w, s.href, s.alt_text,
-                s.original_width, is_base64=is_base64,
-                forced_display_w=cell_width,
-                forced_display_h=row_height,
-                colspan=colspan,
+                # cid_by_sort_key 里存的是裸 CID（与 build_render_plan /
+                # resolve_attachment_manifest 一致），写进 HTML 时必须补 cid: 前缀。
+                bare_cid = (cid_by_sort_key or {}).get(item.sort_key, "")
+                if not bare_cid:
+                    raise ValueError("missing cid for hotspot grid cell")
+                src = f"cid:{bare_cid}"
+            inner += _grid_cell_image(
+                item.path, src, col_width, height, item.href, item.alt_text, is_base64
             )
 
-        all_rows_html += (
-            f'<tr height="{row_height}" style="height: {row_height}px; '
+        cells += (
+            f'<td align="left" valign="top" width="{col_width}" '
+            f'style="width: {col_width}px; height: {total_height}px; '
+            f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; border: 0;" '
-            f'valign="top" align="left">\n'
-            f'{cells}'
-            f'</tr>\n'
+            f'vertical-align: top; mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+            f'mso-text-raise: 0;">\n'
+            f'{inner}'
+            f'</td>\n'
         )
 
-    block = (
-        f'<table role="presentation" data-layout="hotspot-grid" cellpadding="0" '
-        f'cellspacing="0" border="0" align="center" '
-        f'width="{display_w}" '
-        f'style="width: {display_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'mso-table-lspace: 0pt; mso-table-rspace: 0pt; '
-        f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-        f'table-layout: fixed;">\n'
-        f'{colgroup}'
-        f'{all_rows_html}'
-        f'</table>\n'
+    if not cells:
+        raise ValueError("hotspot grid produced no cells")
+    total_width = sum(
+        _get_img_dimensions(column[0].path)[0]
+        for _col_index, column in sorted(columns.items())
     )
-    return block, cid_counter
+    if total_width != display_w:
+        raise ValueError(
+            f"hotspot grid column widths sum to {total_width}, expected {display_w}"
+        )
+    return cells
 
 
 def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) -> List[SliceItem]:
@@ -823,6 +925,14 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
 
     # 2. 处理 hotspot 行：同一源图先完整重组，只做一次 LANCZOS 缩放，再切回。
     # 独立缩放每一行会在行边界重复采样，Outlook 中容易表现为细线或错位。
+    #
+    # V6.4.0 结构性根修（单行列网格）：把网格转置成"列"结构。
+    # 旧实现按行输出 PNG，HTML 侧随之生成"每行一条 <tr>"；Outlook Word 引擎在
+    # <tr> 之间始终插入约 1px 间距（见模块 docstring V4.9.0），一封 3 按钮邮件
+    # 实测 9 条 <tr> → 8 处缝隙。新实现取所有行 X 边界的并集作为列，
+    # 每列输出一张竖向长条 PNG（grid_col/grid_row 标记坐标），
+    # HTML 侧只需 1 条 <tr>：每列 1 个 <td>，列内 display:block 连续堆叠 ——
+    # 与普通长图已验证无缝的结构完全一致。
     hotspot_sources: Dict[int, List[Tuple[Tuple[int, int], List[SliceItem]]]] = {}
     for key in sorted(hotspot_rows_map):
         hotspot_sources.setdefault(key[0], []).append((key, hotspot_rows_map[key]))
@@ -881,27 +991,64 @@ def materialize_display_slices(slices: List[SliceItem], display_w: int = 650) ->
             full_resized = full_source.resize(
                 (display_w_even, target_height), Image.LANCZOS
             )
-            crop_y = 0
-            for (source_parts, _row_image, allocated), output_height in zip(
-                row_records, output_heights
-            ):
-                crop_x = 0
+
+            # V6.4.0：先算出每行在显示空间的 X 区间，再取所有行边界的并集作为列。
+            # 同一行的分段只属于该行；一个全局列可能落在某行某个分段内部，
+            # 此时该列的图就是那个分段的一次裁剪（<a> 归属跟随所属分段）。
+            row_spans: List[List[Tuple[int, int, SliceItem]]] = []
+            for source_parts, _row_image, allocated in row_records:
+                spans: List[Tuple[int, int, SliceItem]] = []
+                cursor = 0
                 for s, _part in source_parts:
-                    counter += 1
-                    target_w = int(allocated.get(s.path, display_w_even))
-                    target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
-                    part = full_resized.crop(
-                        (crop_x, crop_y, crop_x + target_w, crop_y + output_height)
-                    )
-                    part.save(target_path, "PNG")
-                    crop_x += target_w
-                    prepared.append(SliceItem(
-                        path=str(target_path), href=s.href, alt_text=s.alt_text,
-                        sort_key=s.sort_key, original_width=display_w_even,
-                    ))
-                if crop_x != display_w_even:
+                    width = int(allocated.get(s.path, display_w_even))
+                    spans.append((cursor, cursor + width, s))
+                    cursor += width
+                if cursor != display_w_even:
                     raise ValueError("hotspot row width contract failed")
+                row_spans.append(spans)
+
+            column_edges = sorted({0, display_w_even} | {
+                edge
+                for spans in row_spans
+                for left, right, _s in spans
+                for edge in (left, right)
+            })
+
+            crop_y = 0
+            for row_index, output_height in enumerate(output_heights):
+                spans = row_spans[row_index]
+                sub_index_by_owner: Dict[int, int] = {}
+                for col_index in range(len(column_edges) - 1):
+                    left = column_edges[col_index]
+                    right = column_edges[col_index + 1]
+                    owner = next(
+                        (s for span_left, span_right, s in spans
+                         if span_left <= left and right <= span_right),
+                        None,
+                    )
+                    if owner is None:
+                        raise ValueError(
+                            "hotspot column "
+                            f"{left}-{right} has no owning segment in row {row_index}"
+                        )
+                    sub_index = sub_index_by_owner.get(id(owner), 0)
+                    sub_index_by_owner[id(owner)] = sub_index + 1
+                    counter += 1
+                    target_path = out_dir / f"mail_{batch}_{counter:03d}.png"
+                    full_resized.crop(
+                        (left, crop_y, right, crop_y + output_height)
+                    ).save(target_path, "PNG")
+                    # sort_key 追加 1e-10 级亚序，保证同一 owner 的多个列裁片
+                    # 在稳定排序下自左向右；不影响千分位 row / 百万分位 col 解码。
+                    prepared.append(SliceItem(
+                        path=str(target_path), href=owner.href, alt_text=owner.alt_text,
+                        sort_key=owner.sort_key + sub_index * 1e-10,
+                        original_width=display_w_even,
+                        grid_col=col_index, grid_row=row_index,
+                    ))
                 crop_y += output_height
+            if crop_y != target_height:
+                raise ValueError("hotspot column grid height contract failed")
         except Exception:
             for group in fallback_groups:
                 prepared.extend(group)
@@ -929,7 +1076,16 @@ def materialize_display_slices_strict(slices: List[SliceItem], display_w: int = 
     fallback_paths = [p for p in prepared_paths if p in original_paths]
     missing_paths = [p for p in prepared_paths if not Path(p).exists()]
 
-    if fallback_paths or missing_paths or len(prepared) != len(slices):
+    # V6.4.0: 热点链路会把切片细分成"列 × 行"网格单元，数量可能多于输入，
+    # 因此数量校验放宽为"网格化输出不少于输入"；静默降级（返回原文件）仍被拒绝。
+    grid_expanded = (
+        bool(prepared)
+        and all(s.grid_col >= 0 and s.grid_row >= 0 for s in prepared)
+        and len(prepared) >= len(slices)
+    )
+    if fallback_paths or missing_paths or (
+        len(prepared) != len(slices) and not grid_expanded
+    ):
         raise RuntimeError(
             "最终邮件切片预渲染失败，已阻止发送以避免 Outlook 中出现图片缝隙。"
             "请重新切图后再试。"
@@ -954,11 +1110,15 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650,
 
     V4.7.8: 最后清理图片尺寸缓存
     V4.9.3: 普通链路使用图片实际宽度，不归一化到 4 的倍数
+    V6.4.0: 热点链路改为单行列网格 —— 整封邮件只有 1 条 <tr>、无嵌套表格，
+            每列 1 个 <td>，列内 display:block 连续堆叠（与普通长图同一套写法），
+            从结构上根除 Outlook Word 引擎在 <tr> 之间插入的 1px 缝隙。
     """
     try:
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
-        if _is_plain_vertical_stack(groups):
+        layout_attr = ""
+        if _is_plain_vertical_stack(groups) and not _is_single_row_grid(slices):
             # V4.9.3: 普通链路使用图片实际宽度，不归一化到 4 的倍数。
             # V3.0 无缝版本直接用原始宽度，避免 650→652 拉伸导致缝隙。
             try:
@@ -969,19 +1129,36 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650,
             content_blocks, cid_counter = _build_v3_plain_image_stack(
                 groups, effective_w, is_base64=False
             )
+            row_cells = (
+                f'<td align="left" valign="top" width="{effective_w}" style="'
+                f'width: {effective_w}px; padding: 0; margin: 0; border: 0; '
+                f'border-collapse: collapse; border-spacing: 0; '
+                f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+                f'vertical-align: top; '
+                f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+                f'mso-text-raise: 0;">\n'
+                f'{content_blocks}'
+                f'</td>\n'
+            )
         else:
             effective_w = _normalize_display_width(display_w)
             # Fix 1-B: 非普通链路（hotspot/多段）先 materialize，保证 PNG 物理尺寸
             # 与 HTML 声明的 4x 宽/高严格一致，消除纵向/横向错位与表间缝隙。
+            # V6.4.0: materialize 现在直接产出单行列网格单元；已经是网格单元的
+            # 切片不再重复 materialize（否则会二次切分、宽度对不上）。
             # 临时文件由 materialize_display_slices_strict 内部 _track_temp_files 登记，
             # 调用方可用 cleanup_temp_slices 清理（V5 main.py 已做）。
-            if not prepared:
+            if not _is_single_row_grid(slices):
                 slices = materialize_display_slices_strict(slices, effective_w)
-            sorted_slices = sorted(slices, key=lambda s: s.sort_key)
-            groups = _group_by_source(sorted_slices)
-            content_blocks, cid_counter = _build_complex_inline_stack(
-                groups, effective_w, is_base64=False
+            cid_by_sort_key = {
+                item.sort_key: f"slice_{index:03d}"
+                for index, item in enumerate(_ordered_grid_cells(slices), start=1)
+            }
+            row_cells = _build_single_row_column_grid(
+                slices, effective_w, is_base64=False,
+                cid_by_sort_key=cid_by_sort_key,
             )
+            layout_attr = ' data-layout="hotspot-grid"'
 
         # 普通链路：V3 连续 img；hotspot/多段链路：分组表格。
         return (
@@ -999,7 +1176,7 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650,
             f'<body style="margin: 0; padding: 0; background-color: #ffffff; '
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'Margin: 0;">\n'
-            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+            f'<table role="presentation"{layout_attr} cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
             f'width="{effective_w}" '
             f'style="width: {effective_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
@@ -1011,15 +1188,7 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650,
             f'<tr valign="top" align="left" style="'
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
-            f'<td align="left" valign="top" width="{effective_w}" style="'
-            f'width: {effective_w}px; padding: 0; margin: 0; border: 0; '
-            f'border-collapse: collapse; border-spacing: 0; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'vertical-align: top; '
-            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-            f'mso-text-raise: 0;">\n'
-            f'{content_blocks}'
-            f'</td>\n'
+            f'{row_cells}'
             f'</tr>\n'
             f'</table>\n'
             f'</body>\n'
@@ -1049,11 +1218,13 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
     V4.8.1.1: materialize 内部静默降级会导致本修复失效，入口加 guard
     确保 materialize 实际产生了新文件（路径以 mail_ 开头）。
     V4.9.3: 普通链路跳过 materialize，使用图片实际宽度，与 assemble_html 保持一致。
+    V6.4.0: 热点链路与 assemble_html 一样改为单行列网格（1 条 <tr>，无嵌套表格）。
     """
     try:
         sorted_slices = sorted(slices, key=lambda s: s.sort_key)
         groups = _group_by_source(sorted_slices)
-        if _is_plain_vertical_stack(groups):
+        layout_attr = ""
+        if _is_plain_vertical_stack(groups) and not _is_single_row_grid(slices):
             # V4.9.3: 普通链路跳过 materialize，使用图片实际宽度。
             # V3.0 无缝版本不经过 materialize，直接用原始切片。
             try:
@@ -1064,15 +1235,26 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             content_blocks, cid_counter = _build_v3_plain_image_stack(
                 groups, effective_w, is_base64=True
             )
+            row_cells = (
+                f'<td align="left" valign="top" width="{effective_w}" style="'
+                f'width: {effective_w}px; padding: 0; margin: 0; border: 0; '
+                f'border-collapse: collapse; border-spacing: 0; '
+                f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
+                f'vertical-align: top; '
+                f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
+                f'mso-text-raise: 0;">\n'
+                f'{content_blocks}'
+                f'</td>\n'
+            )
         else:
             # hotspot/复杂链路：保留 materialize 预渲染
             effective_w = _normalize_display_width(display_w)
-            slices = materialize_display_slices_strict(slices, effective_w)
-            sorted_slices = sorted(slices, key=lambda s: s.sort_key)
-            groups = _group_by_source(sorted_slices)
-            content_blocks, cid_counter = _build_complex_inline_stack(
-                groups, effective_w, is_base64=True
+            if not _is_single_row_grid(slices):
+                slices = materialize_display_slices_strict(slices, effective_w)
+            row_cells = _build_single_row_column_grid(
+                slices, effective_w, is_base64=True
             )
+            layout_attr = ' data-layout="hotspot-grid"'
         return (
             f'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
             f'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">\n'
@@ -1085,7 +1267,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'Margin: 0;">\n'
             f'<div align="center" style="width: 100%; text-align: center; margin: 0; padding: 0;">\n'
-            f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+            f'<table role="presentation"{layout_attr} cellpadding="0" cellspacing="0" border="0" '
             f'align="center" '
             f'width="{effective_w}" '
             f'style="width: {effective_w}px; border: 0; border-collapse: collapse; border-spacing: 0; '
@@ -1097,15 +1279,7 @@ def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
             f'<tr valign="top" align="left" style="'
             f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
             f'mso-margin-top-alt: 0; mso-margin-bottom-alt: 0;">\n'
-            f'<td align="left" valign="top" width="{effective_w}" style="'
-            f'width: {effective_w}px; padding: 0; margin: 0; border: 0; '
-            f'border-collapse: collapse; border-spacing: 0; '
-            f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-            f'vertical-align: top; '
-            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-            f'mso-text-raise: 0;">\n'
-            f'{content_blocks}'
-            f'</td>\n'
+            f'{row_cells}'
             f'</tr>\n'
             f'</table>\n'
             f'</div>\n'

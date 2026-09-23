@@ -58,12 +58,13 @@ def test_hotspot_grid_v2_keeps_rows_separate_and_links_both_buttons(tmp_path):
 
     assert "https://top.example" in html
     assert "https://bottom.example" in html
-    # 一个统一列网格消除纵向表边界缝隙，colspan 保留每行不同的 X 边界。
+    # V6.4.0 结构性根修：整封邮件只有 1 条 <tr>（每列 1 个 <td>，列内堆叠 <img>），
+    # 上下不同位置的按钮不再产生额外 <tr>，也就不再有行间 1px 缝。
     assert html.count('data-layout="hotspot-grid"') == 1
     assert 'data-layout="hotspot-row"' not in html
     assert html.count("<div") == 0
-    # 1 个邮件 wrapper 行 + 5 个热区视觉行。
-    assert html.count("<tr") == 6
+    assert html.count("<table") == 1
+    assert html.count("<tr") == 1
 
     # 所有预渲染 PNG 边缘不得出现默认黑/白异常色。
     for item in prepared:

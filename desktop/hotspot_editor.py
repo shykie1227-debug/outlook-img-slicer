@@ -137,16 +137,12 @@ class ImageCanvas(QLabel):
         self.display_w = target_width
         self.display_h = int(self.actual_h * self.display_w / self.actual_w) if self.actual_w else 600
         self.scale = self.display_w / self.actual_w if self.actual_w else 1.0
+        self.pixmap = QPixmap()
 
-        src = QPixmap(image_path)
-        self.pixmap = src.scaled(
-            self.display_w, self.display_h,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
-        self.setPixmap(self.pixmap)
-        # V4.6.8：删除 setFixedSize，改用 setMinimumSize，让画布能随父容器缩放
-        # 注意：setMinimumSize.width 仍然是 display_w，缩小后画布会留空
-        self.setMinimumSize(self.display_w, self.display_h)
+        # V6.4.0 修复：位图几何统一走 apply_scaled_pixmap，
+        # 保证 display_w/display_h/scale 与「实际位图」一致（而不是与请求尺寸一致）。
+        self._requested_w = None
+        self.apply_scaled_pixmap(target_width)
         self.setStyleSheet(f"border: 1px solid {Theme.BORDER}; background: {Theme.CARD}; border-radius: 8px;")
 
         # 拖框选状态
@@ -157,6 +153,50 @@ class ImageCanvas(QLabel):
         self._editing_index: Optional[int] = None
         # 待确认的新框选（已拖出但未提交到表单）
         self._pending_rect: Optional[QRect] = None
+
+    def apply_scaled_pixmap(self, target_w: int, target_h: Optional[int] = None):
+        """
+        V6.4.0 修复：画布位图几何的**唯一真源**。
+
+        缺陷现场（修复前实测）：
+          __init__ / _refit 用「请求宽度」算 scale（800 / actual_w），但
+          Qt 的 KeepAspectRatio 在整数取整下常返回略小的位图
+          （实测 900x140 的短切片：请求 800 → 实际 797x124）。
+          三个误差叠加：
+            1) display_w/scale 按请求尺寸算，与实际位图不符；
+            2) setMinimumSize 按请求尺寸撑开，位图右侧留白（实测 49px）；
+            3) QLabel 默认 AlignLeft|AlignVCenter 又把位图垂直居中，
+               原点被推下去（短切片实测下移 16px）。
+          paintEvent 按 (0,0) 画热区、mouseRelease 按 (0,0) 换算坐标，
+          于是「用户看到的按钮框」与「实际存下的坐标」整体错位。
+
+        修复原则：display_w / display_h / scale 一律从 **实际位图** 反推，
+        并把位图钉在左上角，使 画布原点 == 位图原点 == 坐标换算原点。
+        """
+        src = QPixmap(self.image_path)
+        if src.isNull() or not self.actual_w or not self.actual_h:
+            return
+        if target_w <= 0:
+            return
+        if not target_h or target_h <= 0:
+            target_h = max(1, int(round(self.actual_h * target_w / self.actual_w)))
+
+        self.pixmap = src.scaled(
+            target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        # 关键：以实际返回的位图尺寸为准，而不是请求尺寸
+        self.display_w = self.pixmap.width()
+        self.display_h = self.pixmap.height()
+        self.scale = self.display_w / self.actual_w
+        self._requested_w = target_w
+
+        self.setPixmap(self.pixmap)
+        # V4.6.8：删除 setFixedSize，改用 setMinimumSize，让画布能随父容器缩放
+        self.setMinimumSize(self.display_w, self.display_h)
+        # 位图钉在左上角；否则 QLabel 默认 AlignVCenter 会把原点推下去，
+        # 绘制与取坐标都会整体偏移（见上面缺陷现场 3）。
+        self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.update()
 
     def set_hotspots(self, hotspots: List[Hotspot]):
         self.hotspots = hotspots
@@ -478,20 +518,14 @@ class HotspotEditorDialog(ResponsiveDialogMixin, QDialog):
         # 按宽度自适应（避免横向滚动条）
         # 但不能超过原图实际宽度（避免极窄原图被拉伸到 800px 出现模糊）
         new_w = min(natural_w, viewport_w - 4, self.canvas.actual_w)
-        new_h = int(self.canvas.actual_h * new_w / self.canvas.actual_w) if self.canvas.actual_w else 600
-        if new_w == self.canvas.display_w and new_h == self.canvas.display_h:
+        # V6.4.0 修复：宽度没变就不重算 —— 避免 resizeEvent 高频触发时反复缩放长图。
+        # 注意「不变量」由 apply_scaled_pixmap 一次性兜住（含 setAlignment），
+        # 这里提前返回不会留下半截状态。
+        if new_w == self.canvas._requested_w:
             return
-        scale = new_w / self.canvas.actual_w if self.canvas.actual_w else 1.0
-        from PySide6.QtGui import QPixmap
-        from PySide6.QtCore import Qt
-        src_pix = QPixmap(self.canvas.image_path)
-        self.canvas.pixmap = src_pix.scaled(new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.canvas.setPixmap(self.canvas.pixmap)
-        self.canvas.display_w = new_w
-        self.canvas.display_h = new_h
-        self.canvas.scale = scale
-        self.canvas.setMinimumSize(new_w, new_h)
-        self.canvas.update()
+        # V6.4.0 修复：几何一律交给 apply_scaled_pixmap，
+        # 不再在这里手算 display_w/scale（那正是画布原点偏移的根源）。
+        self.canvas.apply_scaled_pixmap(new_w)
 
     # ── 状态机 ──────────────────────────────
     def _on_selection(self, rect: QRect):

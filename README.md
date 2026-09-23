@@ -16,7 +16,7 @@
 
 ## 用户使用
 
-1. 打开 `OutlookImgSlicer-V6.3.0.exe`。
+1. 打开 `OutlookImgSlicer-V6.4.0.exe`。
 2. 拖入图片、PDF、PPT 或 PSD 文件。
 3. 按需调整邮件宽度、手动切线或添加可点击按钮。
 4. 点击“在 Outlook 中创建邮件”，在 Outlook 草稿窗口中检查后手动发送。
@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 输出：
 
 ```text
-dist/OutlookImgSlicer-V6.3.0.exe
+dist/OutlookImgSlicer-V6.4.0.exe
 ```
 
 本地 Parallels Windows VM 构建入口：

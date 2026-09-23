@@ -1,4 +1,4 @@
-# 测试计划 - Outlook 长图助手 V6.3.0
+# 测试计划 - Outlook 长图助手 V6.4.0
 
 ## 1. 目标与底线
 
@@ -8,7 +8,7 @@
 - 普通长图与热区长图必须保持顺序、居中和像素连续，不得出现可见缝隙。
 - 单切片可添加多个互不重叠的有效链接，保存后可编辑和删除。
 - Outlook 路径只创建并显示草稿；运行时代码不得包含 `mail.Send()`、联网、上传、遥测或自动更新。
-- 构建清单、文件名、窗口版本和 Windows 文件属性必须一致为 V6.3.0。
+- 构建清单、文件名、窗口版本和 Windows 文件属性必须一致为 V6.4.0。
 
 ## 2. 自动化范围
 
@@ -53,7 +53,7 @@ git diff --check
 1. 从共享目录复制源码到 Windows 本地目录，避免共享文件锁导致清理失败。
 2. 运行全量 pytest，再执行 PyInstaller onefile 构建。
 3. 校验 `build-manifest.json` 中的版本、产物类型、大小和 SHA-256。
-4. 复制为 `dist/OutlookImgSlicer-V6.3.0.exe`。
+4. 复制为 `dist/OutlookImgSlicer-V6.4.0.exe`。
 5. 读取 PE `FileVersion` / `ProductVersion`，启动 EXE，等待主窗口进程稳定后关闭。
 6. 检查运行期无网络请求，且 Outlook 自动化路径不存在 `mail.Send()`。
 

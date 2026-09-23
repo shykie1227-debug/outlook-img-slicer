@@ -159,7 +159,7 @@ def _tinted_icon(svg_path: str, color: str) -> QIcon:
         return QIcon(svg_path)
 
 
-VERSION = "6.3.0"
+VERSION = "6.4.0"
 VERSION_BY = "xiaoming"
 # 桌面版：PySide6 + 本地图像处理 + Outlook COM。
 HOTSPOT_FEATURE_ENABLED = True

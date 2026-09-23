@@ -43,35 +43,35 @@ def test_hotspot_rows_share_one_unified_column_grid(tmp_path):
     prepared = _prepared_hotspot_items(tmp_path)
     html = assemble_html(prepared, 648)
 
-    # 外层居中 table + 一个统一热区 table。不能再为每个视觉行嵌套 table，
-    # 否则 Outlook Word 会在嵌套表边界重新计算行高并产生可见缝隙。
-    assert html.count("<table") == 2
+    # V6.4.0 结构性根修：整封邮件只有 1 张 table、1 条 <tr>，没有嵌套表格。
+    # 旧结构（每视觉行一条 <tr>）会让 Word 引擎在行间插入约 1px 间距，
+    # 一封 3 按钮邮件实测 9 条 <tr> → 8 处缝隙。
+    assert html.count("<table") == 1
+    assert html.count("<tr") == 1
     assert html.count('data-layout="hotspot-grid"') == 1
     assert 'data-layout="hotspot-row"' not in html
     assert html.count("<div") == 0
+    assert html.count("<colgroup") == 0
+    assert html.count("colspan") == 0
     assert "table-layout: fixed" in html
-    assert "<tr height=" in html
 
-    col_widths = [
-        int(width)
-        for width in re.findall(r'<col width="(\d+)"', html)
-    ]
-    assert len(col_widths) > 1
-    assert sum(col_widths) == 648
-
-    grid = re.search(
-        r'<table[^>]*data-layout="hotspot-grid"[^>]*>(.*?)</table>',
+    cells = re.findall(
+        r'<td align="left" valign="top" width="(\d+)" '
+        r'style="width: \d+px; height: (\d+)px;',
         html,
-        re.DOTALL,
-    ).group(1)
-    visual_rows = re.findall(r'<tr height="\d+"[^>]*>(.*?)</tr>', grid, re.DOTALL)
-    assert len(visual_rows) == 5
-    for row in visual_rows:
-        spans = []
-        for tag in re.findall(r'<td[^>]*>', row):
-            match = re.search(r'colspan="(\d+)"', tag)
-            spans.append(int(match.group(1)) if match else 1)
-        assert sum(spans) == len(col_widths)
+    )
+    assert len(cells) > 1, "热点邮件应按 X 列拆成多个 <td>"
+    col_widths = [int(width) for width, _height in cells]
+    assert sum(col_widths) == 648
+    # 每列内的 <img> 宽度必须与该列 <td> 宽度一致（横向不错位）
+    for match in re.finditer(
+        r'<td align="left" valign="top" width="(\d+)"[^>]*>(.*?)</td>', html, re.DOTALL
+    ):
+        td_width = int(match.group(1))
+        inner = match.group(2)
+        img_widths = [int(w) for w in re.findall(r'<img[^>]*?width="(\d+)"', inner)]
+        assert img_widths, "每个列 <td> 至少要有一张 <img>"
+        assert all(width == td_width for width in img_widths)
 
 
 def test_hotspot_links_are_inline_while_images_remain_block(tmp_path):
