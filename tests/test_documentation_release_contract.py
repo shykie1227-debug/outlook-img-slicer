@@ -12,10 +12,10 @@ def test_handoff_describes_internal_and_release_build_artifacts():
     handoff = _read("HANDOFF.md")
 
     assert "desktop/dist/OutlookImgSlicer.exe" in handoff
-    assert "dist/OutlookImgSlicer-V6.4.1.exe" in handoff
+    assert "dist/OutlookImgSlicer-V6.4.2.exe" in handoff
     assert "build-manifest.json" in handoff
-    assert "181 passed, 0 failed" in handoff
-    assert "# 181 passed" in handoff
+    assert "183 passed, 0 failed" in handoff
+    assert "# 183 passed" in handoff
     assert "2026-09-23" in handoff
     assert "999px" not in handoff
 
@@ -32,7 +32,7 @@ def test_design_matches_current_main_window_labels_and_layout():
 def test_test_plan_uses_current_release_contract():
     test_plan = _read("TEST_PLAN.md")
 
-    assert "V6.4.1" in test_plan
+    assert "V6.4.2" in test_plan
     assert "python3 -m pytest tests/ -q" in test_plan
     assert "80–1200px" in test_plan
     assert "V5.0 当前 93 项" not in test_plan

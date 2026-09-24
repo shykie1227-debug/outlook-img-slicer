@@ -1,8 +1,8 @@
-# HANDOFF — Outlook 长图助手 V6.4.1
+# HANDOFF — Outlook 长图助手 V6.4.2
 
 > 交接日期：2026-09-23
-> 当前版本：V6.4.1
-> 测试状态：181 passed, 0 failed
+> 当前版本：V6.4.2
+> 测试状态：183 passed, 0 failed
 
 ---
 
@@ -11,7 +11,7 @@
 PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持原始清晰度。支持热区链接、智能切图、图片导出。
 
 - 架构：`PySide6 桌面界面 + Python 图像处理 + Outlook COM`
-- 构建：PyInstaller → `OutlookImgSlicer-V6.4.1.exe`
+- 构建：PyInstaller → `OutlookImgSlicer-V6.4.2.exe`
 - 平台：Windows 10/11，经典 Outlook
 
 ## 2. 当前 UI 状态
@@ -19,7 +19,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 ### 布局结构（3 步分区）
 
 ```
-[标题栏 40px — Outlook 长图助手 V6.4.1]
+[标题栏 40px — Outlook 长图助手 V6.4.2]
 [应用标题 18px + 副标题 11px]
 [引导药丸 10px：1 放入文件 → 2 调整切线/添加链接 → 3 创建邮件]
 
@@ -37,7 +37,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
   ├─ 状态提示(11px)
   └─ [在 Outlook 中创建邮件(Primary 42px)] [保存切图(Secondary 42px)]
 
-[版本号 V6.4.1 + 作者]
+[版本号 V6.4.2 + 作者]
 ```
 
 ### 精确尺寸规范
@@ -105,7 +105,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 ## 6. 测试
 
 ```bash
-python3 -m pytest tests/ -q          # 181 passed
+python3 -m pytest tests/ -q          # 183 passed
 python3 -m compileall -q desktop     # 编译检查
 ```
 
@@ -118,9 +118,9 @@ python3 build.py                    # 默认内部产物 desktop/dist/OutlookImg
 若旧目录因 Windows/共享文件锁无法清理，内部产物会写入时间戳备用目录；
 真实路径始终以根目录 `build-manifest.json` 为准。清单记录内部产物的路径、版本、
 大小、SHA-256 和完整源码提交 SHA。Windows 包装脚本或 VM 构建完成后，按清单复制为最终发布文件：
-`dist/OutlookImgSlicer-V6.4.1.exe`。文件名保持英文 ASCII。
+`dist/OutlookImgSlicer-V6.4.2.exe`。文件名保持英文 ASCII。
 
-## 8. 本轮（V6.4.0 → V6.4.1）修改摘要
+## 8. 本轮（V6.4.0 → V6.4.2）修改摘要
 
 ### V6.4.0（主版本）
 
@@ -130,10 +130,29 @@ python3 build.py                    # 默认内部产物 desktop/dist/OutlookImg
 
 ### V6.4.1（补丁）
 
-- **修复 SVG 导入在无 libcairo 环境失败**：`image_slicer._convert_svg_to_png` 原只 `except ImportError`，但缺 libcairo 时 `import cairosvg` 抛的是 `OSError`，不会回退到不依赖系统库的 `svglib`。已放宽为 `except Exception`，并补充 3 项不依赖真实 cairosvg/svglib 的回归测试。
-- **删除零引用死代码**：`_build_cell` / `_build_image_row` / `get_cid_map` / `cleanup_all_tracked_temp_slices` / `HotspotCutError` / `compute_cut_lines` / `build_stripe_assignments` / `_ensure_pptx` / `_emu_to_px` / `_btn_size`，以及随之失效的 import。
-- README 补齐「回归测试」「已知限制」；`requirements.txt` 补充 `pdf2image` / `dulwich` 为可选依赖的说明。
-- 全量回归 **181 passed**。
+- **SVG 兜底异常处理**：`image_slicer._convert_svg_to_png` 原只 `except ImportError`，
+  但缺 libcairo 时 `import cairosvg` 抛的是 `OSError`，不会回退到 `svglib`。
+  已放宽为 `except Exception`。
+  （注：这一步**不足以**让 SVG 导入真正可用，真正修复见 V6.4.2。）
+- **删除零引用死代码**：`_build_cell` / `_build_image_row` / `get_cid_map` /
+  `cleanup_all_tracked_temp_slices` / `HotspotCutError` / `compute_cut_lines` /
+  `build_stripe_assignments` / `_ensure_pptx` / `_emu_to_px` / `_btn_size`，
+  以及随之失效的 import。
+- README 补齐「回归测试」「已知限制」；`requirements.txt` 补充 `pdf2image` /
+  `dulwich` 为可选依赖的说明。
+
+### V6.4.2（补丁）
+
+- **SVG 导入真正可用**：实测 Windows 构建机与打包后的 EXE 上，cairosvg 与
+  svglib+reportlab **同时**失效（后者在 `renderPM` 加载 rlPyCairo 后端时抛
+  `RenderPMError`）—— 两者底层都依赖 libcairo，而目标环境没有。
+  改为把 **PySide6 自带 QtSvg** 提为首选渲染路径：项目已依赖 PySide6，
+  QtSvg 是其中标准模块，不依赖任何系统库；cairosvg / svglib 降为兜底。
+  透明底按白底渲染避免 Outlook 里发黑；原图无有效尺寸时回退 650x650。
+- `desktop/outlook_img_slicer.spec` 的 hiddenimports 显式加入 `PySide6.QtSvg`
+  （函数内 import 不显式声明会被裁掉），并新增守护测试。
+- 新增 5 项 SVG 回归测试，全部不依赖真实 cairosvg / svglib / libcairo。
+- 全量回归 **183 passed**。
 
 ### 已知问题
 

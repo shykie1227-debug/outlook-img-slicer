@@ -21,7 +21,17 @@ from image_safety import check_image_safety, ImageSafetyError
 def _convert_svg_to_png(svg_path: str) -> str:
     """
     将 SVG 文件转换为 PNG 格式。
-    使用 cairosvg 或 svglib 进行转换，保持矢量清晰度。
+
+    渲染优先级（V6.4.2 起）：
+      1) PySide6 自带 QtSvg —— **首选**，不需要任何系统库。
+      2) cairosvg           —— 需要系统 libcairo。
+      3) svglib + reportlab —— 其 renderPM 后端（rlPyCairo）同样需要 libcairo。
+
+    为什么必须把 QtSvg 放在首位：
+      在没有 libcairo 的机器上（**含打包后的 Windows EXE**），2) 与 3) 会同时失效。
+      实测 3) 的失败点并不在 import，而在 `renderPM` 加载 rlPyCairo 后端时抛
+      `RenderPMError`，所以仅仅放宽 except 并不能让 SVG 导入真正可用；
+      而 PySide6 已是本项目依赖，QtSvg 是其中的标准模块，无额外系统依赖。
 
     Args:
         svg_path: SVG 文件路径
@@ -33,28 +43,52 @@ def _convert_svg_to_png(svg_path: str) -> str:
     if ext != ".svg":
         return svg_path
 
-    # V6.4.1 修复：缺少 libcairo 时 `import cairosvg` 抛的是 **OSError**（cairocffi
-    # 找不到 cairo-2 / libcairo-2），不是 ImportError。旧代码只 except ImportError，
-    # 异常会直接冒泡，走不到下面不依赖系统库的 svglib 兜底 —— 在没有 libcairo 的
-    # 机器上（含打包后的 EXE）SVG 导入直接失败。
-    # 这里放宽为 Exception：cairosvg 层面任何失败都落到 svglib 兜底。
+    png_path = str(Path(svg_path).with_suffix(".png"))
+
+    # 1) QtSvg：项目已依赖 PySide6，不依赖系统库，优先使用
+    try:
+        from PySide6.QtCore import QByteArray, QRectF, QSize
+        from PySide6.QtGui import QGuiApplication, QImage, QPainter
+        from PySide6.QtSvg import QSvgRenderer
+
+        # QSvgRenderer 需要 GUI 应用实例；主程序已有，脚本/测试环境下兜底创建
+        if QGuiApplication.instance() is None:
+            QGuiApplication([])
+
+        renderer = QSvgRenderer(QByteArray(Path(svg_path).read_bytes()))
+        if renderer.isValid():
+            size = renderer.defaultSize()
+            if size.width() <= 0 or size.height() <= 0:
+                size = QSize(650, 650)
+            image = QImage(size, QImage.Format_ARGB32)
+            # SVG 常带透明底，按白底渲染，避免插入 Outlook 后发黑
+            image.fill(0xFFFFFFFF)
+            painter = QPainter(image)
+            renderer.render(painter, QRectF(image.rect()))
+            painter.end()
+            if image.save(png_path, "PNG"):
+                return png_path
+        raise RuntimeError("QtSvg 无法解析该 SVG")
+    except Exception:
+        pass
+
+    # 2) cairosvg：缺 libcairo 时 import 即抛 OSError（非 ImportError）
     try:
         import cairosvg
 
-        png_path = str(Path(svg_path).with_suffix(".png"))
         cairosvg.svg2png(url=svg_path, write_to=png_path)
         return png_path
     except Exception:
         pass
 
+    # 3) svglib + reportlab：renderPM 后端同样需要 libcairo
     try:
         from svglib.svglib import svg2rlg
         from reportlab.graphics import renderPM
-        png_path = str(Path(svg_path).with_suffix(".png"))
         drawing = svg2rlg(svg_path)
         renderPM.drawToFile(drawing, png_path, fmt="PNG")
         return png_path
-    except ImportError:
+    except Exception:
         pass
 
     raise RuntimeError("SVG 转换需要安装 cairosvg 或 svglib 库")

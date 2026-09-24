@@ -128,7 +128,7 @@ Outlook 使用 Word 引擎渲染 HTML，和浏览器不同。当前实现必须�
   ├─ 状态提示
   └─ 底部按钮行：在 Outlook 中创建邮件（Primary）| 保存切图（Secondary）
 
-[版本号 V6.4.1 + 作者]
+[版本号 V6.4.2 + 作者]
 ```
 
 ### Ghost disabled 态

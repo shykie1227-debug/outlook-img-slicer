@@ -14,6 +14,9 @@ hiddenimports = [
     "PySide6.QtCore",
     "PySide6.QtGui",
     "PySide6.QtWidgets",
+    # V6.4.2：SVG 转换的首选路径（image_slicer 在函数内 import，
+    # 显式声明以避免打包后被裁掉；它不依赖系统 libcairo）。
+    "PySide6.QtSvg",
     "shiboken6",
     "win32com.client",
     "win32api",

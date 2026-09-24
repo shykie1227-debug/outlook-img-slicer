@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## V6.4.2 - 2026-09-24
+
+### 缺陷修复：SVG 导入真正可用（改用 PySide6 自带 QtSvg）
+- V6.4.1 把 `_convert_svg_to_png` 的 `except ImportError` 放宽为 `except Exception`，
+  方向正确但**不足以修复**：在 Windows 构建机与打包后的 EXE 上实测，
+  `cairosvg` 与 `svglib+reportlab` 会**同时**失效 ——
+  svglib 路径能 import，但 `renderPM` 加载 rlPyCairo 后端时抛
+  `RenderPMError: cannot import desired renderPM backend rlPyCairo`。
+  两条路径的底层依赖都是 libcairo，而目标环境没有它。
+- 修复：把 **PySide6 自带的 QtSvg** 提为首选渲染路径。项目已依赖 PySide6，
+  QtSvg 是其中标准模块，**不依赖任何系统库**；cairosvg / svglib 降为兜底。
+  - 透明底按白底渲染，避免插入 Outlook 后发黑。
+  - 原 SVG 无有效尺寸时回退 650x650，避免产出 0 尺寸图。
+- `desktop/outlook_img_slicer.spec` 的 hiddenimports 显式加入 `PySide6.QtSvg`
+  （函数内 import 若不显式声明，打包后可能被裁掉），并新增守护测试。
+- 回归测试 5 项：真实 QtSvg 主路径 + 两级降级（cairosvg / svglib）+ 非 SVG 直通
+  + spec 配置守护；全部不依赖真实 cairosvg / svglib / libcairo。
+
 ## V6.4.1 - 2026-09-24
 
 ### 缺陷修复：SVG 导入在无 libcairo 环境失败
