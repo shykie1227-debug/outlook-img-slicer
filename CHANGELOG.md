@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 未发布（post-V6.4.0）- 2026-09-24
+
+### 收尾整理（不含功能变更）
+- **删除死代码**（AST 全量扫描确认零引用后删除，共 195 行）：
+  `html_assembler._build_cell` / `_build_image_row`（旧多 `<tr>` 链路残留，
+  本次才真正删掉 —— V6.4.0 说明里只删了 `_build_complex_inline_stack`）、
+  `get_cid_map`、`cleanup_all_tracked_temp_slices`；
+  `hotspot_slicer.HotspotCutError` / `compute_cut_lines` / `build_stripe_assignments`；
+  `ppt_slicer._ensure_pptx`（连同仅它使用的 `_presentation`）/ `_emu_to_px`；
+  `desktop/main._btn_size`。
+- **清理随之失效的 import**：`desktop/main.py` 的 `time`、`QFontMetrics`、
+  `FMT_PNG`/`FMT_JPG`；`hotspot_slicer.py` 的 `HotspotMap`；`ppt_slicer.py` 的 `io`。
+  （保留了仍被引用的 `PPT_RENDERER_UNAVAILABLE_HINT`。）
+- **README**：新增「回归测试」与「已知限制」两节，补全项目结构中遗漏的
+  `clickable_map.py` / `image_safety.py` / `verify_source_snapshot.py` /
+  `vm_start_build.ps1` 等条目。
+- **requirements.txt**：补充 `pdf2image`（需系统 poppler，故不默认引入）与
+  `dulwich`（仅构建校验用）的说明注释，未改动实际依赖列表。
+- **注释**：修正 `html_assembler.py` 中「待删除」的过时措辞（已删）；
+  在 `image_slicer._convert_svg_to_png` 处标注 SVG 兜底失效的真实原因与修复方向。
+- 清理本地临时产物：空的 `build/` 目录、`build_step.log`、`tests/_artifacts` 下的
+  pytest basetemp 与 `__pycache__`（保留 `dist/` 内已发布 EXE 与证据截图）。
+- 回归：全量 **178 passed**，`compileall` 通过，主窗口冒烟正常。
+
 ## V6.4.0 - 2026-09-23
 
 ### 缺陷修复：可点击按钮导致的邮件缝隙（结构性根修）

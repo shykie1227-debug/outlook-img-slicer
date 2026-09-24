@@ -9,28 +9,12 @@ PPT/PPTX 解析模块
 """
 from typing import List
 from PIL import Image
-import io
 import os
 import subprocess
 import shutil
 import tempfile
 import sys
 from pathlib import Path
-
-# python-pptx 仅在 soffice 和 COM 都不存在时作为极端兜底，懒加载
-_presentation = None
-
-
-def _ensure_pptx():
-    global _presentation
-    if _presentation is not None:
-        return _presentation
-    try:
-        from pptx import Presentation
-        _presentation = Presentation
-        return _presentation
-    except ImportError:
-        return None
 
 
 PPT_RENDERER_UNAVAILABLE_HINT = (
@@ -39,10 +23,6 @@ PPT_RENDERER_UNAVAILABLE_HINT = (
     "1. Windows：安装 Microsoft PowerPoint，程序将优先使用 PowerPoint COM 渲染。\n"
     "2. macOS / Linux：安装 LibreOffice，程序将使用 soffice 转 PDF 后逐页渲染。"
 )
-
-
-def _emu_to_px(emu: int, dpi: int = 150) -> int:
-    return int(emu / 914400 * dpi)
 
 
 # ────────────────────────────────────────────

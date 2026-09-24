@@ -33,6 +33,12 @@ def _convert_svg_to_png(svg_path: str) -> str:
     if ext != ".svg":
         return svg_path
 
+    # 已知缺陷（V6.4.0 实测）：下面只捕获 ImportError，但缺少 libcairo 时
+    # `import cairosvg` 抛的是 OSError（cairocffi 找不到 cairo-2/libcairo-2），
+    # 不会被这里捕获，因此不会回退到可用的 svglib —— 在没有 libcairo 的机器上
+    # （含打包后的 EXE）SVG 导入会直接失败。
+    # 修复方向：把 except ImportError 放宽为 except Exception。改动会影响
+    # SVG 导入行为，需要在 Windows 上实测后再改，故先标注不改。
     try:
         import cairosvg
         png_path = str(Path(svg_path).with_suffix(".png"))

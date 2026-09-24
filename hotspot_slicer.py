@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 from PIL import Image
 
-from clickable_map import Hotspot, HotspotMap
+from clickable_map import Hotspot
 from image_slicer import create_temp_workspace
 
 
@@ -36,13 +36,6 @@ HOTSPOT_EDGE_SNAP_TOLERANCE_PX = 3
 
 
 # ── 错误码 ──
-class HotspotCutError:
-    OVERLAP = "Hotspot X 范围重叠，请勿在已有按钮的横向位置再加新按钮"
-    CONTAIN = "Hotspot X 范围被包含于其他 hotspot（嵌套）"
-    OUT_OF_BOUNDS = "Hotspot 坐标超出图片范围"
-    INVALID_RANGE = "Hotspot 宽度为 0 或负"
-
-
 @dataclass
 class CutStripe:
     """
@@ -134,44 +127,6 @@ def validate_hotspots_no_overlap(
                 f"建议：把其中一个按钮稍微移开，或缩小按钮区域。"
             )
     return True, ""
-
-def compute_cut_lines(img_w: int, hotspots: List[Hotspot]) -> List[int]:
-    """
-    计算 X 切割线：图片左右边 + 每个 hotspot 的 x1, x2。
-    去重 + 排序，返回所有切割点（含 0 和 img_w）。
-
-    边界 case: hotspot 太靠近边缘 → x1=0 或 x2=img_w → 正常去重
-    """
-    lines = {0, img_w}
-    for h in hotspots:
-        lines.add(h.x1)
-        lines.add(h.x2)
-    return sorted(lines)
-
-
-def build_stripe_assignments(
-    cut_lines: List[int],
-    hotspots: List[Hotspot]
-) -> List[Tuple[int, str, str]]:
-    """
-    给每条竖条（区间）分配 hotspot URL。
-
-    Returns:
-        List of (stripe_index, href, text)
-        - stripe_index: 竖条在 cut_lines 区间数组中的下标
-        - href: 跳转 URL（若无 hotspot 覆盖则为 None）
-        - text: 按钮文字
-    """
-    assignments = {}
-    for h in hotspots:
-        # 找到包含 h.x1 的区间 (cut_lines[i], cut_lines[i+1])
-        for i in range(len(cut_lines) - 1):
-            if cut_lines[i] == h.x1:
-                # hotspot 的 x1 一定是某条切割线
-                assignments[i] = (h.url, h.text)
-                break
-    return assignments
-
 
 def slice_image_with_hotspots(
     img: Image.Image,

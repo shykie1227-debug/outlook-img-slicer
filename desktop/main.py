@@ -5,7 +5,6 @@ PySide6 窗口应用，支持拖拽上传、自动切片、邮件体积检测、
 import os
 import sys
 import re
-import time
 import tempfile
 import shutil
 from pathlib import Path
@@ -27,7 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QCheckBox, QDialog, QSizePolicy, QComboBox, QLayout
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QMimeData
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontDatabase, QFontMetrics, QKeyEvent, QGuiApplication, QIntValidator, QIcon
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont, QFontDatabase, QKeyEvent, QGuiApplication, QIntValidator, QIcon
 
 from theme import Theme, fit_window_to_screen
 
@@ -53,7 +52,7 @@ from hotspot_slicer import slice_paths_by_hotspots
 from outlook_sender import copy_cf_html_to_clipboard, create_email_with_images
 from image_safety import check_image_safety, ImageSafetyError, estimate_email_size_mb
 # 模式选择在主面板中完成，不再弹出单独模式选择窗口。
-from export_dialog import ExportFormatDialog, FMT_PNG, FMT_JPG
+from export_dialog import ExportFormatDialog
 from export_worker import ExportWorker
 from clipboard_html import (
     build_windows_clipboard_html as _build_windows_clipboard_html,
@@ -260,11 +259,6 @@ class WorkflowStep(QFrame):
         self.body = QVBoxLayout()
         self.body.setSpacing(8)
         layout.addLayout(self.body)
-
-
-def _btn_size(text: str, font_size: int = 13, extra_w: int = 36, height: int = 38) -> QSize:
-    fm = QFontMetrics(QFont("Microsoft YaHei", font_size))
-    return QSize(fm.horizontalAdvance(text) + extra_w, height)
 
 
 def _btn_primary() -> str:

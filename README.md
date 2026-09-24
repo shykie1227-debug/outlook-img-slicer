@@ -28,6 +28,22 @@ python3 -m pip install -r requirements.txt
 python3 desktop/main.py
 ```
 
+## 回归测试
+
+Windows / macOS 双端同一套命令（界面用例依赖 `QT_QPA_PLATFORM=offscreen`）：
+
+```bash
+python3 -m pytest tests/ -q
+python3 -m compileall -q build.py desktop tests image_slicer.py html_assembler.py \
+  outlook_sender.py clipboard_html.py clickable_map.py hotspot_slicer.py \
+  image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py
+```
+
+当前基线：**178 passed**。升版本号时必须同步 `desktop/main.py` 的 `VERSION`、
+`desktop/version_info.txt`、`desktop/ui-preview.html` 以及 4 个测试文件里的版本断言
+（`test_release_consistency.py`、`test_documentation_release_contract.py`、
+`test_v620_release_contract.py`、`test_code_agent_guide.py`）。
+
 ## Windows 构建
 
 在 Windows 上双击：
@@ -76,12 +92,17 @@ outlook-img-slicer/
 ├── psd_slicer.py               # PSD/PSB 合成
 ├── hotspot_slicer.py           # 热区物理切片
 ├── html_assembler.py           # Outlook HTML 生成
+├── clickable_map.py            # 可点击热区数据模型与校验
 ├── clipboard_html.py           # Windows CF_HTML
 ├── outlook_sender.py           # Outlook COM 草稿创建
+├── image_safety.py             # 邮件体积与安全检查
+├── verify_source_snapshot.py   # 构建前校验源码与提交一致
+├── requirements.txt            # 运行与打包依赖
 ├── tests/                      # Python 回归测试
 ├── build.py                    # 根构建入口，委托 desktop/build.py
 ├── build.ps1 / build.bat       # Windows 手动构建入口
-└── vm_build.ps1                # 本地 Windows VM 构建入口
+├── vm_build.ps1                # 本地 Windows VM 构建主流程
+└── vm_start_build.ps1          # VM 内以分离进程启动构建（避免 exec 断连）
 ```
 
 ## 安全原则
@@ -90,3 +111,17 @@ outlook-img-slicer/
 - exe 运行时不上传用户文件。
 - Outlook 只调用 `Display()` 打开草稿，不调用 `Send()` 自动发送。
 - 用户必须在 Outlook 草稿窗口中自行检查并手动发送。
+
+## 已知限制
+
+- **SVG 导入在无 libcairo 的环境下会失败**。`image_slicer._convert_svg_to_png`
+  先尝试 `cairosvg`，但其 `except` 只捕获 `ImportError`；实测缺少 libcairo 时
+  `import cairosvg` 抛的是 `OSError`，不会被捕获，因此不会回退到可用的 `svglib`。
+  修复方向：把该处 `except ImportError` 放宽为 `except Exception`。
+- **PPT 需要本机渲染器**：优先用 PowerPoint COM（Windows），其次 LibreOffice
+  （`soffice`，macOS/Linux）。两者都没有时会停止导出并给出提示，不做低保真降级。
+- **仅支持经典 Outlook**：新版 Outlook（WebView2 内核）不在支持范围内。
+- **一次只处理一个文件**：多图拖入「切图模式」时只处理第一张。
+- **测试进程中的偶发段错误**：若测试进程里「文件名排序最靠前的 Qt 模块」构造
+  `HotspotEditorDialog`，整套用例会段错误。已确认与产品代码无关，
+  已在新测试中规避，根因待定位。

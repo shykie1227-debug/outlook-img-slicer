@@ -1,4 +1,11 @@
 # Outlook 长图插入工具 V6 依赖
+#
+# 下面是运行 + 打包所需的完整依赖。另有两类「可选依赖」不在此列表，
+# 因为它们各自需要系统级组件或只在特定流程里才用：
+#   - pdf2image：仅 ppt_slicer.py 在 PyMuPDF/COM 都不可用时的极端兜底；
+#                另外需要系统安装 poppler（Windows 上还要单独部署），故不默认引入。
+#   - dulwich  ：仅 verify_source_snapshot.py 使用，用于 Windows 虚拟机构建时
+#                校验源码快照与提交一致；日常运行和 pytest 都不需要。
 Pillow>=10.0.0
 PySide6>=6.5.0
 pywin32>=306

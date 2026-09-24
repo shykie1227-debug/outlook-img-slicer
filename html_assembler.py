@@ -94,11 +94,6 @@ def cleanup_temp_slices(paths: List[str]) -> int:
     return deleted
 
 
-def cleanup_all_tracked_temp_slices() -> int:
-    """进程退出兜底：删掉本进程所有 materialize 临时文件。"""
-    return cleanup_temp_slices(list(_materialized_temp_files))
-
-
 @dataclass
 class SliceItem:
     """
@@ -341,121 +336,6 @@ def _allocate_axis_4x(source_lengths: List[int], target_total: int) -> List[int]
     return [units * 4 for units in _distribute_units(raw_units, total_units)]
 
 
-def _build_cell(slice_path: str, cid_or_src: str, display_w: int, href: Optional[str] = None,
-              alt: str = "", original_width: int = 0, is_base64: bool = False,
-              forced_display_w: Optional[int] = None,
-              forced_display_h: Optional[int] = None,
-              colspan: int = 1) -> str:
-    """
-    生成一张切片的 <td>...</td>（V4.7.8 缝隙消除+错位修复）。
-
-    V4.7.8 优化点：
-      - 进一步加强 Outlook 缝隙消除（mso-line-height-rule 强制）
-      - 所有尺寸严格偶数化
-      - 添加 mso-table-lspace/mso-table-rspace 相关属性
-
-    拆 _build_image_row 的原因：
-      之前每段占一整 <tr> → 纵向堆叠 → V1 物理切割产物重叠成
-      "碎片化"视觉。现在改为同 source_index 的多段拼成一行 <tr>，
-      每段 1 个 <td> 横向并排，恢反原图。
-
-    Args:
-        cid_or_src: 若是 base64 模式（复制到剪贴板）则传 data:xxx；CID 模式传 cid:xxx
-        is_base64: True = generate_plain_html 路径，False = assemble_html 路径
-    """
-    try:
-        actual_w, actual_h = _get_img_dimensions(slice_path)
-    except Exception:
-        actual_w, actual_h = 650, 650
-
-    display_w = _normalize_display_width(display_w)
-    if forced_display_w is not None:
-        seg_display_w = _even_pixel_4x(max(1, int(forced_display_w)))
-    elif original_width > 0 and actual_w > 0:
-        ratio = actual_w / original_width
-        seg_display_w = _even_pixel_4x(round(display_w * ratio))
-    else:
-        seg_display_w = _even_pixel_4x(display_w)
-    # V4.8.8: forced_display_h 已由 _compute_group_height 算好（4 的倍数），
-    # 直接用，不再二次处理。
-    if forced_display_h is not None:
-        seg_display_h = max(1, int(forced_display_h))
-    else:
-        raw_h = round(actual_h * seg_display_w / actual_w) if actual_w else 650
-        seg_display_h = _even_pixel_4x(raw_h)
-
-    if not alt:
-        alt = Path(slice_path).name
-    safe_alt = escape(alt, quote=True)
-
-    # base64 模式 vs CID 模式
-    if is_base64:
-        import base64
-        with open(slice_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
-        ext = Path(slice_path).suffix.lower().lstrip(".")
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
-        src = f"data:{mime};base64,{b64}"
-    else:
-        src = cid_or_src
-    safe_src = escape(src, quote=True)
-
-    img_tag = (
-        f'<img src="{safe_src}" '
-        f'width="{seg_display_w}" '
-        f'height="{seg_display_h}" '
-        f'alt="{safe_alt}" '
-        f'border="0" hspace="0" vspace="0" '
-        f'style="width: {seg_display_w}px; height: {seg_display_h}px; '
-        f'border: 0; border-collapse: collapse; border-spacing: 0; '
-        f'display: block; outline: none; text-decoration: none; '
-        f'vertical-align: top; margin: 0; padding: 0; '
-        f'line-height: 0; font-size: 0; '
-        f'-ms-interpolation-mode: bicubic;" />'
-    )
-
-    if href:
-        safe_href = escape(href, quote=True)
-        inner = (
-            f'<a href="{safe_href}" target="_blank" '
-            f'style="display: block; width: {seg_display_w}px; height: {seg_display_h}px; '
-            f'text-decoration: none; outline: none; border: 0; border-collapse: collapse; '
-            f'mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-            f'line-height: 0; font-size: 0;">'
-            f'{img_tag}'
-            f'</a>'
-        )
-    else:
-        inner = img_tag
-
-    colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
-    return (
-        f'<td align="left" valign="top" width="{seg_display_w}" height="{seg_display_h}"'
-        f'{colspan_attr} style="'
-        f'width: {seg_display_w}px; height: {seg_display_h}px; '
-        f'padding: 0; margin: 0; border: 0; border-collapse: collapse; border-spacing: 0; '
-        f'font-size: 0; line-height: 0; mso-line-height-rule: exactly; '
-        f'vertical-align: top; mso-padding-alt: 0; mso-border-alt: solid #FFFFFF 0px; '
-        f'mso-text-raise: 0;'
-        f'">'
-        f'{inner}'
-        f'</td>\n'
-    )
-
-
-def _build_image_row(slice_path: str, cid: str, display_w: int, href: Optional[str] = None, alt: str = "",
-                    original_width: int = 0) -> str:
-    """
-    兼容旧 API：返回 <tr><td>...</td></tr>。
-    V4.6.9 后推荐使用 _build_cell + 手工拼 <tr>（见 assemble_html）。
-    """
-    return (
-        f'<tr>\n'
-        f'{_build_cell(slice_path, cid, display_w, href, alt, original_width)}'
-        f'</tr>\n'
-    )
-
-
 def _is_plain_vertical_stack(groups: List[List[SliceItem]]) -> bool:
     """
     普通长图链路：每个视觉组只有一张、无 href 的切片。
@@ -694,7 +574,7 @@ def _compute_group_height(group: List[SliceItem], display_w: int) -> int:
 #   _build_single_row_column_grid 取代）：它为每个视觉行输出一条 <tr>，
 #   一封 3 按钮邮件实测 9 条 <tr>；Outlook Word 引擎在 <tr> 之间始终插入约 1px
 #   间距，行数越多缝隙越多 —— 这是"添加可点击按钮后出现各种缝隙"的根因。
-# - _build_cell / _build_image_row：只被上述两条旧链路使用，一并删除。
+# - _build_cell / _build_image_row：只被上述两条旧链路使用，已一并删除。
 
 
 def _grid_cell_image(slice_path: str, src: str, width: int, height: int,
@@ -1197,12 +1077,6 @@ def assemble_html(slices: List[SliceItem], display_w: int = 650,
     finally:
         # V4.7.8: 清理缓存，释放内存
         _clear_dimensions_cache()
-
-
-def get_cid_map(slices: List[SliceItem]) -> Dict[int, str]:
-    """返回 {index: cid} 映射，给 outlook_sender.py 用。"""
-    sorted_slices = sorted(slices, key=lambda s: s.sort_key)
-    return {i: f"slice_{i + 1:03d}" for i in range(len(sorted_slices))}
 
 
 def generate_plain_html(slices: List[SliceItem], display_w: int = 650) -> str:
