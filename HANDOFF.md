@@ -1,8 +1,8 @@
-# HANDOFF — Outlook 长图助手 V6.4.0
+# HANDOFF — Outlook 长图助手 V6.4.1
 
 > 交接日期：2026-09-23
-> 当前版本：V6.4.0
-> 测试状态：178 passed, 0 failed
+> 当前版本：V6.4.1
+> 测试状态：181 passed, 0 failed
 
 ---
 
@@ -11,7 +11,7 @@
 PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持原始清晰度。支持热区链接、智能切图、图片导出。
 
 - 架构：`PySide6 桌面界面 + Python 图像处理 + Outlook COM`
-- 构建：PyInstaller → `OutlookImgSlicer-V6.4.0.exe`
+- 构建：PyInstaller → `OutlookImgSlicer-V6.4.1.exe`
 - 平台：Windows 10/11，经典 Outlook
 
 ## 2. 当前 UI 状态
@@ -19,7 +19,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 ### 布局结构（3 步分区）
 
 ```
-[标题栏 40px — Outlook 长图助手 V6.4.0]
+[标题栏 40px — Outlook 长图助手 V6.4.1]
 [应用标题 18px + 副标题 11px]
 [引导药丸 10px：1 放入文件 → 2 调整切线/添加链接 → 3 创建邮件]
 
@@ -37,7 +37,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
   ├─ 状态提示(11px)
   └─ [在 Outlook 中创建邮件(Primary 42px)] [保存切图(Secondary 42px)]
 
-[版本号 V6.4.0 + 作者]
+[版本号 V6.4.1 + 作者]
 ```
 
 ### 精确尺寸规范
@@ -105,7 +105,7 @@ PySide6 桌面工具，将长图/PDF/PPT 切片后插入 Outlook 邮件，保持
 ## 6. 测试
 
 ```bash
-python3 -m pytest tests/ -q          # 178 passed
+python3 -m pytest tests/ -q          # 181 passed
 python3 -m compileall -q desktop     # 编译检查
 ```
 
@@ -118,16 +118,26 @@ python3 build.py                    # 默认内部产物 desktop/dist/OutlookImg
 若旧目录因 Windows/共享文件锁无法清理，内部产物会写入时间戳备用目录；
 真实路径始终以根目录 `build-manifest.json` 为准。清单记录内部产物的路径、版本、
 大小、SHA-256 和完整源码提交 SHA。Windows 包装脚本或 VM 构建完成后，按清单复制为最终发布文件：
-`dist/OutlookImgSlicer-V6.4.0.exe`。文件名保持英文 ASCII。
+`dist/OutlookImgSlicer-V6.4.1.exe`。文件名保持英文 ASCII。
 
-## 8. 本轮（V6.4.0）修改摘要
+## 8. 本轮（V6.4.0 → V6.4.1）修改摘要
+
+### V6.4.0（主版本）
 
 - **切线可增删**：切线编辑器顶部新增「＋ 新增切线」「－ 删除切线」，可自由增删单条切线；未选中时删除置灰，空间不足时新增置灰并提示；「恢复自动切线」会一并丢弃增删过的切线并重建。
 - **修复可点击按钮导致的 Outlook 缝隙（结构性根修）**：热区邮件改为「单行列网格」——整封邮件只有 1 张 `<table>`、1 条 `<tr>`，无嵌套表格、无 `colgroup`/`colspan`。旧实现为每个视觉行输出一条 `<tr>`（3 按钮邮件实测 9 条），而 Outlook 的 Word 引擎在 `<tr>` 之间始终插入约 1px 间距，行数越多缝隙越多。
 - **修复热区编辑器画布偏移**：缩放比例与画布几何改按**实际位图尺寸**回填（`Qt.KeepAspectRatio` 请求 800 常返回 797/799），位图强制钉在左上角（`AlignLeft|AlignTop`）。修复前短切片（900x140）实测下移 16px、右侧留 49px 白边，导致用户看到的按钮框与实际存储坐标不一致。
-- 清理已被取代的旧链路代码（`_build_complex_inline_stack`、`_build_cell`、`_build_image_row`）。
-- 版本同步升到 V6.4.0（窗口标题 / 文件属性 / UI 预览 / 文档 / 测试断言），全量回归 **178 passed**。
-- 已知问题：测试进程中若「文件名排序最靠前的 Qt 模块」构造 `HotspotEditorDialog`，整套用例会段错误（与产品代码无关，回退 HEAD 仍复现），已在新测试中规避，根因待定位。
+
+### V6.4.1（补丁）
+
+- **修复 SVG 导入在无 libcairo 环境失败**：`image_slicer._convert_svg_to_png` 原只 `except ImportError`，但缺 libcairo 时 `import cairosvg` 抛的是 `OSError`，不会回退到不依赖系统库的 `svglib`。已放宽为 `except Exception`，并补充 3 项不依赖真实 cairosvg/svglib 的回归测试。
+- **删除零引用死代码**：`_build_cell` / `_build_image_row` / `get_cid_map` / `cleanup_all_tracked_temp_slices` / `HotspotCutError` / `compute_cut_lines` / `build_stripe_assignments` / `_ensure_pptx` / `_emu_to_px` / `_btn_size`，以及随之失效的 import。
+- README 补齐「回归测试」「已知限制」；`requirements.txt` 补充 `pdf2image` / `dulwich` 为可选依赖的说明。
+- 全量回归 **181 passed**。
+
+### 已知问题
+
+- 测试进程中若「文件名排序最靠前的 Qt 模块」构造 `HotspotEditorDialog`，整套用例会段错误（与产品代码无关，回退 HEAD 仍复现），已在新测试中规避，根因待定位。
 
 ## 9. 后续优化空间
 

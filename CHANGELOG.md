@@ -1,6 +1,20 @@
 # CHANGELOG
 
-## 未发布（post-V6.4.0）- 2026-09-24
+## V6.4.1 - 2026-09-24
+
+### 缺陷修复：SVG 导入在无 libcairo 环境失败
+- `image_slicer._convert_svg_to_png` 原只 `except ImportError`，但缺少 libcairo 时
+  `import cairosvg` 抛的是 **`OSError`**（cairocffi 找不到 cairo-2 / libcairo-2），
+  异常直接冒泡，走不到下面不依赖系统库的 `svglib` 兜底 —— 在没有 libcairo 的机器上
+  （含打包后的 EXE）SVG 导入直接失败。
+- 修复：该处 `except ImportError` 放宽为 `except Exception`，
+  cairosvg 层面任何失败都落到 svglib 兜底。
+- 新增 `tests/test_v641_svg_fallback.py`（3 项）：用 monkeypatch 拦截
+  `builtins.__import__` 模拟两种环境，**不依赖真实 cairosvg / svglib / libcairo**，
+  因此在 macOS / Windows / CI 上都能稳定执行。已验证旧写法下该测试会以
+  `OSError: no library called "cairo-2" was found` 失败（与真实故障现场一致）。
+
+### 收尾整理（不含功能变更）
 
 ### 收尾整理（不含功能变更）
 - **删除死代码**（AST 全量扫描确认零引用后删除，共 195 行）：

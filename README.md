@@ -16,7 +16,7 @@
 
 ## 用户使用
 
-1. 打开 `OutlookImgSlicer-V6.4.0.exe`。
+1. 打开 `OutlookImgSlicer-V6.4.1.exe`。
 2. 拖入图片、PDF、PPT 或 PSD 文件。
 3. 按需调整邮件宽度、手动切线或添加可点击按钮。
 4. 点击“在 Outlook 中创建邮件”，在 Outlook 草稿窗口中检查后手动发送。
@@ -39,7 +39,7 @@ python3 -m compileall -q build.py desktop tests image_slicer.py html_assembler.p
   image_safety.py pdf_slicer.py ppt_slicer.py psd_slicer.py
 ```
 
-当前基线：**178 passed**。升版本号时必须同步 `desktop/main.py` 的 `VERSION`、
+当前基线：**181 passed**。升版本号时必须同步 `desktop/main.py` 的 `VERSION`、
 `desktop/version_info.txt`、`desktop/ui-preview.html` 以及 4 个测试文件里的版本断言
 （`test_release_consistency.py`、`test_documentation_release_contract.py`、
 `test_v620_release_contract.py`、`test_code_agent_guide.py`）。
@@ -61,7 +61,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 输出：
 
 ```text
-dist/OutlookImgSlicer-V6.4.0.exe
+dist/OutlookImgSlicer-V6.4.1.exe
 ```
 
 本地 Parallels Windows VM 构建入口：

@@ -28,18 +28,18 @@ def test_v640_version_is_synchronized_everywhere():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     spec = (ROOT / "SPEC.md").read_text(encoding="utf-8")
 
-    assert main.VERSION == "6.4.0"
-    assert "6.4.0.20260923" in version_info
+    assert main.VERSION == "6.4.1"
+    assert "6.4.1.20260924" in version_info
     assert "u'040904B0'" in version_info
     assert "VarFileInfo" in version_info
     assert "0x0409, 1200" in version_info
     version_tuple = re.search(r"filevers=\(([^)]+)\)", version_info)
     assert version_tuple
     components = [int(value.strip()) for value in version_tuple.group(1).split(",")]
-    assert components == [6, 4, 0, 2026]
+    assert components == [6, 4, 1, 2026]
     assert all(0 <= value <= 65535 for value in components)
-    assert "OutlookImgSlicer-V6.4.0.exe" in readme
-    assert "V6.4.0" in spec
+    assert "OutlookImgSlicer-V6.4.1.exe" in readme
+    assert "V6.4.1" in spec
 
 
 def test_main_window_exposes_three_workflow_steps(qapp):
